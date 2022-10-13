@@ -1,20 +1,18 @@
-#![allow(dead_code)]
-
-type Identifier = String;
+pub type Identifier = String;
 type Reference = i64;
 
-struct CompilationUnit {
-    members: Vec<Declaration>,
+pub struct CompilationUnit {
+    pub members: Vec<Declaration>,
 }
 
-enum Declaration {
+pub enum Declaration {
     Class {
         name: Identifier,
         members: Vec<DeclarationMember>,
     },
 }
 
-enum DeclarationMember {
+pub enum DeclarationMember {
     Constructor {
         name: Identifier,
         params: Vec<Parameter>,
@@ -35,9 +33,9 @@ enum DeclarationMember {
     },
 }
 
-struct Parameter {
-    type_: NonVoidType,
-    name: Identifier,
+pub struct Parameter {
+    pub type_: NonVoidType,
+    pub name: Identifier,
 }
 
 struct Specification {
@@ -46,7 +44,7 @@ struct Specification {
     exceptional: Option<Expression>,
 }
 
-enum Statement {
+pub enum Statement {
     Declare {
         type_: NonVoidType,
         var: Identifier,
@@ -95,16 +93,21 @@ enum Statement {
     },
 }
 
-enum Invocation {
+pub enum Invocation {
     InvokeMethod {
         lhs: Identifier,
         rhs: Identifier,
         arguments: Vec<Expression>,
         resolved: Option<Box<(Declaration, DeclarationMember)>>, // What is this?
     },
+    InvokeConstructor {
+        class_name: Identifier,
+        arguments: Vec<Expression>,
+        resolved: Option<Box<(Declaration, DeclarationMember)>>, // What is this?
+    },
 }
 
-enum Lhs {
+pub enum Lhs {
     LhsVar {
         var: Identifier,
         type_: RuntimeType,
@@ -122,7 +125,7 @@ enum Lhs {
     },
 }
 
-enum Rhs {
+pub enum Rhs {
     RhsExpression {
         value: Expression,
         type_: RuntimeType,
@@ -148,7 +151,7 @@ enum Rhs {
     },
 }
 
-enum Expression {
+pub enum Expression {
     Forall {
         elem: Identifier,
         range: Identifier,
@@ -242,19 +245,19 @@ struct Type {
     type_: Option<NonVoidType>,
 }
 
-enum NonVoidType {
+pub enum NonVoidType {
     UIntType,
     IntType,
     FloatType,
     BoolType,
     StringType,
     CharType,
-    ReferenceType,
+    ReferenceType { identifier: String },
     ArrayType { inner_type: Box<NonVoidType> },
 }
 
 // how is this used during parsing? or is it only used during execution
-enum RuntimeType {
+pub enum RuntimeType {
     UnknownRuntimeType,
     VoidRuntimeType,
     UIntRuntimeType,
@@ -269,14 +272,4 @@ enum RuntimeType {
     NUMRuntimeType,
     REFRuntimeType,
     ARRAYRuntimeType,
-}
-
-fn parse(bs: &[u8]) -> Option<CompilationUnit> {
-    unimplemented!()
-}
-
-#[test]
-fn parse_linkedlist() {
-    let compilation_unit = parse(include_bytes!("../examples/linkedlist.oox"));
-    assert!(compilation_unit.is_some());
 }

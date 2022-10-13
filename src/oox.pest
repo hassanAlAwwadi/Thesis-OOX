@@ -1,0 +1,63 @@
+input = { SOI ~ ((section)* ~ NEWLINE)* ~ (section)* ~ EOI }
+
+section = { " " | "\t" | comment | token }
+
+comment = { "//" ~ (LETTER | NUMBER | MARK | PUNCTUATION | SYMBOL | SEPARATOR )* }
+
+token = { identifier | keyword | punctuator | literal }
+
+identifier = { (LETTER | NUMBER | "_")+ }
+
+keyword = { "assert" | "catch" | "else"
+| "false"
+| "if"
+| "new"
+| "static"
+| "true"
+| "while"
+| "assume"
+| "char"
+| "ensures"
+| "float"
+| "int"
+| "null"
+| "string"
+| "try"
+| "bool"
+| "class"
+| "exceptional"
+| "forall"
+| "join"
+| "requires"
+| "this"
+| "uint"
+| "break"
+| "continue"
+| "exists"
+| "fork"
+| "lock"
+| "return"
+| "throw"
+| "void"
+}
+
+punctuator = {
+    "+"  | ">"   | "{"  | ";"  | "-"  |
+    "<=" | ">="  | "==" | "!=" | "&&" | 
+    "||" | "==>" | "}"  | "*"  | "/"  | 
+    "%"  | "!"   | ":=" | "<"  | "["  | 
+    "]"  | "("   | ")"  | "."  | ","  | 
+    ":"  | "#"
+}
+
+literal = { boolean | integer | float | char | string | "null" }
+
+boolean = { "true" | "false" }
+
+integer = { OTHER_NUMBER }
+
+float = { DECIMAL_NUMBER }
+
+char = { "'" ~ !"'" ~ ANY ~ "'"}
+
+string = { "\"" ~ (!"\"" ~ ANY)* ~ "\"" }

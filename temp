@@ -1,0 +1,16 @@
+fn take_till_and_consume<T, I, E>(tag: T) -> impl Fn(I) -> nom::IResult<I, I, E>
+where
+    E: nom::error::ParseError<I>,
+    I: nom::InputTake
+        + nom::FindSubstring<T>
+        + nom::Slice<std::ops::RangeFrom<usize>>
+        + nom::InputIter<Item = u8>
+        + nom::InputLength,
+    T: nom::InputLength + Clone,
+{
+    use nom::bytes::streaming::take;
+    use nom::bytes::streaming::take_until;
+    use nom::sequence::terminated;
+
+    move |input| terminated(take_until(tag.clone()), take(tag.input_len()))(input)
+}
