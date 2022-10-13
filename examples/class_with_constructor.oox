@@ -1,0 +1,10 @@
+//
+// A class with a constructor, parsing example
+//
+class Node {
+
+    Node() {
+        int p;
+        p := 0
+    }
+}

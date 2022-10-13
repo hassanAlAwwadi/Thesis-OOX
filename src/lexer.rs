@@ -1,6 +1,6 @@
-use std::{fs, fmt::{Display, Arguments}};
+use std::{fmt::{Display}};
 
-use pest::{Parser, Span};
+use pest::{Parser};
 
 #[derive(Parser)]
 #[grammar = "oox.pest"]
@@ -26,13 +26,14 @@ impl<'a> Display for Token<'a> {
 }
 
 
-pub fn tokens(file: &str) -> Vec<(Token, (usize, usize))> {
+// pub fn tokens(file: &str) -> Vec<(Token, (usize, usize))> {
+pub fn tokens<'a>(file: &'a str) -> Vec<Token<'a>> {
     let file = OOXLexer::parse(Rule::input, file)
         .expect("unsuccessful parse") // unwrap the parse result
         .next()
         .unwrap(); // get and unwrap the `file` rule; never fails
 
-    dbg!(&file);
+    // dbg!(&file);
 
     file.into_inner()
         .filter_map(|record| {
@@ -47,8 +48,8 @@ pub fn tokens(file: &str) -> Vec<(Token, (usize, usize))> {
                 .into_inner()
                 .filter(|record| record.as_rule() == Rule::token)
                 .map(|token_pair| {
+                    let token_str = token_pair.as_str();
                     let token_rule = token_pair.into_inner().next().unwrap().as_rule();
-                    let token_str = token_pair.as_str().to_owned();
                     // a token always is one of four, see grammar
                     let token = match token_rule {
                         Rule::identifier => Token::Identifier,
@@ -56,8 +57,9 @@ pub fn tokens(file: &str) -> Vec<(Token, (usize, usize))> {
                         Rule::punctuator => Token::Punctuator,
                         Rule::literal => Token::Literal,
                         _ => unreachable!(),
-                    }(token_str);
-                    (token, token_pair.as_span().start_pos().line_col())
+                    }(&token_str);
+                    // (token, token_pair.as_span().start_pos().line_col())
+                    token
                 })
         })
         .collect::<Vec<_>>()

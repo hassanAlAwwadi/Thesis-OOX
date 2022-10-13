@@ -1,62 +1,62 @@
 use pom::parser::*;
-use pom::Parser;
 
-use std::array;
-use std::collections::HashMap;
 use std::str::{self, FromStr};
 
 use crate::syntax::*;
 
 use crate::lexer::*;
 
-fn program<'a>() -> Parser<Token<'a>, CompilationUnit> {
+
+fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit> {
     class()
-        .repeat(0..)
+        .repeat(1)
         .map(|members| CompilationUnit { members })
 }
 
-fn class<'a>() -> Parser<Token<'a>, Declaration> {
+fn class<'a>() -> Parser<'a, Token<'a>, Declaration> {
     let identifier_and_members =
-        (keyword("class") * identifier()) + (punct("{") * member() - punct("}"));
+        (keyword("class") * identifier()) + (punct("{") * members() - punct("}"));
     identifier_and_members.map(|(name, members)| Declaration::Class { name, members })
 }
 
-fn member<'a>() -> Parser<Token<'a>, Vec<DeclarationMember>> {
-    todo!()
+fn members<'a>() -> Parser<'a, Token<'a>, Vec<DeclarationMember>> {
+    constructor().repeat(0..)
+    // empty().map(|_| vec![])
 }
 
-fn constructor<'a>() -> Parser<Token<'a>, DeclarationMember> {
+fn constructor<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     let p = identifier() - punct("(") + parameters() - punct(")");
-    let specification = todo!();
+    // let specification = todo!();
     let body = punct("{") * statement() - punct("}");
 
     (p + body).map(|((name, params), body)| DeclarationMember::Constructor {
         name,
         params,
-        specification: todo!(),
+        specification: Specification { requires: None, ensures: None, exceptional: None },
         body,
     })
 }
 
-fn statement<'a>() -> Parser<Token<'a>, Statement> {
+fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     let declaration =
         (nonvoidtype() + identifier()).map(|(type_, var)| Statement::Declare { type_, var });
     let assignment = (lhs() - punct(":=") + rhs()).map(|(lhs, rhs)| Statement::Assign { lhs, rhs });
-    let call = (invocation() - punct(";")).map(|invocation| Statement::Call { invocation });
+    let call_ = (invocation() - punct(";")).map(|invocation| Statement::Call { invocation });
     let skip = punct(";").map(|_| Statement::Skip);
     let assert = (keyword("assert") * verification_expression() - punct(";"))
         .map(|assertion| Statement::Assert { assertion });
     let assume = (keyword("assume") * verification_expression() - punct(";"))
         .map(|assumption| Statement::Assume { assumption });
-    let while_ = (keyword("while") * punct("(") * expression() - punct(")") + statement()).map(
+    
+    let while_ = (keyword("while") * punct("(") * expression() - punct(")") + call(statement)).map(
         |(guard, body)| Statement::While {
             guard,
             body: Box::new(body),
         },
     );
-    let ite = (keyword("if") * punct("(") * expression() - punct(")") + punct("{") * statement()
+    let ite = (keyword("if") * punct("(") * expression() - punct(")") + punct("{") * call(statement)
         - punct("}")
-        + punct("{") * statement()
+        + punct("{") * call(statement)
         - punct("}"))
     .map(|((guard, true_body), false_body)| Statement::Ite {
         guard,
@@ -70,22 +70,22 @@ fn statement<'a>() -> Parser<Token<'a>, Statement> {
     let throw = (keyword("throw") * punct(";")).map(|_| Statement::Throw {
         message: String::new(),
     });
-    let try_ = (keyword("try") * punct("{") * statement()
-        + punct("}") * keyword("catch") * punct("{") * statement()
+    let try_ = (keyword("try") * punct("{") * call(statement)
+        + punct("}") * keyword("catch") * punct("{") * call(statement)
         - punct("}"))
     .map(|(try_body, catch_body)| Statement::Try {
         try_body: Box::new(try_body),
         catch_body: Box::new(catch_body),
     });
-    let block = (punct("{") * statement() - punct("}")).map(|body| Statement::Block {
+    let block = (punct("{") * call(statement) - punct("}")).map(|body| Statement::Block {
         body: Box::new(body),
     });
 
     // lock, fork & join are left out
-
+    let p_statement =
     declaration
         | assignment
-        | call
+        | call_
         | skip
         | assert
         | assume
@@ -96,10 +96,16 @@ fn statement<'a>() -> Parser<Token<'a>, Statement> {
         | return_
         | throw
         | try_
-        | block
+        | block;
+    (p_statement + (punct(";") * call(statement)).opt()).map(|(stmt, other_statement)| {
+        if let Some(other_statement) = other_statement {
+            return Statement::Seq { stat1: Box::new(stmt), stat2: Box::new(other_statement) }
+        }
+        return stmt
+    })
 }
 
-fn verification_expression<'a>() -> Parser<Token<'a>, Expression> {
+fn verification_expression<'a>() -> Parser<'a, Token<'a>, Expression> {
     // todo
     (!empty()).map(|_| Expression::Var {
         var: "".to_owned(),
@@ -107,7 +113,7 @@ fn verification_expression<'a>() -> Parser<Token<'a>, Expression> {
     })
 }
 
-fn invocation<'a>() -> Parser<Token<'a>, Invocation> {
+fn invocation<'a>() -> Parser<'a, Token<'a>, Invocation> {
     (identifier() - punct(".") + identifier() - punct("(") + arguments() - punct(")")).map(
         |((lhs, rhs), arguments)| Invocation::InvokeMethod {
             lhs,
@@ -118,15 +124,16 @@ fn invocation<'a>() -> Parser<Token<'a>, Invocation> {
     )
 }
 
-fn arguments<'a>() -> Parser<Token<'a>, Vec<Expression>> {
+fn arguments<'a>() -> Parser<'a, Token<'a>, Vec<Expression>> {
     list(expression(), punct(","))
 }
 
-fn expression<'a>() -> Parser<Token<'a>, Expression> {
-    todo!()
+fn expression<'a>() -> Parser<'a, Token<'a>, Expression> {
+    // todo!()
+    take(1).map(|_| Expression::Lit { lit: Lit::NullLit, type_: RuntimeType::ANYRuntimeType })
 }
 
-fn lhs<'a>() -> Parser<Token<'a>, Lhs> {
+fn lhs<'a>() -> Parser<'a, Token<'a>, Lhs> {
     let lhs_var = identifier().map(|var| Lhs::LhsVar {
         var,
         type_: RuntimeType::UnknownRuntimeType,
@@ -149,7 +156,7 @@ fn lhs<'a>() -> Parser<Token<'a>, Lhs> {
     lhs_var | lhs_field | lhs_elem
 }
 
-fn rhs<'a>() -> Parser<Token<'a>, Rhs> {
+fn rhs<'a>() -> Parser<'a, Token<'a>, Rhs> {
     let rhs_expression = expression().map(|value| Rhs::RhsExpression {
         value,
         type_: RuntimeType::UnknownRuntimeType,
@@ -192,18 +199,18 @@ fn rhs<'a>() -> Parser<Token<'a>, Rhs> {
     rhs_expression | rhs_field | rhs_call | rhs_elem | rhs_constructor_call | rhs_array
 }
 
-fn parameters<'a>() -> Parser<Token<'a>, Vec<Parameter>> {
+fn parameters<'a>() -> Parser<'a, Token<'a>, Vec<Parameter>> {
     let parameter = (nonvoidtype() + identifier()).map(|(type_, name)| Parameter { name, type_ });
 
     // can it be empty?
-    list(parameter, punct(","))
+    list(parameter, punct(",")) | empty().map(|_| Vec::new())
 }
 
-fn nonvoidtype<'a>() -> Parser<Token<'a>, NonVoidType> {
+fn nonvoidtype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
     primitivetype() | referencetype()
 }
 
-fn primitivetype<'a>() -> Parser<Token<'a>, NonVoidType> {
+fn primitivetype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
     keyword("uint").map(|_| NonVoidType::UIntType)
         | keyword("int").map(|_| NonVoidType::IntType)
         | keyword("bool").map(|_| NonVoidType::BoolType)
@@ -211,37 +218,75 @@ fn primitivetype<'a>() -> Parser<Token<'a>, NonVoidType> {
         | keyword("char").map(|_| NonVoidType::CharType)
 }
 
-fn referencetype<'a>() -> Parser<Token<'a>, NonVoidType> {
+fn referencetype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
     let arraytype = (classtype() | primitivetype()) - (punct("[") + punct("]")).repeat(1..);
     classtype() | arraytype
 }
 
-fn classtype<'a>() -> Parser<Token<'a>, NonVoidType> {
+fn classtype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
     identifier().map(|identifier| NonVoidType::ReferenceType { identifier })
         | keyword("string").map(|_| NonVoidType::StringType)
 }
 
-fn integer<'a>() -> Parser<Token<'a>, Expression> {
-    todo!()
+fn integer<'a>() -> Parser<'a, Token<'a>, Expression> {
+    take(1).convert(|tokens| {
+        let token = tokens[0]; // only one taken
+        if let Token::Literal(s) = token {
+            return Ok(s)
+        } 
+        Err(())
+    }).convert(i64::from_str).map(|int_value| Expression::Lit { lit: Lit::IntLit{ int_value}, type_: RuntimeType::ANYRuntimeType })
 }
 
-fn identifier<'a>() -> Parser<Token<'a>, Identifier> {
-    is_a(|t: Token<'a>| match t {
-        Token::Identifier(_s) => true,
-        _ => false,
+fn identifier<'a>() -> Parser<'a, Token<'a>, Identifier> {
+    take(1).convert(|tokens| {
+        let token = tokens[0]; // only one taken
+        if let Token::Identifier(s) = token {
+            Ok(s.to_string())
+        } else {
+            Err(())
+        }
     })
-    .map(|Token::Identifier(s)| s.to_owned())
 }
 
-fn punct<'a>(p: &str) -> Parser<Token<'a>, Token> {
+fn punct<'a>(p: &'a str) -> Parser<'a, Token<'a>, Token> {
     sym(Token::Punctuator(p))
 }
 
-fn keyword<'a>(kw: &str) -> Parser<Token<'a>, Token> {
+fn keyword<'a>(kw: &'a str) -> Parser<'a, Token<'a>, Token> {
     sym(Token::Keyword(kw))
 }
 
-// fn is_literal<'a>() -> Parser<Token<'a>, Token<'a>> {
+
+
+#[test]
+fn class_with_constructor() {
+    let file_content = include_str!("../examples/class_with_constructor.oox");
+
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+    dbg!(as_ref);
+    let c = program().parse(&as_ref).unwrap(); // should not panic;
+    dbg!(c);
+
+    assert!(false);
+}
+
+#[test]
+fn test_statement() {
+    let file_content = "int p; p := 0";
+
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+    dbg!(as_ref);
+    let c = (statement() - end()) .parse(&as_ref).unwrap(); // should not panic;
+    dbg!(c);
+
+    assert!(false);
+}
+
+
+// fn is_literal<'a>() -> Parser<'a, Token<'a>, Token<'a>> {
 // 	is_a(|t: Token<'a>| match t {
 //         Token::Literal(_s) => true,
 //         _ => false,

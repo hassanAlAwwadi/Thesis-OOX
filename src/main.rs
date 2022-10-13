@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 mod syntax;
 mod parser_example;
 mod parser;
