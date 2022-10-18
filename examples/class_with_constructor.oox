@@ -2,7 +2,8 @@
 // A class with a constructor, parsing example
 //
 class Node {
-
+    int value ;
+    Node next ;
     Node() {
         int p;
         p := 0

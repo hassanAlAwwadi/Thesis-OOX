@@ -256,7 +256,7 @@ pub enum Lit {
 
 #[derive(Debug)]
 pub struct Type {
-    type_: Option<NonVoidType>,
+    pub type_: Option<NonVoidType>,
 }
 
 #[derive(Debug)]

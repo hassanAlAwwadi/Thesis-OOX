@@ -1,3 +1,4 @@
+use nom::Slice;
 use pom::parser::*;
 
 use std::str::{self, FromStr};
@@ -6,22 +7,48 @@ use crate::syntax::*;
 
 use crate::lexer::*;
 
-
 fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit> {
-    class()
-        .repeat(1)
-        .map(|members| CompilationUnit { members })
+    class().repeat(1).map(|members| CompilationUnit { members })
 }
 
 fn class<'a>() -> Parser<'a, Token<'a>, Declaration> {
     let identifier_and_members =
-        (keyword("class") * identifier()) + (punct("{") * members() - punct("}"));
+        (keyword("class") * identifier()) + (punct("{") * member().repeat(0..) - punct("}"));
     identifier_and_members.map(|(name, members)| Declaration::Class { name, members })
 }
 
-fn members<'a>() -> Parser<'a, Token<'a>, Vec<DeclarationMember>> {
-    constructor().repeat(0..)
+fn member<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
+    constructor() | field() | method()
+
     // empty().map(|_| vec![])
+}
+
+fn field<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
+    (nonvoidtype() + identifier() - punct(";"))
+        .map(|(type_, name)| DeclarationMember::Field { type_, name })
+}
+
+fn method<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
+    let is_static = keyword("static").opt().map(|x| x.is_some());
+
+    let parameters = punct("(") * parameters() - punct(")");
+
+    (is_static + type_() + identifier() + parameters + body()).map(
+        |((((is_static, return_type), name), params), body)| DeclarationMember::Method {
+            is_static,
+            return_type,
+            name,
+            params,
+            specification: Specification {
+                requires: None,
+                ensures: None,
+                exceptional: None,
+            },
+            body,
+        },
+    )
+
+    // todo!()
 }
 
 fn constructor<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
@@ -32,14 +59,45 @@ fn constructor<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     (p + body).map(|((name, params), body)| DeclarationMember::Constructor {
         name,
         params,
-        specification: Specification { requires: None, ensures: None, exceptional: None },
+        specification: Specification {
+            requires: None,
+            ensures: None,
+            exceptional: None,
+        },
         body,
     })
 }
 
+fn body<'a>() -> Parser<'a, Token<'a>, Statement> {
+    punct("{") * statement() - punct("}")
+}
+
 fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
-    let declaration =
-        (nonvoidtype() + identifier()).map(|(type_, var)| Statement::Declare { type_, var });
+    // let declaration =
+    //     (nonvoidtype() + identifier() + (punct(":=") * rhs()).opt()).map(|((type_, var), rhs)| {
+    //         if let Some(rhs) = rhs {
+    //             Statement::Seq {
+    //                 stat1: Box::new(Statement::Declare {
+    //                     type_,
+    //                     var: var.clone(),
+    //                 }),
+    //                 stat2: Box::new(Statement::Assign {
+    //                     lhs: Lhs::LhsVar {
+    //                         var,
+    //                         type_: RuntimeType::UnknownRuntimeType,
+    //                     },
+    //                     rhs,
+    //                 }),
+    //             }
+    //         } else {
+    //             Statement::Declare { type_, var }
+    //         }
+    //     });
+
+        let declaration =
+        (nonvoidtype() + identifier() ).map(|(type_, var)| {
+                Statement::Declare { type_, var }
+        });
     let assignment = (lhs() - punct(":=") + rhs()).map(|(lhs, rhs)| Statement::Assign { lhs, rhs });
     let call_ = (invocation() - punct(";")).map(|invocation| Statement::Call { invocation });
     let skip = punct(";").map(|_| Statement::Skip);
@@ -47,15 +105,17 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         .map(|assertion| Statement::Assert { assertion });
     let assume = (keyword("assume") * verification_expression() - punct(";"))
         .map(|assumption| Statement::Assume { assumption });
-    
+
     let while_ = (keyword("while") * punct("(") * expression() - punct(")") + call(statement)).map(
         |(guard, body)| Statement::While {
             guard,
             body: Box::new(body),
         },
     );
-    let ite = (keyword("if") * punct("(") * expression() - punct(")") + punct("{") * call(statement)
+    let ite = (keyword("if") * punct("(") * expression() - punct(")")
+        + punct("{") * call(statement)
         - punct("}")
+        - keyword("else")
         + punct("{") * call(statement)
         - punct("}"))
     .map(|((guard, true_body), false_body)| Statement::Ite {
@@ -82,8 +142,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     });
 
     // lock, fork & join are left out
-    let p_statement =
-    declaration
+    let p_statement = declaration
         | assignment
         | call_
         | skip
@@ -99,16 +158,19 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         | block;
     (p_statement + (punct(";") * call(statement)).opt()).map(|(stmt, other_statement)| {
         if let Some(other_statement) = other_statement {
-            return Statement::Seq { stat1: Box::new(stmt), stat2: Box::new(other_statement) }
+            return Statement::Seq {
+                stat1: Box::new(stmt),
+                stat2: Box::new(other_statement),
+            };
         }
-        return stmt
+        return stmt;
     })
 }
 
 fn verification_expression<'a>() -> Parser<'a, Token<'a>, Expression> {
     // todo
-    (!empty()).map(|_| Expression::Var {
-        var: "".to_owned(),
+    (take(1)).map(|_| Expression::Var {
+        var: "verificationexpr".to_owned(),
         type_: RuntimeType::UnknownRuntimeType,
     })
 }
@@ -129,8 +191,164 @@ fn arguments<'a>() -> Parser<'a, Token<'a>, Vec<Expression>> {
 }
 
 fn expression<'a>() -> Parser<'a, Token<'a>, Expression> {
-    // todo!()
-    take(1).map(|_| Expression::Lit { lit: Lit::NullLit, type_: RuntimeType::ANYRuntimeType })
+    expression2()
+}
+
+fn expression2<'a>() -> Parser<'a, Token<'a>, Expression> {
+    let implies =
+        (expression3() + punct("==>") * call(expression2)).map(|(lhs, rhs)| Expression::BinOp {
+            bin_op: BinOp::Implies,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            type_: RuntimeType::UnknownRuntimeType,
+        });
+
+    implies | expression3()
+}
+
+fn expression3<'a>() -> Parser<'a, Token<'a>, Expression> {
+    let and =
+        (expression4() + punct("&&") * call(expression3)).map(|(lhs, rhs)| Expression::BinOp {
+            bin_op: BinOp::And,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            type_: RuntimeType::UnknownRuntimeType,
+        });
+    let or =
+        (expression4() + punct("||") * call(expression3)).map(|(lhs, rhs)| Expression::BinOp {
+            bin_op: BinOp::Or,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            type_: RuntimeType::UnknownRuntimeType,
+        });
+
+    and | or | expression4()
+}
+
+fn expression4<'a>() -> Parser<'a, Token<'a>, Expression> {
+    let eq =
+        (expression5() + punct("==") * call(expression4)).map(|(lhs, rhs)| Expression::BinOp {
+            bin_op: BinOp::Equal,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            type_: RuntimeType::UnknownRuntimeType,
+        });
+
+    let neq =
+        (expression5() + punct("!=") * call(expression4)).map(|(lhs, rhs)| Expression::BinOp {
+            bin_op: BinOp::NotEqual,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            type_: RuntimeType::UnknownRuntimeType,
+        });
+
+    eq | neq | expression5()
+}
+
+fn expression5<'a>() -> Parser<'a, Token<'a>, Expression> {
+    let lt = (expression6() + punct("<") * call(expression5)).map(|(lhs, rhs)| Expression::BinOp {
+        bin_op: BinOp::LessThan,
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+        type_: RuntimeType::UnknownRuntimeType,
+    });
+    let gt = (expression6() + punct(">") * call(expression5)).map(|(lhs, rhs)| Expression::BinOp {
+        bin_op: BinOp::GreaterThan,
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+        type_: RuntimeType::UnknownRuntimeType,
+    });
+    let lte =
+        (expression6() + punct("<=") * call(expression5)).map(|(lhs, rhs)| Expression::BinOp {
+            bin_op: BinOp::LessThanEqual,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            type_: RuntimeType::UnknownRuntimeType,
+        });
+    let gte =
+        (expression6() + punct(">=") * call(expression5)).map(|(lhs, rhs)| Expression::BinOp {
+            bin_op: BinOp::GreaterThanEqual,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            type_: RuntimeType::UnknownRuntimeType,
+        });
+
+    gte | lte | lt | gt | expression6()
+}
+
+fn expression6<'a>() -> Parser<'a, Token<'a>, Expression> {
+    let plus =
+        (expression7() + punct("+") * call(expression6)).map(|(lhs, rhs)| Expression::BinOp {
+            bin_op: BinOp::Plus,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            type_: RuntimeType::UnknownRuntimeType,
+        });
+    let minus =
+        (expression7() + punct("-") * call(expression6)).map(|(lhs, rhs)| Expression::BinOp {
+            bin_op: BinOp::Minus,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            type_: RuntimeType::UnknownRuntimeType,
+        });
+
+    plus | minus | expression7()
+}
+
+fn expression7<'a>() -> Parser<'a, Token<'a>, Expression> {
+    let multiply =
+        (expression8() + punct("*") * call(expression7)).map(|(lhs, rhs)| Expression::BinOp {
+            bin_op: BinOp::Multiply,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            type_: RuntimeType::UnknownRuntimeType,
+        });
+    let divide =
+        (expression8() + punct("/") * call(expression7)).map(|(lhs, rhs)| Expression::BinOp {
+            bin_op: BinOp::Divide,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            type_: RuntimeType::UnknownRuntimeType,
+        });
+    let modulo =
+        (expression8() + punct("%") * call(expression7)).map(|(lhs, rhs)| Expression::BinOp {
+            bin_op: BinOp::Modulo,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            type_: RuntimeType::UnknownRuntimeType,
+        });
+
+    multiply | divide | modulo | expression8()
+}
+
+fn expression8<'a>() -> Parser<'a, Token<'a>, Expression> {
+    let negative = (punct("-") * call(expression8)).map(|value| Expression::UnOp {
+        un_op: UnOp::Negative,
+        value: Box::new(value),
+        type_: RuntimeType::UnknownRuntimeType,
+    });
+
+    let negate = (punct("!") * call(expression8)).map(|value| Expression::UnOp {
+        un_op: UnOp::Negate,
+        value: Box::new(value),
+        type_: RuntimeType::UnknownRuntimeType,
+    });
+
+    negative | negate | expression9()
+}
+
+fn expression9<'a>() -> Parser<'a, Token<'a>, Expression> {
+    let var = identifier().map(|var| Expression::Var {
+        var,
+        type_: RuntimeType::UnknownRuntimeType,
+    });
+    let sizeof = (punct("#") * identifier()).map(|var| Expression::SizeOf {
+        var,
+        type_: RuntimeType::UnknownRuntimeType,
+    });
+    let parenthesized = punct("(") * call(expression) - punct(")");
+
+    var | sizeof | parenthesized | literal()
 }
 
 fn lhs<'a>() -> Parser<'a, Token<'a>, Lhs> {
@@ -195,8 +413,7 @@ fn rhs<'a>() -> Parser<'a, Token<'a>, Rhs> {
         type_: RuntimeType::UnknownRuntimeType,
     });
 
-
-    rhs_expression | rhs_field | rhs_call | rhs_elem | rhs_constructor_call | rhs_array
+    rhs_call | rhs_field | rhs_elem | rhs_expression | rhs_constructor_call | rhs_array
 }
 
 fn parameters<'a>() -> Parser<'a, Token<'a>, Vec<Parameter>> {
@@ -204,6 +421,11 @@ fn parameters<'a>() -> Parser<'a, Token<'a>, Vec<Parameter>> {
 
     // can it be empty?
     list(parameter, punct(",")) | empty().map(|_| Vec::new())
+}
+
+fn type_<'a>() -> Parser<'a, Token<'a>, Type> {
+    keyword("void").map(|_| Type { type_: None })
+        | nonvoidtype().map(|type_| Type { type_: Some(type_) })
 }
 
 fn nonvoidtype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
@@ -229,13 +451,58 @@ fn classtype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
 }
 
 fn integer<'a>() -> Parser<'a, Token<'a>, Expression> {
-    take(1).convert(|tokens| {
-        let token = tokens[0]; // only one taken
-        if let Token::Literal(s) = token {
-            return Ok(s)
-        } 
-        Err(())
-    }).convert(i64::from_str).map(|int_value| Expression::Lit { lit: Lit::IntLit{ int_value}, type_: RuntimeType::ANYRuntimeType })
+    take(1)
+        .convert(|tokens| {
+            let token = tokens[0]; // only one taken
+            if let Token::Literal(s) = token {
+                return Ok(s);
+            }
+            Err(())
+        })
+        .convert(i64::from_str)
+        .map(|int_value| Expression::Lit {
+            lit: Lit::IntLit { int_value },
+            type_: RuntimeType::ANYRuntimeType,
+        })
+}
+
+fn literal<'a>() -> Parser<'a, Token<'a>, Expression> {
+    take(1)
+        .convert(|tokens| {
+            let token = tokens[0]; // only one taken
+            if let Token::Literal(s) = token {
+                return Ok(s);
+            }
+            Err(())
+        })
+        .map(|value| Expression::Lit {
+            lit: match value {
+                "null" => Lit::NullLit,
+                "true" => Lit::BoolLit { bool_value: true },
+                "false" => Lit::BoolLit { bool_value: false },
+                s => {
+                    if s.starts_with("'") && s.ends_with("'") {
+                        let char_value = s.chars().nth(1).unwrap();
+                        Lit::CharLit { char_value }
+                    } else if s.starts_with("\"") && s.ends_with("\"") {
+                        let string_value = s.slice(1..s.len() - 1);
+                        Lit::StringLit {
+                            string_value: string_value.to_string(),
+                        }
+                    } else {
+                        if let Ok(int_value) = i64::from_str(s) {
+                            Lit::IntLit { int_value }
+                        } else if let Ok(float_value) = f64::from_str(s) {
+                            Lit::FloatLit { float_value }
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            },
+            type_: RuntimeType::ANYRuntimeType,
+        })
 }
 
 fn identifier<'a>() -> Parser<'a, Token<'a>, Identifier> {
@@ -257,8 +524,6 @@ fn keyword<'a>(kw: &'a str) -> Parser<'a, Token<'a>, Token> {
     sym(Token::Keyword(kw))
 }
 
-
-
 #[test]
 fn class_with_constructor() {
     let file_content = include_str!("../examples/class_with_constructor.oox");
@@ -268,8 +533,6 @@ fn class_with_constructor() {
     dbg!(as_ref);
     let c = program().parse(&as_ref).unwrap(); // should not panic;
     dbg!(c);
-
-    assert!(false);
 }
 
 #[test]
@@ -279,12 +542,77 @@ fn test_statement() {
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
     dbg!(as_ref);
-    let c = (statement() - end()) .parse(&as_ref).unwrap(); // should not panic;
+    let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
     dbg!(c);
-
     assert!(false);
 }
 
+#[test]
+fn class_with_methods() {
+    let file_content = include_str!("../examples/class_with_methods.oox");
+
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+    dbg!(as_ref);
+    let c = (program() - end()).parse(&as_ref).unwrap(); // should not panic;
+    dbg!(c);
+    assert!(false);
+}
+
+#[test]
+fn this_dot() {
+    let file_content = "p := this.value";
+
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+    dbg!(as_ref);
+    let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
+    dbg!(c);
+    assert!(false);
+}
+
+#[test]
+fn ite() {
+    let file_content = "if(x==v) { ; }
+    else {
+        Node n; n := this.next ;
+    bool b;
+    b := n.member(x) ;
+    return b;
+    }";
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+    dbg!(&as_ref);
+    let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
+    dbg!(c);
+    assert!(false);
+}
+
+#[test]
+fn boolean() {
+    let file_content = "true";
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+    dbg!(as_ref);
+    let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
+    dbg!(c);
+    assert!(false);
+}
+
+
+#[test]
+fn test_statement2() {
+    let file_content = "Node n; n := this.next ;
+    bool b;
+    b := n.member(x) ;
+    return b;";
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+    dbg!(as_ref);
+    let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
+    dbg!(c);
+    assert!(false);
+}
 
 // fn is_literal<'a>() -> Parser<'a, Token<'a>, Token<'a>> {
 // 	is_a(|t: Token<'a>| match t {
