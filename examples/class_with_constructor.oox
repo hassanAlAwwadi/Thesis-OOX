@@ -6,6 +6,50 @@ class Node {
     Node next ;
     Node() {
         int p;
-        p := 0
+        p := 0;
+    }
+}
+
+class Node {
+    int value ;
+    Node next ;
+    Node() {
+        int p;
+        p := 0;
+    }
+}
+class Node {
+    int value ;
+    Node next ;
+    Node() {
+        int p;
+        p := 0;
+    }
+}
+
+class Node {
+    int value ;
+    Node next ;
+    Node() {
+        int p;
+        p := 0;
+    }
+}
+class Node {
+}
+class Node {
+    int value ;
+    Node next ;
+    Node() {
+        int p;
+        p := 0;
+    }
+}
+class Node {
+    int value ;
+    Node next ;
+    Node() {
+        int p;
+        p := 0;
     }
 }

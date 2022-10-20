@@ -8,7 +8,9 @@ use crate::syntax::*;
 use crate::lexer::*;
 
 fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit> {
-    class().repeat(1).map(|members| CompilationUnit { members })
+    class()
+        .repeat(0..)
+        .map(|members| CompilationUnit { members })
 }
 
 fn class<'a>() -> Parser<'a, Token<'a>, Declaration> {
@@ -18,7 +20,7 @@ fn class<'a>() -> Parser<'a, Token<'a>, Declaration> {
 }
 
 fn member<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
-    constructor() | field() | method()
+    field() | constructor() | method().name("method")
 
     // empty().map(|_| vec![])
 }
@@ -33,17 +35,13 @@ fn method<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
 
     let parameters = punct("(") * parameters() - punct(")");
 
-    (is_static + type_() + identifier() + parameters + body()).map(
-        |((((is_static, return_type), name), params), body)| DeclarationMember::Method {
+    (is_static + type_() + identifier() + parameters + specification() + body()).map(
+        |(((((is_static, return_type), name), params), specification), body)| DeclarationMember::Method {
             is_static,
             return_type,
             name,
             params,
-            specification: Specification {
-                requires: None,
-                ensures: None,
-                exceptional: None,
-            },
+            specification,
             body,
         },
     )
@@ -51,19 +49,16 @@ fn method<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     // todo!()
 }
 
+
 fn constructor<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     let p = identifier() - punct("(") + parameters() - punct(")");
     // let specification = todo!();
     let body = punct("{") * statement() - punct("}");
 
-    (p + body).map(|((name, params), body)| DeclarationMember::Constructor {
+    (p + specification() + body).map(|(((name, params), specification), body)| DeclarationMember::Constructor {
         name,
         params,
-        specification: Specification {
-            requires: None,
-            ensures: None,
-            exceptional: None,
-        },
+        specification,
         body,
     })
 }
@@ -73,32 +68,31 @@ fn body<'a>() -> Parser<'a, Token<'a>, Statement> {
 }
 
 fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
-    // let declaration =
-    //     (nonvoidtype() + identifier() + (punct(":=") * rhs()).opt()).map(|((type_, var), rhs)| {
-    //         if let Some(rhs) = rhs {
-    //             Statement::Seq {
-    //                 stat1: Box::new(Statement::Declare {
-    //                     type_,
-    //                     var: var.clone(),
-    //                 }),
-    //                 stat2: Box::new(Statement::Assign {
-    //                     lhs: Lhs::LhsVar {
-    //                         var,
-    //                         type_: RuntimeType::UnknownRuntimeType,
-    //                     },
-    //                     rhs,
-    //                 }),
-    //             }
-    //         } else {
-    //             Statement::Declare { type_, var }
-    //         }
-    //     });
-
-        let declaration =
-        (nonvoidtype() + identifier() ).map(|(type_, var)| {
+    let declaration = (nonvoidtype() + identifier() + (punct(":=") * rhs()).opt() - punct(";"))
+        .map(|((type_, var), rhs)| {
+            if let Some(rhs) = rhs {
+                Statement::Seq {
+                    stat1: Box::new(Statement::Declare {
+                        type_,
+                        var: var.clone(),
+                    }),
+                    stat2: Box::new(Statement::Assign {
+                        lhs: Lhs::LhsVar {
+                            var,
+                            type_: RuntimeType::UnknownRuntimeType,
+                        },
+                        rhs,
+                    }),
+                }
+            } else {
                 Statement::Declare { type_, var }
+            }
         });
-    let assignment = (lhs() - punct(":=") + rhs()).map(|(lhs, rhs)| Statement::Assign { lhs, rhs });
+
+    // let declaration = (nonvoidtype() + identifier() - punct(";"))
+    //     .map(|(type_, var)| Statement::Declare { type_, var });
+    let assignment =
+        (lhs() - punct(":=") + rhs() - punct(";")).map(|(lhs, rhs)| Statement::Assign { lhs, rhs });
     let call_ = (invocation() - punct(";")).map(|invocation| Statement::Call { invocation });
     let skip = punct(";").map(|_| Statement::Skip);
     let assert = (keyword("assert") * verification_expression() - punct(";"))
@@ -113,15 +107,12 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         },
     );
     let ite = (keyword("if") * punct("(") * expression() - punct(")")
-        + punct("{") * call(statement)
-        - punct("}")
-        - keyword("else")
-        + punct("{") * call(statement)
-        - punct("}"))
+        + call(statement)
+        + (keyword("else") * call(statement)).opt())
     .map(|((guard, true_body), false_body)| Statement::Ite {
         guard,
         true_body: Box::new(true_body),
-        false_body: Box::new(false_body),
+        false_body: Box::new(false_body.unwrap_or(Statement::Skip)),
     });
     let continue_ = (keyword("continue") * punct(";")).map(|_| Statement::Continue);
     let break_ = (keyword("break") * punct(";")).map(|_| Statement::Break);
@@ -156,7 +147,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         | throw
         | try_
         | block;
-    (p_statement + (punct(";") * call(statement)).opt()).map(|(stmt, other_statement)| {
+    (p_statement + (call(statement)).opt()).map(|(stmt, other_statement)| {
         if let Some(other_statement) = other_statement {
             return Statement::Seq {
                 stat1: Box::new(stmt),
@@ -167,12 +158,35 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     })
 }
 
+fn expression1<'a>() -> Parser<'a, Token<'a>, Expression> {
+    verification_expression()
+}
+
 fn verification_expression<'a>() -> Parser<'a, Token<'a>, Expression> {
-    // todo
-    (take(1)).map(|_| Expression::Var {
-        var: "verificationexpr".to_owned(),
+    let forall = (keyword("forall") * identifier() - punct(",") + identifier() - punct(":")
+        + identifier()
+        - punct(":")
+        + call(expression1))
+    .map(|(((elem, range), domain), formula)| Expression::Forall {
+        elem,
+        range,
+        domain,
+        formula: Box::new(formula),
         type_: RuntimeType::UnknownRuntimeType,
-    })
+    });
+    let exists = (keyword("exists") * identifier() - punct(",") + identifier() - punct(":")
+        + identifier()
+        - punct(":")
+        + call(expression1))
+    .map(|(((elem, range), domain), formula)| Expression::Exists {
+        elem,
+        range,
+        domain,
+        formula: Box::new(formula),
+        type_: RuntimeType::UnknownRuntimeType,
+    });
+
+    forall | exists | expression2()
 }
 
 fn invocation<'a>() -> Parser<'a, Token<'a>, Invocation> {
@@ -190,8 +204,16 @@ fn arguments<'a>() -> Parser<'a, Token<'a>, Vec<Expression>> {
     list(expression(), punct(","))
 }
 
+fn specification<'a>() -> Parser<'a, Token<'a>, Specification> {
+    let requires = keyword("requires") * punct("(") * verification_expression() - punct(")");
+    let ensures = keyword("ensures") * punct("(") * verification_expression() - punct(")");
+    let exceptional = keyword("exceptional") * punct("(") * verification_expression() - punct(")");
+
+    (requires.opt() + ensures.opt() + exceptional.opt()).map(|((requires, ensures), exceptional)| Specification{ requires, ensures, exceptional })
+}
+
 fn expression<'a>() -> Parser<'a, Token<'a>, Expression> {
-    expression2()
+    expression1()
 }
 
 fn expression2<'a>() -> Parser<'a, Token<'a>, Expression> {
@@ -429,8 +451,8 @@ fn type_<'a>() -> Parser<'a, Token<'a>, Type> {
 }
 
 fn nonvoidtype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
-    primitivetype() | referencetype()
-}
+    referencetype() | primitivetype()
+} 
 
 fn primitivetype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
     keyword("uint").map(|_| NonVoidType::UIntType)
@@ -537,7 +559,7 @@ fn class_with_constructor() {
 
 #[test]
 fn test_statement() {
-    let file_content = "int p; p := 0";
+    let file_content = "int p; p := 0;";
 
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
@@ -553,15 +575,33 @@ fn class_with_methods() {
 
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-    dbg!(as_ref);
-    let c = (program() - end()).parse(&as_ref).unwrap(); // should not panic;
-    dbg!(c);
-    assert!(false);
+    // dbg!(as_ref);
+    let c = (program() - end()).parse(&as_ref);
+    // dbg!(&c);
+    c.unwrap(); // should not panic;
+
+    // dbg!(c);
+    // assert!(false);
+}
+
+#[test]
+fn bsort_test() {
+    let file_content = include_str!("../examples/bsort.oox");
+
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+    // dbg!(as_ref);
+    let c = (program() - end()).parse(&as_ref);
+    // dbg!(&c);
+    c.unwrap(); // should not panic;
+
+    // dbg!(c);
+    // assert!(false);
 }
 
 #[test]
 fn this_dot() {
-    let file_content = "p := this.value";
+    let file_content = "p := this.value;";
 
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
@@ -573,12 +613,13 @@ fn this_dot() {
 
 #[test]
 fn ite() {
-    let file_content = "if(x==v) { ; }
+    let file_content = "
+    int v := this.value ;
+    if(x==v) { return true; }
     else {
-        Node n; n := this.next ;
-    bool b;
-    b := n.member(x) ;
-    return b;
+        Node n := this.next ;
+        bool b := n.member(x) ;
+        return b ;
     }";
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
@@ -599,7 +640,6 @@ fn boolean() {
     assert!(false);
 }
 
-
 #[test]
 fn test_statement2() {
     let file_content = "Node n; n := this.next ;
@@ -612,6 +652,17 @@ fn test_statement2() {
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
     dbg!(c);
     assert!(false);
+}
+
+#[test]
+fn forall() {
+    let file_content = "(forall x, i : a : i<k ==> (forall y, j : a : i<=j ==> x<=y))";
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+    dbg!(as_ref);
+    let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
+    // dbg!(c);
+    // assert!(false);
 }
 
 // fn is_literal<'a>() -> Parser<'a, Token<'a>, Token<'a>> {

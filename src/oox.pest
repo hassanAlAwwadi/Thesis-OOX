@@ -18,7 +18,6 @@ keyword = { "assert" | "catch" | "else"
 | "ensures"
 | "float"
 | "int"
-| "null"
 | "string"
 | "try"
 | "bool"
@@ -39,12 +38,12 @@ keyword = { "assert" | "catch" | "else"
 }
 
 punctuator = {
-    "+"  | ">"   | "{"  | ";"  | "-"  |
-    "<=" | ">="  | "==" | "!=" | "&&" | 
-    "||" | "==>" | "}"  | "*"  | "/"  | 
+    "+"  | "{"  | ";"  | "-"  |
+    "<=" | ">="  | "==>"  | "!=" | "&&" | 
+    "||" | "==" | "}"  | "*"  | "/"  | 
     "%"  | "!"   | ":=" | "<"  | "["  | 
     "]"  | "("   | ")"  | "."  | ","  | 
-    ":"  | "#"
+    ":"  | "#" | ">" 
 }
 
 literal = { boolean | integer | float | char | string | "null" }
