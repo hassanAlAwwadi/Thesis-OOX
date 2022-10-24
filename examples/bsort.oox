@@ -15,27 +15,27 @@ class PVbenchmark {
       // BUT oox does not support loop-inv, so we just require it as assert.
       // oox does not do inv-rule reduction :(
       assert 0<=k && k<=#a && (forall x, i : a : i<k ==> (forall y, j : a : i<=j ==> x<=y)) ;
-    //  while (k<#a) {
-    //      int m := #a-1 ;
-    //      int am := a[m] ;
-    //      // inv of inner loop
-    //      assert 0<=k && k<=#a
-    //             && (forall x, i : a : i<k ==> (forall y, j : a : i<=j ==> x<=y))
-    //             && k<=m && m<#a
-    //             && (forall z,j : a : m<=j  ==> am<=z) ;
-    //      while (k<m) {
-    //            am := a[m] ;
-    //            int prev := a[m-1] ;
-    //            if (am<prev) {
-    //                  int tmp := am ;
-    //                  a[m] := prev  ;
-    //                  a[m-1] := tmp ;
-    //               }
-    //            m := m-1 ;
-    //      }
-    //      k := k+1 ;
-    //  } ;
-    //  assert (forall x,i : a : (forall y,j : a : i<=j ==> x<=y)) ;
+      while (k<#a) {
+          int m := #a-1 ;
+          int am := a[m] ;
+          // inv of inner loop
+          assert 0<=k && k<=#a
+                 && (forall x, i : a : i<k ==> (forall y, j : a : i<=j ==> x<=y))
+                 && k<=m && m<#a
+                 && (forall z,j : a : m<=j  ==> am<=z) ;
+          while (k<m) {
+                am := a[m] ;
+                int prev := a[m-1] ;
+                if (am<prev) {
+                      int tmp := am ;
+                      a[m] := prev  ;
+                      a[m-1] := tmp ;
+                   }
+                m := m-1 ;
+          }
+          k := k+1 ;
+      } ;
+      assert (forall x,i : a : (forall y,j : a : i<=j ==> x<=y)) ;
       return a ;
     }
 

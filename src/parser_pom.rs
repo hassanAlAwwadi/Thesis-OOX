@@ -7,6 +7,11 @@ use crate::syntax::*;
 
 use crate::lexer::*;
 
+pub fn parse<'a>(tokens: &[Token<'a>]) -> Result<CompilationUnit, pom::Error> {
+    (program() - end()).parse(tokens)
+}
+
+
 fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit> {
     class()
         .repeat(0..)
@@ -229,118 +234,184 @@ fn expression2<'a>() -> Parser<'a, Token<'a>, Expression> {
 }
 
 fn expression3<'a>() -> Parser<'a, Token<'a>, Expression> {
-    let and =
-        (expression4() + punct("&&") * call(expression3)).map(|(lhs, rhs)| Expression::BinOp {
-            bin_op: BinOp::And,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            type_: RuntimeType::UnknownRuntimeType,
-        });
-    let or =
-        (expression4() + punct("||") * call(expression3)).map(|(lhs, rhs)| Expression::BinOp {
-            bin_op: BinOp::Or,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            type_: RuntimeType::UnknownRuntimeType,
-        });
+    // let and =
+    //     (expression4() + punct("&&") * call(expression3)).map(|(lhs, rhs)| Expression::BinOp {
+    //         bin_op: BinOp::And,
+    //         lhs: Box::new(lhs),
+    //         rhs: Box::new(rhs),
+    //         type_: RuntimeType::UnknownRuntimeType,
+    //     });
+    // let or =
+    //     (expression4() + punct("||") * call(expression3)).map(|(lhs, rhs)| Expression::BinOp {
+    //         bin_op: BinOp::Or,
+    //         lhs: Box::new(lhs),
+    //         rhs: Box::new(rhs),
+    //         type_: RuntimeType::UnknownRuntimeType,
+    //     });
 
-    and | or | expression4()
+    let and = punct("&&").map(|_| BinOp::And);
+    let or = punct("||").map(|_| BinOp::Or);
+
+    (expression4() + ((and | or) + call(expression3)).opt()).map(|(lhs, rhs)| {
+        if let Some((bin_op, rhs)) = rhs {
+            Expression::BinOp {
+                bin_op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                type_: RuntimeType::UnknownRuntimeType,
+            }  
+        } else {
+            lhs
+        }
+    })
+
+    // and | or | expression4()
 }
 
 fn expression4<'a>() -> Parser<'a, Token<'a>, Expression> {
-    let eq =
-        (expression5() + punct("==") * call(expression4)).map(|(lhs, rhs)| Expression::BinOp {
-            bin_op: BinOp::Equal,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            type_: RuntimeType::UnknownRuntimeType,
-        });
+    // let eq =
+    //     (expression5() + punct("==") * call(expression4)).map(|(lhs, rhs)| Expression::BinOp {
+    //         bin_op: BinOp::Equal,
+    //         lhs: Box::new(lhs),
+    //         rhs: Box::new(rhs),
+    //         type_: RuntimeType::UnknownRuntimeType,
+    //     });
 
-    let neq =
-        (expression5() + punct("!=") * call(expression4)).map(|(lhs, rhs)| Expression::BinOp {
-            bin_op: BinOp::NotEqual,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            type_: RuntimeType::UnknownRuntimeType,
-        });
+    // let neq =
+    //     (expression5() + punct("!=") * call(expression4)).map(|(lhs, rhs)| Expression::BinOp {
+    //         bin_op: BinOp::NotEqual,
+    //         lhs: Box::new(lhs),
+    //         rhs: Box::new(rhs),
+    //         type_: RuntimeType::UnknownRuntimeType,
+    //     });
 
-    eq | neq | expression5()
+    let eq = punct("==").map(|_| BinOp::Equal);
+    let neq = punct("!=").map(|_| BinOp::NotEqual);
+
+    (expression5() + ((eq | neq) + call(expression4)).opt()).map(|(lhs, rhs)| {
+        if let Some((bin_op, rhs)) = rhs {
+            Expression::BinOp {
+                bin_op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                type_: RuntimeType::UnknownRuntimeType,
+            }  
+        } else {
+            lhs
+        }
+    })
+
+    // eq | neq | expression5()
 }
 
-fn expression5<'a>() -> Parser<'a, Token<'a>, Expression> {
-    let lt = (expression6() + punct("<") * call(expression5)).map(|(lhs, rhs)| Expression::BinOp {
-        bin_op: BinOp::LessThan,
-        lhs: Box::new(lhs),
-        rhs: Box::new(rhs),
-        type_: RuntimeType::UnknownRuntimeType,
-    });
-    let gt = (expression6() + punct(">") * call(expression5)).map(|(lhs, rhs)| Expression::BinOp {
-        bin_op: BinOp::GreaterThan,
-        lhs: Box::new(lhs),
-        rhs: Box::new(rhs),
-        type_: RuntimeType::UnknownRuntimeType,
-    });
-    let lte =
-        (expression6() + punct("<=") * call(expression5)).map(|(lhs, rhs)| Expression::BinOp {
-            bin_op: BinOp::LessThanEqual,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            type_: RuntimeType::UnknownRuntimeType,
-        });
-    let gte =
-        (expression6() + punct(">=") * call(expression5)).map(|(lhs, rhs)| Expression::BinOp {
-            bin_op: BinOp::GreaterThanEqual,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            type_: RuntimeType::UnknownRuntimeType,
-        });
+fn expression5<'a>() -> Parser<'a, Token<'a>, Expression> {    
+    // let lt = (expression6() + punct("<") * call(expression5)).map(|(lhs, rhs)| Expression::BinOp {
+    //     bin_op: BinOp::LessThan,
+    //     lhs: Box::new(lhs),
+    //     rhs: Box::new(rhs),
+    //     type_: RuntimeType::UnknownRuntimeType,
+    // });
+    // let gt = (expression6() + punct(">") * call(expression5)).map(|(lhs, rhs)| Expression::BinOp {
+    //     bin_op: BinOp::GreaterThan,
+    //     lhs: Box::new(lhs),
+    //     rhs: Box::new(rhs),
+    //     type_: RuntimeType::UnknownRuntimeType,
+    // });
+    // let lte =
+    //     (expression6() + punct("<=") * call(expression5)).map(|(lhs, rhs)| Expression::BinOp {
+    //         bin_op: BinOp::LessThanEqual,
+    //         lhs: Box::new(lhs),
+    //         rhs: Box::new(rhs),
+    //         type_: RuntimeType::UnknownRuntimeType,
+    //     });
+    // let gte =
+    //     (expression6() + punct(">=") * call(expression5)).map(|(lhs, rhs)| Expression::BinOp {
+    //         bin_op: BinOp::GreaterThanEqual,
+    //         lhs: Box::new(lhs),
+    //         rhs: Box::new(rhs),
+    //         type_: RuntimeType::UnknownRuntimeType,
+    //     });
 
-    gte | lte | lt | gt | expression6()
+    let gte = punct(">=").map(|_| BinOp::GreaterThanEqual);
+    let lte = punct("<=").map(|_| BinOp::LessThanEqual);
+    let lt = punct("<").map(|_| BinOp::LessThan);
+    let gt = punct(">").map(|_| BinOp::GreaterThan);
+    
+    (expression6() + ((gte | lte | lt | gt) + call(expression5)).opt()).map(|(lhs, rhs)| {
+        if let Some((bin_op, rhs)) = rhs {
+            Expression::BinOp {
+                bin_op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                type_: RuntimeType::UnknownRuntimeType,
+            }  
+        } else {
+            lhs
+        }
+    })
+
+    // gte | lte | lt | gt | expression6()
 }
 
 fn expression6<'a>() -> Parser<'a, Token<'a>, Expression> {
-    let plus =
-        (expression7() + punct("+") * call(expression6)).map(|(lhs, rhs)| Expression::BinOp {
-            bin_op: BinOp::Plus,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            type_: RuntimeType::UnknownRuntimeType,
-        });
-    let minus =
-        (expression7() + punct("-") * call(expression6)).map(|(lhs, rhs)| Expression::BinOp {
-            bin_op: BinOp::Minus,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            type_: RuntimeType::UnknownRuntimeType,
-        });
+    let plus = punct("+").map(|_| BinOp::Plus);
+    let minus = punct("-").map(|_| BinOp::Minus);
 
-    plus | minus | expression7()
+    (expression7() + ((plus | minus) + call(expression6)).opt()).map(|(lhs, rhs)| {
+        if let Some((bin_op, rhs)) = rhs {
+            Expression::BinOp {
+                bin_op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                type_: RuntimeType::UnknownRuntimeType,
+            }  
+        } else {
+            lhs
+        }
+    })
 }
 
 fn expression7<'a>() -> Parser<'a, Token<'a>, Expression> {
-    let multiply =
-        (expression8() + punct("*") * call(expression7)).map(|(lhs, rhs)| Expression::BinOp {
-            bin_op: BinOp::Multiply,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            type_: RuntimeType::UnknownRuntimeType,
-        });
-    let divide =
-        (expression8() + punct("/") * call(expression7)).map(|(lhs, rhs)| Expression::BinOp {
-            bin_op: BinOp::Divide,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            type_: RuntimeType::UnknownRuntimeType,
-        });
-    let modulo =
-        (expression8() + punct("%") * call(expression7)).map(|(lhs, rhs)| Expression::BinOp {
-            bin_op: BinOp::Modulo,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            type_: RuntimeType::UnknownRuntimeType,
-        });
+    // let multiply =
+    //     (expression8() + punct("*") * call(expression7)).map(|(lhs, rhs)| Expression::BinOp {
+    //         bin_op: BinOp::Multiply,
+    //         lhs: Box::new(lhs),
+    //         rhs: Box::new(rhs),
+    //         type_: RuntimeType::UnknownRuntimeType,
+    //     });
+    // let divide =
+    //     (expression8() + punct("/") * call(expression7)).map(|(lhs, rhs)| Expression::BinOp {
+    //         bin_op: BinOp::Divide,
+    //         lhs: Box::new(lhs),
+    //         rhs: Box::new(rhs),
+    //         type_: RuntimeType::UnknownRuntimeType,
+    //     });
+    // let modulo =
+    //     (expression8() + punct("%") * call(expression7)).map(|(lhs, rhs)| Expression::BinOp {
+    //         bin_op: BinOp::Modulo,
+    //         lhs: Box::new(lhs),
+    //         rhs: Box::new(rhs),
+    //         type_: RuntimeType::UnknownRuntimeType,
+    //     });
 
-    multiply | divide | modulo | expression8()
+    let multiply = punct("*").map(|_| BinOp::Multiply);
+    let divide = punct("/").map(|_| BinOp::Divide);
+    let modulo = punct("%").map(|_| BinOp::Modulo);
+
+    (expression8() + ((multiply | divide | modulo) + call(expression7)).opt()).map(|(lhs, rhs)| {
+        if let Some((bin_op, rhs)) = rhs {
+            Expression::BinOp {
+                bin_op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                type_: RuntimeType::UnknownRuntimeType,
+            }
+        } else {
+            lhs
+        }
+    })
+
+    // multiply | divide | modulo | expression8()
 }
 
 fn expression8<'a>() -> Parser<'a, Token<'a>, Expression> {
@@ -656,13 +727,13 @@ fn test_statement2() {
 
 #[test]
 fn forall() {
-    let file_content = "(forall x, i : a : i<k ==> (forall y, j : a : i<=j ==> x<=y))";
+    let file_content = "(forall x, i : a : i<k ==> (forall x, i : a : i<k ==> true))";
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-    dbg!(as_ref);
+    // dbg!(as_ref);
     let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
-    // dbg!(c);
-    // assert!(false);
+    dbg!(c);
+    assert!(false);
 }
 
 // fn is_literal<'a>() -> Parser<'a, Token<'a>, Token<'a>> {

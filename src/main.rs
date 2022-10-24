@@ -5,6 +5,8 @@ mod parser;
 mod lexer;
 mod parser_pom;
 
+mod cfg;
+
 #[macro_use]
 extern crate pest_derive;
 

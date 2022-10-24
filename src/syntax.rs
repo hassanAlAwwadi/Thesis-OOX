@@ -6,7 +6,7 @@ pub struct CompilationUnit {
     pub members: Vec<Declaration>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Declaration {
     Class {
         name: Identifier,
@@ -14,7 +14,7 @@ pub enum Declaration {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum DeclarationMember {
     Constructor {
         name: Identifier,
@@ -36,20 +36,20 @@ pub enum DeclarationMember {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Parameter {
     pub type_: NonVoidType,
     pub name: Identifier,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Specification {
     pub requires: Option<Expression>,
     pub ensures: Option<Expression>,
     pub exceptional: Option<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Statement {
     Declare {
         type_: NonVoidType,
@@ -99,7 +99,7 @@ pub enum Statement {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Invocation {
     InvokeMethod {
         lhs: Identifier,
@@ -114,7 +114,7 @@ pub enum Invocation {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Lhs {
     LhsVar {
         var: Identifier,
@@ -133,7 +133,7 @@ pub enum Lhs {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Rhs {
     RhsExpression {
         value: Expression,
@@ -160,7 +160,7 @@ pub enum Rhs {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expression {
     Forall {
         elem: Identifier,
@@ -219,7 +219,7 @@ pub enum Expression {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BinOp {
     Implies,
     And,
@@ -237,13 +237,13 @@ pub enum BinOp {
     Modulo,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UnOp {
     Negative,
     Negate,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Lit {
     BoolLit { bool_value: bool },
     UIntLit { uint_value: u64 },
@@ -254,12 +254,12 @@ pub enum Lit {
     NullLit,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Type {
     pub type_: Option<NonVoidType>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum NonVoidType {
     UIntType,
     IntType,
@@ -272,7 +272,7 @@ pub enum NonVoidType {
 }
 
 // how is this used during parsing? or is it only used during execution
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RuntimeType {
     UnknownRuntimeType,
     VoidRuntimeType,
