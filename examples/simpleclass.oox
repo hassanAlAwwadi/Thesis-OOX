@@ -14,13 +14,4 @@ class Node {
             return b ;
         }
     }
-
-    int length() {
-        Node n := this.next ;
-        if (n==null) return 1 ;
-        else {
-            int k := n.length() ;
-            return k+1 ;
-        }
-    }
 }

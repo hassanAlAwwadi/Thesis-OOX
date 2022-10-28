@@ -1,0 +1,25 @@
+//
+// Linked-list, with several methods.
+//
+class Node {
+    int value ;
+    Node next ;
+
+    Node min()
+    {
+       Node p := this ;
+       Node min := p ;
+       int minval := min.value ;
+
+       while ( p != null) {
+          int value := p.value ;
+          if ( value < minval) {
+               min := p ;
+               minval := value ;
+               break;
+          }
+          p := p.next;
+       }
+       return min ;
+    }
+}

@@ -11,7 +11,6 @@ pub fn parse<'a>(tokens: &[Token<'a>]) -> Result<CompilationUnit, pom::Error> {
     (program() - end()).parse(tokens)
 }
 
-
 fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit> {
     class()
         .repeat(0..)
@@ -41,30 +40,33 @@ fn method<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     let parameters = punct("(") * parameters() - punct(")");
 
     (is_static + type_() + identifier() + parameters + specification() + body()).map(
-        |(((((is_static, return_type), name), params), specification), body)| DeclarationMember::Method {
-            is_static,
-            return_type,
-            name,
-            params,
-            specification,
-            body,
+        |(((((is_static, return_type), name), params), specification), body)| {
+            DeclarationMember::Method {
+                is_static,
+                return_type,
+                name,
+                params,
+                specification,
+                body,
+            }
         },
     )
 
     // todo!()
 }
 
-
 fn constructor<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     let p = identifier() - punct("(") + parameters() - punct(")");
     // let specification = todo!();
     let body = punct("{") * statement() - punct("}");
 
-    (p + specification() + body).map(|(((name, params), specification), body)| DeclarationMember::Constructor {
-        name,
-        params,
-        specification,
-        body,
+    (p + specification() + body).map(|(((name, params), specification), body)| {
+        DeclarationMember::Constructor {
+            name,
+            params,
+            specification,
+            body,
+        }
     })
 }
 
@@ -105,14 +107,14 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     let assume = (keyword("assume") * verification_expression() - punct(";"))
         .map(|assumption| Statement::Assume { assumption });
 
-    let while_ = (keyword("while") * punct("(") * expression() - punct(")") + call(statement)).map(
+    let while_ = (keyword("while") * punct("(") * expression() - punct(")") + (punct("{") * call(statement) - punct("}"))).map(
         |(guard, body)| Statement::While {
             guard,
             body: Box::new(body),
         },
     );
     let ite = (keyword("if") * punct("(") * expression() - punct(")")
-        + call(statement)
+        + ((punct("{") * call(statement) - punct("}")) | call(statement))
         + (keyword("else") * call(statement)).opt())
     .map(|((guard, true_body), false_body)| Statement::Ite {
         guard,
@@ -133,9 +135,12 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         try_body: Box::new(try_body),
         catch_body: Box::new(catch_body),
     });
-    let block = (punct("{") * call(statement) - punct("}")).map(|body| Statement::Block {
-        body: Box::new(body),
-    });
+    let block = (punct("{") * call(statement) - punct("}"))
+        // .map(|body| Statement::Block {
+        //     body: Box::new(body),
+        // });
+        .map(|body| body);
+
 
     // lock, fork & join are left out
     let p_statement = declaration
@@ -154,9 +159,18 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         | block;
     (p_statement + (call(statement)).opt()).map(|(stmt, other_statement)| {
         if let Some(other_statement) = other_statement {
-            return Statement::Seq {
-                stat1: Box::new(stmt),
-                stat2: Box::new(other_statement),
+            return match stmt {
+                Statement::Seq { stat1, stat2 } => Statement::Seq {
+                    stat1,
+                    stat2: Box::new(Statement::Seq {
+                        stat1: stat2,
+                        stat2: Box::new(other_statement),
+                    }),
+                },
+                _ => Statement::Seq {
+                    stat1: Box::new(stmt),
+                    stat2: Box::new(other_statement),
+                },
             };
         }
         return stmt;
@@ -214,7 +228,13 @@ fn specification<'a>() -> Parser<'a, Token<'a>, Specification> {
     let ensures = keyword("ensures") * punct("(") * verification_expression() - punct(")");
     let exceptional = keyword("exceptional") * punct("(") * verification_expression() - punct(")");
 
-    (requires.opt() + ensures.opt() + exceptional.opt()).map(|((requires, ensures), exceptional)| Specification{ requires, ensures, exceptional })
+    (requires.opt() + ensures.opt() + exceptional.opt()).map(
+        |((requires, ensures), exceptional)| Specification {
+            requires,
+            ensures,
+            exceptional,
+        },
+    )
 }
 
 fn expression<'a>() -> Parser<'a, Token<'a>, Expression> {
@@ -259,7 +279,7 @@ fn expression3<'a>() -> Parser<'a, Token<'a>, Expression> {
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
                 type_: RuntimeType::UnknownRuntimeType,
-            }  
+            }
         } else {
             lhs
         }
@@ -295,7 +315,7 @@ fn expression4<'a>() -> Parser<'a, Token<'a>, Expression> {
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
                 type_: RuntimeType::UnknownRuntimeType,
-            }  
+            }
         } else {
             lhs
         }
@@ -304,7 +324,7 @@ fn expression4<'a>() -> Parser<'a, Token<'a>, Expression> {
     // eq | neq | expression5()
 }
 
-fn expression5<'a>() -> Parser<'a, Token<'a>, Expression> {    
+fn expression5<'a>() -> Parser<'a, Token<'a>, Expression> {
     // let lt = (expression6() + punct("<") * call(expression5)).map(|(lhs, rhs)| Expression::BinOp {
     //     bin_op: BinOp::LessThan,
     //     lhs: Box::new(lhs),
@@ -336,7 +356,7 @@ fn expression5<'a>() -> Parser<'a, Token<'a>, Expression> {
     let lte = punct("<=").map(|_| BinOp::LessThanEqual);
     let lt = punct("<").map(|_| BinOp::LessThan);
     let gt = punct(">").map(|_| BinOp::GreaterThan);
-    
+
     (expression6() + ((gte | lte | lt | gt) + call(expression5)).opt()).map(|(lhs, rhs)| {
         if let Some((bin_op, rhs)) = rhs {
             Expression::BinOp {
@@ -344,7 +364,7 @@ fn expression5<'a>() -> Parser<'a, Token<'a>, Expression> {
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
                 type_: RuntimeType::UnknownRuntimeType,
-            }  
+            }
         } else {
             lhs
         }
@@ -364,7 +384,7 @@ fn expression6<'a>() -> Parser<'a, Token<'a>, Expression> {
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
                 type_: RuntimeType::UnknownRuntimeType,
-            }  
+            }
         } else {
             lhs
         }
@@ -523,7 +543,7 @@ fn type_<'a>() -> Parser<'a, Token<'a>, Type> {
 
 fn nonvoidtype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
     referencetype() | primitivetype()
-} 
+}
 
 fn primitivetype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
     keyword("uint").map(|_| NonVoidType::UIntType)
