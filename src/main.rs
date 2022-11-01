@@ -4,6 +4,8 @@ mod parser_example;
 mod parser;
 mod lexer;
 mod parser_pom;
+mod symbolic_exec;
+mod stack;
 
 mod cfg;
 

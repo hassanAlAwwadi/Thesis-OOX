@@ -3,7 +3,7 @@
 use crate::{lexer::tokens, parser_pom::parse, syntax::*};
 
 #[derive(Debug, Clone)]
-enum CFGStatement {
+pub enum CFGStatement {
     Statement(Statement), // without Seq
     Ite(Expression, u64, u64),
     While(Expression, u64),
