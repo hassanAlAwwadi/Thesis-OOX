@@ -1,5 +1,5 @@
 pub type Identifier = String;
-type Reference = i64;
+pub type Reference = i64;
 
 #[derive(Debug)]
 pub struct CompilationUnit {

@@ -1,9 +1,11 @@
-use crate::syntax::{Lhs, Parameter};
+use std::collections::HashMap;
+
+use crate::syntax::{Expression, Identifier, Lhs};
 
 
 
-pub(crate) struct StackFrame {
-    pc: u64,
-    lhs: Lhs,
-    local_vars: Vec<(String, Parameter)>,
+pub struct StackFrame {
+    pub pc: u64,
+    pub t: Lhs,
+    pub params: HashMap<Identifier, Expression>
 }
