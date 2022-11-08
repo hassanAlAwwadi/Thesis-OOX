@@ -9,6 +9,8 @@ mod stack;
 mod cfg;
 mod exec;
 
+mod typeable;
+
 #[macro_use]
 extern crate pest_derive;
 

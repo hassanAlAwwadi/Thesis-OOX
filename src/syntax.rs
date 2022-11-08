@@ -272,7 +272,7 @@ pub enum NonVoidType {
 }
 
 // how is this used during parsing? or is it only used during execution
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeType {
     UnknownRuntimeType,
     VoidRuntimeType,
@@ -286,6 +286,6 @@ pub enum RuntimeType {
     ArrayRuntimeType { inner_type: Box<RuntimeType> },
     ANYRuntimeType,
     NUMRuntimeType,
-    REFRuntimeType,
+    REFRuntimeType, // is this symbolic or something? why not use ReferenceRuntimeType
     ARRAYRuntimeType,
 }
