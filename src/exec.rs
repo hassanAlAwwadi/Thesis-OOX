@@ -6,14 +6,14 @@ use crate::{
     stack::StackFrame,
     syntax::{
         BinOp, Expression, Identifier, Lhs, Lit, NonVoidType, Reference, Rhs, RuntimeType,
-        Statement,
+        Statement, UnOp,
     },
     typeable::Typeable,
 };
 
-type Heap = HashMap<Reference, HeapValue>;
+pub type Heap = HashMap<Reference, HeapValue>;
 
-enum HeapValue {
+pub enum HeapValue {
     ObjectValue {
         fields: HashMap<Identifier, Expression>,
         type_: RuntimeType,
@@ -33,7 +33,7 @@ impl HeapValue {
 type PathConstraints = HashSet<Expression>;
 
 // refactor to Vec<Reference>? neins, since it can also be ITE and stuff
-type AliasMap = HashMap<String, Vec<Expression>>;
+pub type AliasMap = HashMap<String, Vec<Expression>>;
 
 enum Output {
     Valid,
@@ -41,12 +41,16 @@ enum Output {
     Unknown,
 }
 
+
+// perhaps separate program from this structure, such that we can have multiple references to it.
 struct State {
     pc: u64,
     program: HashMap<u64, CFGStatement>,
     stack: Vec<StackFrame>,
     heap: Heap,
     precondition: Expression,
+
+    constraints: PathConstraints,
     alias_map: AliasMap,
     ref_counter: i64,
 }
@@ -82,6 +86,7 @@ fn action(
         stack,
         heap,
         precondition,
+        constraints,
         alias_map,
         ref_counter,
     }: &mut State,
@@ -101,9 +106,32 @@ fn action(
                 return branch();
             }
             let value = evaluateRhs(heap, stack, alias_map, ref_counter, rhs);
-            executeAssign(heap, stack, alias_map, ref_counter, lhs, &value);
-            
+            execute_assign(heap, stack, alias_map, ref_counter, lhs, &value);
+
             branch()
+        }
+        CFGStatement::Statement(Statement::Assert { assertion }) => {
+            let exp = constraints.iter().fold(
+                Expression::UnOp {
+                    un_op: UnOp::Negative,
+                    value: Box::new(assertion.clone()),
+                    type_: RuntimeType::BoolRuntimeType,
+                },
+                |x, b| Expression::BinOp {
+                    bin_op: BinOp::And,
+                    lhs: Box::new(x),
+                    rhs: Box::new(b.clone()),
+                    type_: RuntimeType::BoolRuntimeType,
+                },
+            );
+            if exp == (Expression::Lit  { lit: Lit::BoolLit { bool_value: true }, type_: RuntimeType::BoolRuntimeType }) {
+                panic!("invalid");
+            } else if exp == (Expression::Lit  { lit: Lit::BoolLit { bool_value: false }, type_: RuntimeType::BoolRuntimeType }) {
+                branch();
+            } else {
+                dbg!("invoke Z3 with:", exp);
+                branch()
+            }
         }
         _ => todo!(),
     }
@@ -211,7 +239,7 @@ fn null() -> Expression {
     }
 }
 
-fn init(
+pub fn init(
     heap: &mut Heap,
     alias_map: &mut AliasMap,
     sym_ref: &Identifier,
@@ -259,7 +287,7 @@ fn write_index(heap: &mut Heap, ref_: i64, index: &Expression, value: &Expressio
     // }
 }
 
-fn executeAssign(
+fn execute_assign(
     heap: &mut Heap,
     stack: &mut Vec<StackFrame>,
     alias_map: &mut AliasMap,
@@ -315,7 +343,6 @@ fn executeAssign(
             //     _ => panic!("expected ref, found expr {:?}", &ref_),
             // }
         }
-
     }
 }
 

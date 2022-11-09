@@ -160,7 +160,7 @@ pub enum Rhs {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
     Forall {
         elem: Identifier,
@@ -219,7 +219,7 @@ pub enum Expression {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinOp {
     Implies,
     And,
@@ -237,13 +237,13 @@ pub enum BinOp {
     Modulo,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnOp {
     Negative,
     Negate,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Lit {
     BoolLit { bool_value: bool },
     UIntLit { uint_value: u64 },

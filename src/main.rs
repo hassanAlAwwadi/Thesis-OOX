@@ -10,6 +10,7 @@ mod cfg;
 mod exec;
 
 mod typeable;
+mod eval;
 
 #[macro_use]
 extern crate pest_derive;
