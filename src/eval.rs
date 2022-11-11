@@ -6,11 +6,11 @@ use crate::{
     syntax::Expression,
 };
 
-fn evaluate(
+pub fn evaluate(
     heap: &mut Heap,
-    stack: &mut Vec<StackFrame>,
+    stack: &Vec<StackFrame>,
     alias_map: &mut AliasMap,
-    expression: &mut Expression,
+    expression: &Expression,
     ref_counter: &mut i64,
 ) -> Expression {
     // if substitute
@@ -19,9 +19,9 @@ fn evaluate(
 
 fn substitute(
     heap: &mut Heap,
-    stack: &mut Vec<StackFrame>,
+    stack: & Vec<StackFrame>,
     alias_map: &mut AliasMap,
-    expression: &mut Expression,
+    expression: &Expression,
     ref_counter: &mut i64,
 ) -> Expression {
     match expression {
@@ -53,7 +53,7 @@ fn substitute(
             }
         }
         Expression::Var { var, type_ } => {
-            let StackFrame { pc, t, params } = stack.first().unwrap();
+            let StackFrame { pc, t, params, .. } = stack.first().unwrap();
             let o = params
                 .get(var)
                 .unwrap_or_else(|| panic!("infeasible, object does not exit"));

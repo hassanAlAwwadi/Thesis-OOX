@@ -1,4 +1,5 @@
 use nom::Slice;
+use ordered_float::NotNan;
 use pom::parser::*;
 
 use std::str::{self, FromStr};
@@ -606,7 +607,7 @@ fn literal<'a>() -> Parser<'a, Token<'a>, Expression> {
                         if let Ok(int_value) = i64::from_str(s) {
                             Lit::IntLit { int_value }
                         } else if let Ok(float_value) = f64::from_str(s) {
-                            Lit::FloatLit { float_value }
+                            Lit::FloatLit { float_value: NotNan::new(float_value).unwrap() }
                         } else {
                             unreachable!()
                         }

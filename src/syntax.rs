@@ -1,5 +1,9 @@
+use ordered_float::NotNan;
+
 pub type Identifier = String;
 pub type Reference = i64;
+
+pub type Float = NotNan<f64>;
 
 #[derive(Debug)]
 pub struct CompilationUnit {
@@ -34,6 +38,30 @@ pub enum DeclarationMember {
         type_: NonVoidType,
         name: Identifier,
     },
+}
+
+impl DeclarationMember {
+    fn specification(&self) -> Option<&Specification> {
+        match &self {
+            DeclarationMember::Constructor { specification, .. } => {
+                Some(specification)
+            },
+            DeclarationMember::Method {  specification, .. } => {
+                Some(specification)
+            },
+            DeclarationMember::Field { .. } => {
+                None
+            },
+        }
+    }
+
+    pub fn requires(&self) -> Option<&Expression> {
+        self.specification().and_then(|s| s.requires.as_ref())
+    }
+
+    pub fn post_condition(&self) -> Option<&Expression> {
+        self.specification().and_then(|s| s.ensures.as_ref())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -160,7 +188,7 @@ pub enum Rhs {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expression {
     Forall {
         elem: Identifier,
@@ -219,7 +247,7 @@ pub enum Expression {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BinOp {
     Implies,
     And,
@@ -237,21 +265,25 @@ pub enum BinOp {
     Modulo,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UnOp {
     Negative,
     Negate,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub enum Lit {
     BoolLit { bool_value: bool },
     UIntLit { uint_value: u64 },
     IntLit { int_value: i64 },
-    FloatLit { float_value: f64 },
+    FloatLit { float_value: Float },
     StringLit { string_value: String },
     CharLit { char_value: char },
     NullLit,
+}
+
+impl Eq for Lit {
+
 }
 
 #[derive(Debug, Clone)]
@@ -272,7 +304,7 @@ pub enum NonVoidType {
 }
 
 // how is this used during parsing? or is it only used during execution
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RuntimeType {
     UnknownRuntimeType,
     VoidRuntimeType,

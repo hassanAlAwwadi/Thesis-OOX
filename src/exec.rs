@@ -1,8 +1,11 @@
 use core::panic;
 use std::collections::{HashMap, HashSet};
 
+use ordered_float::NotNan;
+
 use crate::{
     cfg::CFGStatement,
+    eval::{self, evaluate},
     stack::StackFrame,
     syntax::{
         BinOp, Expression, Identifier, Lhs, Lit, NonVoidType, Reference, Rhs, RuntimeType,
@@ -10,6 +13,10 @@ use crate::{
     },
     typeable::Typeable,
 };
+
+fn retval() -> String {
+    "retval".to_string()
+}
 
 pub type Heap = HashMap<Reference, HeapValue>;
 
@@ -41,7 +48,6 @@ enum Output {
     Unknown,
 }
 
-
 // perhaps separate program from this structure, such that we can have multiple references to it.
 struct State {
     pc: u64,
@@ -60,7 +66,9 @@ fn default(t: impl Typeable) -> Expression {
     let lit = match &type_ {
         RuntimeType::UIntRuntimeType => Lit::UIntLit { uint_value: 0 },
         RuntimeType::IntRuntimeType => Lit::IntLit { int_value: 0 },
-        RuntimeType::FloatRuntimeType => Lit::FloatLit { float_value: 0. },
+        RuntimeType::FloatRuntimeType => Lit::FloatLit {
+            float_value: NotNan::new(0.0).unwrap(),
+        },
         RuntimeType::BoolRuntimeType => Lit::BoolLit { bool_value: false },
         RuntimeType::StringRuntimeType => Lit::NullLit,
         RuntimeType::CharRuntimeType => Lit::CharLit { char_value: '\0' },
@@ -96,7 +104,7 @@ fn action(
 
     match action {
         CFGStatement::Statement(Statement::Declare { type_, var }) => {
-            let StackFrame { pc, t, params } = stack.first_mut().unwrap();
+            let StackFrame { pc, t, params, .. } = stack.first_mut().unwrap();
             params.insert(var.clone(), default(type_));
 
             branch()
@@ -111,31 +119,86 @@ fn action(
             branch()
         }
         CFGStatement::Statement(Statement::Assert { assertion }) => {
-            let exp = constraints.iter().fold(
-                Expression::UnOp {
-                    un_op: UnOp::Negative,
-                    value: Box::new(assertion.clone()),
-                    type_: RuntimeType::BoolRuntimeType,
-                },
-                |x, b| Expression::BinOp {
-                    bin_op: BinOp::And,
-                    lhs: Box::new(x),
-                    rhs: Box::new(b.clone()),
-                    type_: RuntimeType::BoolRuntimeType,
-                },
-            );
-            if exp == (Expression::Lit  { lit: Lit::BoolLit { bool_value: true }, type_: RuntimeType::BoolRuntimeType }) {
+            let expression =
+                exec_assert(&constraints, assertion, heap, stack, alias_map, ref_counter);
+            if expression == true_lit() {
                 panic!("invalid");
-            } else if exp == (Expression::Lit  { lit: Lit::BoolLit { bool_value: false }, type_: RuntimeType::BoolRuntimeType }) {
+            } else if expression == false_lit() {
                 branch();
             } else {
-                dbg!("invoke Z3 with:", exp);
+                dbg!("invoke Z3 with:", expression);
                 branch()
             }
+        }
+        CFGStatement::Statement(Statement::Assume { assumption }) => {
+            let expression = evaluate(heap, stack, alias_map, assumption, ref_counter);
+            if expression == false_lit() {
+                panic!("infeasible");
+            } else if expression != true_lit() {
+                constraints.insert(expression);
+            }
+            branch()
+        }
+        CFGStatement::Statement(Statement::Return { expression }) => {
+            if let Some(expression) = expression {
+                let StackFrame { pc, t, params, .. } = stack.first_mut().unwrap();
+                params.insert("retval".to_string(), expression.clone());
+            }
+            branch()
+        }
+        CFGStatement::FunctionEntry(_name) => {
+            // only check preconditions when it's the first method called??
+            // we assume that the previous stackframe is of this method
+            let StackFrame { current_member, .. } = stack.first().unwrap();
+            if let Some(requires) = current_member.requires() {
+                exec_assert(constraints, requires, heap, stack, alias_map, ref_counter);
+                // more?
+            }
+            branch()
+        }
+        CFGStatement::FunctionExit(_name) => {
+            let StackFrame { current_member, params, .. } = stack.first().unwrap();
+            if let Some(post_condition) = current_member.post_condition() {
+                exec_assert(constraints, post_condition, heap, stack, alias_map, ref_counter);
+                // some if true then unfeasible/invalid or something?
+            }
+            
+            if stack.len() == 1 {
+                return branch();
+                // we are pbobably done now
+            } else {
+                
+            }
+
+            branch()
         }
         _ => todo!(),
     }
     todo!()
+}
+
+fn exec_assert(
+    constraints: &PathConstraints,
+    assertion: &Expression,
+    heap: &mut Heap,
+    stack: &Vec<StackFrame>,
+    alias_map: &mut AliasMap,
+    ref_counter: &mut i64,
+) -> Expression {
+    let expression = constraints.iter().fold(
+        Expression::UnOp {
+            un_op: UnOp::Negative,
+            value: Box::new(assertion.clone()),
+            type_: RuntimeType::BoolRuntimeType,
+        },
+        |x, b| Expression::BinOp {
+            bin_op: BinOp::And,
+            lhs: Box::new(x),
+            rhs: Box::new(b.clone()),
+            type_: RuntimeType::BoolRuntimeType,
+        },
+    );
+    evaluate(heap, stack, alias_map, &expression, ref_counter)
 }
 
 fn read_field_concrete_ref(heap: &mut Heap, ref_: i64, field: &Identifier) -> Expression {
@@ -297,7 +360,7 @@ fn execute_assign(
 ) {
     match lhs {
         Lhs::LhsVar { var, type_ } => {
-            let StackFrame { pc, t, params } = stack.first_mut().unwrap();
+            let StackFrame { pc, t, params, .. } = stack.first_mut().unwrap();
             params.insert(var.clone(), e.clone());
         }
         Lhs::LhsField {
@@ -306,7 +369,7 @@ fn execute_assign(
             field,
             type_,
         } => {
-            let StackFrame { pc, t, params } = stack.first_mut().unwrap();
+            let StackFrame { pc, t, params, .. } = stack.first_mut().unwrap();
             let o = params
                 .get(var)
                 .unwrap_or_else(|| panic!("infeasible, object does not exit"));
@@ -326,7 +389,7 @@ fn execute_assign(
             todo!()
         }
         Lhs::LhsElem { var, index, type_ } => {
-            let StackFrame { pc, t, params } = stack.first_mut().unwrap();
+            let StackFrame { pc, t, params, .. } = stack.first_mut().unwrap();
             let ref_ = params
                 .get(var)
                 .unwrap_or_else(|| panic!("infeasible, array does not exit"));
@@ -383,7 +446,7 @@ fn exec_rhs_field(
     field: &Identifier,
     type_: &RuntimeType,
 ) -> Expression {
-    let StackFrame { pc, t, params } = stack.first_mut().unwrap();
+    let StackFrame { pc, t, params, .. } = stack.first_mut().unwrap();
     match var {
         Expression::Conditional {
             guard,
@@ -413,6 +476,20 @@ fn exec_rhs_field(
             read_field_symbolic_ref(heap, concrete_refs, sym_ref, field)
         }
         _ => todo!("Expected reference here"),
+    }
+}
+
+fn true_lit() -> Expression {
+    Expression::Lit {
+        lit: Lit::BoolLit { bool_value: true },
+        type_: RuntimeType::BoolRuntimeType,
+    }
+}
+
+fn false_lit() -> Expression {
+    Expression::Lit {
+        lit: Lit::BoolLit { bool_value: false },
+        type_: RuntimeType::BoolRuntimeType,
     }
 }
 
