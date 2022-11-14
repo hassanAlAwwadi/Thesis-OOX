@@ -1,3 +1,5 @@
+use std::{ops::Deref, borrow::Borrow};
+
 use crate::syntax::{RuntimeType, NonVoidType, Expression};
 
 pub trait Typeable {
@@ -30,9 +32,9 @@ pub trait Typeable {
     }
 }
 
-impl Typeable for &NonVoidType {
+impl<B: Borrow<NonVoidType>> Typeable for B {
     fn type_of(&self) -> RuntimeType {
-        match self {
+        match self.borrow() {
             NonVoidType::UIntType => RuntimeType::UIntRuntimeType,
             NonVoidType::IntType => RuntimeType::IntRuntimeType,
             NonVoidType::FloatType => RuntimeType::FloatRuntimeType,

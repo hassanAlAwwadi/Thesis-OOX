@@ -122,7 +122,5 @@ fn substitute(
             formula,
             type_,
         } => todo!(),
-    };
-
-    todo!()
+    }
 }

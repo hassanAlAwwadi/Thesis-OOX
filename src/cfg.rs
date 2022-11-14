@@ -12,7 +12,7 @@ pub enum CFGStatement {
     FunctionExit(String),
 }
 
-fn labelled_statements(
+pub fn labelled_statements(
     compilation_unit: CompilationUnit,
     i: &mut u64,
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {

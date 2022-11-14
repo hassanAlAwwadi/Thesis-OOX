@@ -10,6 +10,26 @@ pub struct CompilationUnit {
     pub members: Vec<Declaration>,
 }
 
+impl CompilationUnit {
+    pub fn find_declaration(&self, identifier: &Identifier) -> Option<DeclarationMember> {
+        for member in &self.members {
+            let Declaration::Class {members, ..} = member;
+            for declaration_member in  members {
+                match declaration_member {
+                    DeclarationMember::Constructor { name, .. } if identifier == name => {
+                        return Some(declaration_member.clone());
+                    },
+                    DeclarationMember::Method { name, .. } if identifier == name =>  {
+                        return Some(declaration_member.clone());
+                    },
+                    _ => ()
+                }
+            }
+        }
+        None
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Declaration {
     Class {
