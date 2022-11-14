@@ -8,8 +8,8 @@ use crate::{
     eval::{self, evaluate},
     stack::StackFrame,
     syntax::{
-        BinOp, Expression, Identifier, Lhs, Lit, NonVoidType, Reference, Rhs, RuntimeType,
-        Statement, UnOp,
+        BinOp, DeclarationMember, Expression, Identifier, Lhs, Lit, NonVoidType, Parameter,
+        Reference, Rhs, RuntimeType, Statement, UnOp, Invocation,
     },
     typeable::Typeable,
 };
@@ -104,7 +104,7 @@ fn action(
 
     match action {
         CFGStatement::Statement(Statement::Declare { type_, var }) => {
-            let StackFrame { pc, t, params, .. } = stack.first_mut().unwrap();
+            let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
             params.insert(var.clone(), default(type_));
 
             branch()
@@ -141,7 +141,7 @@ fn action(
         }
         CFGStatement::Statement(Statement::Return { expression }) => {
             if let Some(expression) = expression {
-                let StackFrame { pc, t, params, .. } = stack.first_mut().unwrap();
+                let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
                 params.insert("retval".to_string(), expression.clone());
             }
             branch()
@@ -149,7 +149,7 @@ fn action(
         CFGStatement::FunctionEntry(_name) => {
             // only check preconditions when it's the first method called??
             // we assume that the previous stackframe is of this method
-            let StackFrame { current_member, .. } = stack.first().unwrap();
+            let StackFrame { current_member, .. } = stack.last().unwrap();
             if let Some(requires) = current_member.requires() {
                 exec_assert(constraints, requires, heap, stack, alias_map, ref_counter);
                 // more?
@@ -157,24 +157,93 @@ fn action(
             branch()
         }
         CFGStatement::FunctionExit(_name) => {
-            let StackFrame { current_member, params, .. } = stack.first().unwrap();
+            let StackFrame {
+                current_member,
+                params,
+                ..
+            } = stack.last().unwrap();
             if let Some(post_condition) = current_member.post_condition() {
-                exec_assert(constraints, post_condition, heap, stack, alias_map, ref_counter);
+                exec_assert(
+                    constraints,
+                    post_condition,
+                    heap,
+                    stack,
+                    alias_map,
+                    ref_counter,
+                );
                 // some if true then unfeasible/invalid or something?
             }
-            
             if stack.len() == 1 {
                 return branch();
                 // we are pbobably done now
             } else {
-                
+                let StackFrame { pc, t, params, .. } = stack.pop().unwrap();
+                if let Some(lhs) = t {
+                    let retval = params.get(&retval()).unwrap();
+                    // perhaps also write retval to current stack?
+                    // will need to do this due to this case: `return o.func();`
+
+                    execute_assign(heap, stack, alias_map, ref_counter, &lhs, &retval);
+                }
+            }
+            branch()
+        }
+        CFGStatement::Statement(Statement::Call { invocation }) => {
+            let (declaration, member) = invocation.resolved().unwrap(); // i don't get this
+
+            match member { // ??
+                DeclarationMember::Method {
+                    is_static: true,
+                    return_type,
+                    name,
+                    params,
+                    specification,
+                    body,
+                } => exec_invocation(invocation, None, *pc),
+                DeclarationMember::Method {
+                    is_static: false,
+                    return_type,
+                    name,
+                    params,
+                    specification,
+                    body,
+                } => todo!(),
+                DeclarationMember::Constructor {
+                    name,
+                    params,
+                    specification,
+                    body,
+                } => todo!(),
+                DeclarationMember::Field { type_, name } => todo!(),
             }
 
-            branch()
+            
         }
         _ => todo!(),
     }
     todo!()
+}
+
+fn exec_invocation(stack: &mut Vec<StackFrame>, invocation: &Invocation, return_point: u64, member: DeclarationMember, lhs_return: Option<Lhs>) {
+    match invocation {
+        Invocation::InvokeMethod { lhs, rhs, arguments, resolved } => 
+        exec_static_method(&mut stack, *pc, member.clone(), lhs),
+        Invocation::InvokeConstructor { class_name, arguments, resolved } => todo!(),
+    }
+    
+}
+
+fn exec_static_method(stack: &mut Vec<StackFrame>, return_point: u64, member: DeclarationMember, lhs: Option<Lhs>, arguments: &[Expression], parameters: &[Parameter]) {
+    push_stack_frame(stack, return_point, member, lhs, parameters.iter().zip(arguments.iter()))
+}
+
+fn push_stack_frame<'a, P>(stack: &mut Vec<StackFrame>, return_point: u64, member: DeclarationMember, lhs: Option<Lhs>, params: P)
+where
+    P: Iterator<Item = (&'a Parameter, &'a Expression)>,
+{
+    let params = params.map(|(p, e)| (p.name.clone(), e.clone())).collect();
+    let stack_frame = StackFrame { pc: return_point, t: lhs, params, current_member: member };
+    stack.push(stack_frame);
 }
 
 fn exec_assert(
@@ -360,7 +429,7 @@ fn execute_assign(
 ) {
     match lhs {
         Lhs::LhsVar { var, type_ } => {
-            let StackFrame { pc, t, params, .. } = stack.first_mut().unwrap();
+            let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
             params.insert(var.clone(), e.clone());
         }
         Lhs::LhsField {
@@ -369,7 +438,7 @@ fn execute_assign(
             field,
             type_,
         } => {
-            let StackFrame { pc, t, params, .. } = stack.first_mut().unwrap();
+            let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
             let o = params
                 .get(var)
                 .unwrap_or_else(|| panic!("infeasible, object does not exit"));
@@ -389,7 +458,7 @@ fn execute_assign(
             todo!()
         }
         Lhs::LhsElem { var, index, type_ } => {
-            let StackFrame { pc, t, params, .. } = stack.first_mut().unwrap();
+            let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
             let ref_ = params
                 .get(var)
                 .unwrap_or_else(|| panic!("infeasible, array does not exit"));
@@ -446,7 +515,7 @@ fn exec_rhs_field(
     field: &Identifier,
     type_: &RuntimeType,
 ) -> Expression {
-    let StackFrame { pc, t, params, .. } = stack.first_mut().unwrap();
+    let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
     match var {
         Expression::Conditional {
             guard,

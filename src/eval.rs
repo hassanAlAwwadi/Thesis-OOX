@@ -53,7 +53,7 @@ fn substitute(
             }
         }
         Expression::Var { var, type_ } => {
-            let StackFrame { pc, t, params, .. } = stack.first().unwrap();
+            let StackFrame { pc, t, params, .. } = stack.last().unwrap();
             let o = params
                 .get(var)
                 .unwrap_or_else(|| panic!("infeasible, object does not exit"));

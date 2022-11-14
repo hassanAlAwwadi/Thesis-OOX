@@ -43,15 +43,9 @@ pub enum DeclarationMember {
 impl DeclarationMember {
     fn specification(&self) -> Option<&Specification> {
         match &self {
-            DeclarationMember::Constructor { specification, .. } => {
-                Some(specification)
-            },
-            DeclarationMember::Method {  specification, .. } => {
-                Some(specification)
-            },
-            DeclarationMember::Field { .. } => {
-                None
-            },
+            DeclarationMember::Constructor { specification, .. } => Some(specification),
+            DeclarationMember::Method { specification, .. } => Some(specification),
+            DeclarationMember::Field { .. } => None,
         }
     }
 
@@ -140,6 +134,15 @@ pub enum Invocation {
         arguments: Vec<Expression>,
         resolved: Option<Box<(Declaration, DeclarationMember)>>, // What is this?
     },
+}
+
+impl Invocation {
+    pub fn resolved(&self) -> Option<&(Declaration, DeclarationMember)> {
+        match &self {
+            Invocation::InvokeMethod { resolved, .. } => resolved.as_ref().map(Box::as_ref),
+            Invocation::InvokeConstructor { resolved, .. } => resolved.as_ref().map(Box::as_ref),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -282,9 +285,7 @@ pub enum Lit {
     NullLit,
 }
 
-impl Eq for Lit {
-
-}
+impl Eq for Lit {}
 
 #[derive(Debug, Clone)]
 pub struct Type {
