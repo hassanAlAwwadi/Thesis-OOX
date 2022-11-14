@@ -8,8 +8,8 @@ use crate::{
     eval::{self, evaluate},
     stack::StackFrame,
     syntax::{
-        BinOp, DeclarationMember, Expression, Identifier, Lhs, Lit, NonVoidType, Parameter,
-        Reference, Rhs, RuntimeType, Statement, UnOp, Invocation,
+        BinOp, DeclarationMember, Expression, Identifier, Invocation, Lhs, Lit, NonVoidType,
+        Parameter, Reference, Rhs, RuntimeType, Statement, UnOp,
     },
     typeable::Typeable,
 };
@@ -191,7 +191,8 @@ fn action(
         CFGStatement::Statement(Statement::Call { invocation }) => {
             let (declaration, member) = invocation.resolved().unwrap(); // i don't get this
 
-            match member { // ??
+            match member {
+                // ??
                 DeclarationMember::Method {
                     is_static: true,
                     return_type,
@@ -199,7 +200,13 @@ fn action(
                     params,
                     specification,
                     body,
-                } => exec_invocation(invocation, None, *pc),
+                } => {
+                    let arguments = invocation.arguments();
+                    exec_static_method(stack, *pc, member.clone(), None, arguments, params);
+                    let next_entry = find_entry_for_static_invocation(invocation.identifier(), program);
+
+                    step(next_entry);
+                }
                 DeclarationMember::Method {
                     is_static: false,
                     return_type,
@@ -216,33 +223,60 @@ fn action(
                 } => todo!(),
                 DeclarationMember::Field { type_, name } => todo!(),
             }
-
-            
         }
         _ => todo!(),
     }
     todo!()
 }
 
-fn exec_invocation(stack: &mut Vec<StackFrame>, invocation: &Invocation, return_point: u64, member: DeclarationMember, lhs_return: Option<Lhs>) {
-    match invocation {
-        Invocation::InvokeMethod { lhs, rhs, arguments, resolved } => 
-        exec_static_method(&mut stack, *pc, member.clone(), lhs),
-        Invocation::InvokeConstructor { class_name, arguments, resolved } => todo!(),
-    }
+fn find_entry_for_static_invocation(invocation: &Identifier, program: &HashMap<u64, CFGStatement>) -> u64 {
+    let (entry, _) = program.iter().find(|(k, v)| **v == CFGStatement::FunctionEntry(invocation.to_string())).unwrap();
     
+    *entry
 }
 
-fn exec_static_method(stack: &mut Vec<StackFrame>, return_point: u64, member: DeclarationMember, lhs: Option<Lhs>, arguments: &[Expression], parameters: &[Parameter]) {
-    push_stack_frame(stack, return_point, member, lhs, parameters.iter().zip(arguments.iter()))
+// fn exec_invocation(stack: &mut Vec<StackFrame>, invocation: &Invocation, return_point: u64, member: DeclarationMember, lhs_return: Option<Lhs>) {
+//     match invocation {
+//         Invocation::InvokeMethod { lhs, rhs, arguments, resolved } =>
+//         exec_static_method(&mut stack, *pc, member.clone(), lhs),
+//         Invocation::InvokeConstructor { class_name, arguments, resolved } => todo!(),
+//     }
+
+// }
+
+fn exec_static_method(
+    stack: &mut Vec<StackFrame>,
+    return_point: u64,
+    member: DeclarationMember,
+    lhs: Option<Lhs>,
+    arguments: &[Expression],
+    parameters: &[Parameter],
+) {
+    push_stack_frame(
+        stack,
+        return_point,
+        member,
+        lhs,
+        parameters.iter().zip(arguments.iter()),
+    )
 }
 
-fn push_stack_frame<'a, P>(stack: &mut Vec<StackFrame>, return_point: u64, member: DeclarationMember, lhs: Option<Lhs>, params: P)
-where
+fn push_stack_frame<'a, P>(
+    stack: &mut Vec<StackFrame>,
+    return_point: u64,
+    member: DeclarationMember,
+    lhs: Option<Lhs>,
+    params: P,
+) where
     P: Iterator<Item = (&'a Parameter, &'a Expression)>,
 {
     let params = params.map(|(p, e)| (p.name.clone(), e.clone())).collect();
-    let stack_frame = StackFrame { pc: return_point, t: lhs, params, current_member: member };
+    let stack_frame = StackFrame {
+        pc: return_point,
+        t: lhs,
+        params,
+        current_member: member,
+    };
     stack.push(stack_frame);
 }
 
@@ -563,3 +597,5 @@ fn false_lit() -> Expression {
 }
 
 fn branch() {}
+
+fn step(next_pc: u64) {}

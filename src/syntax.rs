@@ -10,7 +10,7 @@ pub struct CompilationUnit {
     pub members: Vec<Declaration>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Declaration {
     Class {
         name: Identifier,
@@ -18,13 +18,13 @@ pub enum Declaration {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeclarationMember {
     Constructor {
         name: Identifier,
         params: Vec<Parameter>,
         specification: Specification,
-        body: Statement,
+        body: Statement
     },
     Method {
         is_static: bool,
@@ -32,7 +32,7 @@ pub enum DeclarationMember {
         name: Identifier,
         params: Vec<Parameter>,
         specification: Specification,
-        body: Statement,
+        body: Statement
     },
     Field {
         type_: NonVoidType,
@@ -58,20 +58,20 @@ impl DeclarationMember {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parameter {
     pub type_: NonVoidType,
     pub name: Identifier,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Specification {
     pub requires: Option<Expression>,
     pub ensures: Option<Expression>,
     pub exceptional: Option<Expression>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     Declare {
         type_: NonVoidType,
@@ -121,7 +121,7 @@ pub enum Statement {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Invocation {
     InvokeMethod {
         lhs: Identifier,
@@ -143,9 +143,23 @@ impl Invocation {
             Invocation::InvokeConstructor { resolved, .. } => resolved.as_ref().map(Box::as_ref),
         }
     }
+
+    pub fn arguments(&self) -> &Vec<Expression> {
+        match &self {
+            Invocation::InvokeMethod { arguments, .. } => arguments.as_ref(),
+            Invocation::InvokeConstructor { arguments, .. } => arguments.as_ref(),
+        }
+    }
+
+    pub fn identifier(&self) -> &String {
+        match &self {
+            Invocation::InvokeMethod { rhs, .. } => rhs,
+            Invocation::InvokeConstructor { class_name, .. } => class_name,
+        }
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Lhs {
     LhsVar {
         var: Identifier,
@@ -164,7 +178,7 @@ pub enum Lhs {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rhs {
     RhsExpression {
         value: Expression,
@@ -287,12 +301,12 @@ pub enum Lit {
 
 impl Eq for Lit {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Type {
     pub type_: Option<NonVoidType>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NonVoidType {
     UIntType,
     IntType,

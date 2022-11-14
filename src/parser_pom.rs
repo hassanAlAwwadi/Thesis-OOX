@@ -756,6 +756,17 @@ fn forall() {
     dbg!(c);
     assert!(false);
 }
+#[test]
+fn absolute_simplest() {
+    let file_content = include_str!("../examples/absolute_simplest.oox");
+
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+    // dbg!(as_ref);
+    let c = (program() - end()).parse(&as_ref);
+    // dbg!(&c);
+    c.unwrap(); // should not panic;
+}
 
 // fn is_literal<'a>() -> Parser<'a, Token<'a>, Token<'a>> {
 // 	is_a(|t: Token<'a>| match t {
