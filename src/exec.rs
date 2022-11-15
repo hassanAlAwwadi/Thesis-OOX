@@ -14,7 +14,7 @@ use crate::{
         BinOp, DeclarationMember, Expression, Identifier, Invocation, Lhs, Lit, NonVoidType,
         Parameter, Reference, Rhs, RuntimeType, Statement, UnOp,
     },
-    typeable::Typeable, dsl::neg,
+    typeable::Typeable, dsl::neg, z3_checker,
 };
 
 fn retval() -> String {
@@ -168,7 +168,8 @@ fn action(
             } else if expression == false_lit() {
                 None
             } else {
-                dbg!("invoke Z3 with:", expression);
+                dbg!("invoke Z3 with:", &expression);
+                dbg!(&z3_checker::verify(&expression));
                 None
             }
         }
