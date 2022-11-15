@@ -1,0 +1,8 @@
+class Foo {
+
+    void min(int x, int y) {
+        int z := x;
+        if (y < x) { z := y; } else { ; }
+        assert ((z == x) || (z == y)) && (z <= x) && (z <= y);
+    }
+}

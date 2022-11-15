@@ -9,12 +9,12 @@ use crate::{
     eval::{self, evaluate},
     lexer::tokens,
     parser_pom::parse,
-    stack::StackFrame,
+    stack::{StackFrame, lookup_in_stack},
     syntax::{
         BinOp, DeclarationMember, Expression, Identifier, Invocation, Lhs, Lit, NonVoidType,
         Parameter, Reference, Rhs, RuntimeType, Statement, UnOp,
     },
-    typeable::Typeable,
+    typeable::Typeable, dsl::neg,
 };
 
 fn retval() -> String {
@@ -23,6 +23,7 @@ fn retval() -> String {
 
 pub type Heap = HashMap<Reference, HeapValue>;
 
+#[derive(Clone)]
 pub enum HeapValue {
     ObjectValue {
         fields: HashMap<Identifier, Expression>,
@@ -52,6 +53,7 @@ enum Output {
 }
 
 // perhaps separate program from this structure, such that we can have multiple references to it.
+#[derive(Clone)]
 struct State {
     pc: u64,
     program: HashMap<u64, CFGStatement>,
@@ -97,14 +99,20 @@ enum SymResult {
 fn sym_exec(state: &mut State, flows: &HashMap<u64, Vec<u64>>, k: u64) -> SymResult {
     let next = action(state, k);
 
-    if let Some(next) = next { // function call or return
+    dbg!(&state.pc);
+
+    if let Some(next) = next {
+        // function call or return
         state.pc = next;
         sym_exec(state, flows, k - 1);
     } else {
         if let Some(neighbours) = flows.get(&state.pc) {
+            dbg!(&neighbours);
             for neighbour_pc in neighbours {
-                state.pc = *neighbour_pc;
-                let result = sym_exec(state, flows, k - 1);
+                let mut new_state = state.clone();
+                new_state.pc = *neighbour_pc;
+
+                let result = sym_exec(&mut new_state, flows, k - 1);
                 if result != SymResult::Valid {
                     return result;
                 }
@@ -259,7 +267,8 @@ fn action(
                 DeclarationMember::Field { type_, name } => todo!(),
             }
         }
-        _ => todo!(),
+
+        _ => None,
     }
 }
 
@@ -328,19 +337,31 @@ fn exec_assert(
     alias_map: &mut AliasMap,
     ref_counter: &mut i64,
 ) -> Expression {
-    let expression = constraints.iter().fold(
-        Expression::UnOp {
-            un_op: UnOp::Negative,
-            value: Box::new(assertion.clone()),
-            type_: RuntimeType::BoolRuntimeType,
-        },
-        |x, b| Expression::BinOp {
+    let expression = if constraints.len() >= 1 {
+        let assumptions = constraints.iter().cloned().reduce(|x, y| Expression::BinOp {
             bin_op: BinOp::And,
             lhs: Box::new(x),
-            rhs: Box::new(b.clone()),
+            rhs: Box::new(y),
             type_: RuntimeType::BoolRuntimeType,
-        },
-    );
+        }).unwrap();
+
+        neg(Expression::BinOp { bin_op: BinOp::Implies, lhs: Box::new(assumptions), rhs: Box::new(assertion.clone()), type_: RuntimeType::BoolRuntimeType })
+    } else {
+        neg(assertion.clone())
+    }   ;
+    // let expression = constraints.iter().fold(
+    //     Expression::UnOp {
+    //         un_op: UnOp::Negative,
+    //         value: Box::new(assertion.clone()),
+    //         type_: RuntimeType::BoolRuntimeType,
+    //     },
+    //     |x, b| Expression::BinOp {
+    //         bin_op: BinOp::And,
+    //         lhs: Box::new(x),
+    //         rhs: Box::new(b.clone()),
+    //         type_: RuntimeType::BoolRuntimeType,
+    //     },
+    // );
     evaluate(heap, stack, alias_map, &expression, ref_counter)
 }
 
@@ -562,7 +583,12 @@ fn evaluateRhs(
 ) -> Expression {
     match rhs {
         Rhs::RhsExpression { value, type_ } => {
-            value.clone() // for now no simplification
+            match value {
+                Expression::Var { var, type_ } => {
+                    lookup_in_stack(var, stack).unwrap().clone()
+                },
+                _ => value.clone() // might have to expand on this when dealing with complex quantifying expressions and array
+            }
         }
         Rhs::RhsField { var, field, type_ } => {
             exec_rhs_field(heap, stack, alias_map, ref_counter, var, field, type_)
@@ -665,9 +691,20 @@ fn sym_exec_of_absolute_simplest() {
 
     let pc = find_entry_for_static_invocation(&"f".to_string(), &program);
 
-    if let DeclarationMember::Method {  params, .. } = &declaration_member_initial_function {
-        let params = params.iter().map(|p| (p.name.clone(), Expression::SymbolicVar { var: p.name.clone(), type_: p.type_.type_of() })).collect();
-        
+    if let DeclarationMember::Method { params, .. } = &declaration_member_initial_function {
+        let params = params
+            .iter()
+            .map(|p| {
+                (
+                    p.name.clone(),
+                    Expression::SymbolicVar {
+                        var: p.name.clone(),
+                        type_: p.type_.type_of(),
+                    },
+                )
+            })
+            .collect();
+
         let mut state = State {
             pc,
             program,
@@ -683,9 +720,78 @@ fn sym_exec_of_absolute_simplest() {
             alias_map: HashMap::new(),
             ref_counter: 0,
         };
-    
+
         assert_eq!(sym_exec(&mut state, &flows, 10), SymResult::Valid);
     } else {
         panic!()
     }
+}
+
+#[test]
+fn sym_exec_min() {
+    let file_content = include_str!("../examples/psv/min.oox");
+
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+
+    let c = parse(&tokens);
+    let c = c.unwrap();
+
+    // dbg!(&c);
+
+    let mut i = 0;
+    let declaration_member_initial_function = c.find_declaration(&"min".to_string()).unwrap();
+    let (result, flw) = labelled_statements(c, &mut i);
+
+    let program = result.into_iter().collect();
+    // dbg!(&program);
+    // dbg!(&flw);
+    
+    let flows: HashMap<u64, Vec<u64>> = flw
+        .iter()
+        .group_by(|x| x.0)
+        .into_iter()
+        .map(|(k, group)| (k, group.map(|(_, x)| *x).collect()))
+        .collect();
+
+    dbg!(&flows);
+    // dbg!(&program);
+
+    let pc = find_entry_for_static_invocation(&"min".to_string(), &program);
+
+    if let DeclarationMember::Method { params, .. } = &declaration_member_initial_function {
+        let params = params
+            .iter()
+            .map(|p| {
+                (
+                    p.name.clone(),
+                    Expression::SymbolicVar {
+                        var: p.name.clone(),
+                        type_: p.type_.type_of(),
+                    },
+                )
+            })
+            .collect();
+
+        let mut state = State {
+            pc,
+            program,
+            stack: vec![StackFrame {
+                pc,
+                t: None,
+                params,
+                current_member: declaration_member_initial_function,
+            }],
+            heap: HashMap::new(),
+            precondition: true_lit(),
+            constraints: HashSet::new(),
+            alias_map: HashMap::new(),
+            ref_counter: 0,
+        };
+
+        assert_eq!(sym_exec(&mut state, &flows, 10), SymResult::Valid);
+    } else {
+        panic!()
+    }
+    panic!()
 }

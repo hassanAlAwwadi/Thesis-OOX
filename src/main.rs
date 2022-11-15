@@ -12,6 +12,8 @@ mod exec;
 mod typeable;
 mod eval;
 
+mod dsl;
+
 #[macro_use]
 extern crate pest_derive;
 

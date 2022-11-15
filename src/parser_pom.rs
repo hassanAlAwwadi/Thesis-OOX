@@ -4,6 +4,7 @@ use pom::parser::*;
 
 use std::str::{self, FromStr};
 
+use crate::dsl::neg;
 use crate::syntax::*;
 
 use crate::lexer::*;
@@ -108,20 +109,16 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     let assume = (keyword("assume") * verification_expression() - punct(";"))
         .map(|assumption| Statement::Assume { assumption });
 
-    let while_ = (keyword("while") * punct("(") * expression() - punct(")") + (punct("{") * call(statement) - punct("}"))).map(
-        |(guard, body)| Statement::While {
-            guard,
-            body: Box::new(body),
-        },
-    );
+    let while_ = (keyword("while") * punct("(") * expression() - punct(")")
+        + (punct("{") * call(statement) - punct("}")))
+    .map(|(guard, body)| Statement::While {
+        guard,
+        body: Box::new(body),
+    });
     let ite = (keyword("if") * punct("(") * expression() - punct(")")
         + ((punct("{") * call(statement) - punct("}")) | call(statement))
-        + (keyword("else") * call(statement)).opt())
-    .map(|((guard, true_body), false_body)| Statement::Ite {
-        guard,
-        true_body: Box::new(true_body),
-        false_body: Box::new(false_body.unwrap_or(Statement::Skip)),
-    });
+        + (keyword("else") * (punct("{") * call(statement) - punct("}"))).opt())
+    .map(|((guard, true_body), false_body)| create_ite(guard, true_body, false_body));
     let continue_ = (keyword("continue") * punct(";")).map(|_| Statement::Continue);
     let break_ = (keyword("break") * punct(";")).map(|_| Statement::Break);
     let return_ = (keyword("return") * expression().opt() - punct(";"))
@@ -141,7 +138,6 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         //     body: Box::new(body),
         // });
         .map(|body| body);
-
 
     // lock, fork & join are left out
     let p_statement = declaration
@@ -176,6 +172,18 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         }
         return stmt;
     })
+}
+
+fn create_ite(guard: Expression, true_body: Statement, false_body: Option<Statement>) -> Statement {
+    Statement::Ite {
+        guard: guard.clone(),
+        true_body: Box::new(Statement::Seq {stat1: Box::new(Statement::Assume { assumption: guard.clone() }), stat2: Box::new(true_body)}),
+        false_body: if let Some(false_body) = false_body {
+            Box::new(Statement::Seq {stat1: Box::new(Statement::Assume { assumption: neg(guard.clone()) }), stat2: Box::new(false_body)})
+        } else {
+            Box::new(Statement::Skip)
+        },
+    }
 }
 
 fn expression1<'a>() -> Parser<'a, Token<'a>, Expression> {
@@ -393,28 +401,6 @@ fn expression6<'a>() -> Parser<'a, Token<'a>, Expression> {
 }
 
 fn expression7<'a>() -> Parser<'a, Token<'a>, Expression> {
-    // let multiply =
-    //     (expression8() + punct("*") * call(expression7)).map(|(lhs, rhs)| Expression::BinOp {
-    //         bin_op: BinOp::Multiply,
-    //         lhs: Box::new(lhs),
-    //         rhs: Box::new(rhs),
-    //         type_: RuntimeType::UnknownRuntimeType,
-    //     });
-    // let divide =
-    //     (expression8() + punct("/") * call(expression7)).map(|(lhs, rhs)| Expression::BinOp {
-    //         bin_op: BinOp::Divide,
-    //         lhs: Box::new(lhs),
-    //         rhs: Box::new(rhs),
-    //         type_: RuntimeType::UnknownRuntimeType,
-    //     });
-    // let modulo =
-    //     (expression8() + punct("%") * call(expression7)).map(|(lhs, rhs)| Expression::BinOp {
-    //         bin_op: BinOp::Modulo,
-    //         lhs: Box::new(lhs),
-    //         rhs: Box::new(rhs),
-    //         type_: RuntimeType::UnknownRuntimeType,
-    //     });
-
     let multiply = punct("*").map(|_| BinOp::Multiply);
     let divide = punct("/").map(|_| BinOp::Divide);
     let modulo = punct("%").map(|_| BinOp::Modulo);
@@ -607,7 +593,9 @@ fn literal<'a>() -> Parser<'a, Token<'a>, Expression> {
                         if let Ok(int_value) = i64::from_str(s) {
                             Lit::IntLit { int_value }
                         } else if let Ok(float_value) = f64::from_str(s) {
-                            Lit::FloatLit { float_value: NotNan::new(float_value).unwrap() }
+                            Lit::FloatLit {
+                                float_value: NotNan::new(float_value).unwrap(),
+                            }
                         } else {
                             unreachable!()
                         }

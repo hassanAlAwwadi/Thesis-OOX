@@ -192,7 +192,7 @@ fn fallthrough(
         CFGStatement::Seq(l1, l2) => {
             let s1 = lookup(*l1, all_smts);
             let s2 = lookup(*l2, all_smts);
-            // if let 
+            // if let
             let final_s1 = fallthrough(&(*l1, s1), all_smts);
             let mut final_s2 = fallthrough(&(*l2, s2), all_smts);
 
@@ -252,6 +252,8 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
             let mut final_s1 = r#final(&(*s1, lookup(*s1, all_smts)), all_smts);
             let mut final_s2 = r#final(&(*s2, lookup(*s2, all_smts)), all_smts);
             final_s1.append(&mut final_s2);
+
+            dbg!(s1, s2, &final_s1);
             final_s1
         }
         CFGStatement::Seq(l1, l2) => {
@@ -512,6 +514,30 @@ fn cfg_for_simpleclass4() {
         (0, 2),
         (40, 41),
     ];
+
+    assert_eq!(expected, flw);
+}
+
+#[test]
+fn cfg_for_min() {
+    let file_content = include_str!("../examples/psv/min.oox");
+
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+
+    let c = parse(&tokens);
+    let c = c.unwrap();
+
+    // dbg!(&c);
+
+    let mut i = 0;
+    let (result, flw) = labelled_statements(c, &mut i);
+
+    // dbg!(&result);
+
+    // dbg!(&flw);
+    let expected = vec![(10, 12), (14, 16), (8, 10), (8, 14), (12, 18), (16, 18), (5, 8), (2, 5), (0, 2), (18, 19)];
+
 
     assert_eq!(expected, flw);
 }
