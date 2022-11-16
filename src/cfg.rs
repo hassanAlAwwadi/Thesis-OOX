@@ -356,6 +356,8 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
     }
 }
 
+
+
 #[test]
 fn cfg_for_simpleclass() {
     let file_content = include_str!("../examples/simpleclass.oox");
@@ -536,8 +538,18 @@ fn cfg_for_min() {
     // dbg!(&result);
 
     // dbg!(&flw);
-    let expected = vec![(10, 12), (14, 16), (8, 10), (8, 14), (12, 18), (16, 18), (5, 8), (2, 5), (0, 2), (18, 19)];
-
+    let expected = vec![
+        (10, 12),
+        (14, 16),
+        (8, 10),
+        (8, 14),
+        (12, 18),
+        (16, 18),
+        (5, 8),
+        (2, 5),
+        (0, 2),
+        (18, 19),
+    ];
 
     assert_eq!(expected, flw);
 }

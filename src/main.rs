@@ -17,6 +17,8 @@ mod eval;
 mod dsl;
 mod z3_checker;
 
+mod resolver;
+
 #[macro_use]
 extern crate pest_derive;
 

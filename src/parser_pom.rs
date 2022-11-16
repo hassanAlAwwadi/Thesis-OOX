@@ -5,12 +5,16 @@ use pom::parser::*;
 use std::str::{self, FromStr};
 
 use crate::dsl::neg;
+use crate::resolver;
 use crate::syntax::*;
 
 use crate::lexer::*;
 
 pub fn parse<'a>(tokens: &[Token<'a>]) -> Result<CompilationUnit, pom::Error> {
-    (program() - end()).parse(tokens)
+    (program() - end()).parse(tokens).map(|mut c| {
+        resolver::set_resolvers(&mut c); // set the resolvers in Invocations
+        c
+    })
 }
 
 fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit> {
@@ -177,9 +181,19 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
 fn create_ite(guard: Expression, true_body: Statement, false_body: Option<Statement>) -> Statement {
     Statement::Ite {
         guard: guard.clone(),
-        true_body: Box::new(Statement::Seq {stat1: Box::new(Statement::Assume { assumption: guard.clone() }), stat2: Box::new(true_body)}),
+        true_body: Box::new(Statement::Seq {
+            stat1: Box::new(Statement::Assume {
+                assumption: guard.clone(),
+            }),
+            stat2: Box::new(true_body),
+        }),
         false_body: if let Some(false_body) = false_body {
-            Box::new(Statement::Seq {stat1: Box::new(Statement::Assume { assumption: neg(guard.clone()) }), stat2: Box::new(false_body)})
+            Box::new(Statement::Seq {
+                stat1: Box::new(Statement::Assume {
+                    assumption: neg(guard.clone()),
+                }),
+                stat2: Box::new(false_body),
+            })
         } else {
             Box::new(Statement::Skip)
         },

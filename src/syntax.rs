@@ -11,7 +11,7 @@ pub struct CompilationUnit {
 }
 
 impl CompilationUnit {
-    pub fn find_declaration(&self, identifier: &Identifier) -> Option<DeclarationMember> {
+    pub fn find_declaration(&self, identifier: &str) -> Option<DeclarationMember> {
         for member in &self.members {
             let Declaration::Class {members, ..} = member;
             for declaration_member in  members {

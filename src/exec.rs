@@ -3,18 +3,21 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use ordered_float::NotNan;
+use z3::SatResult;
 
 use crate::{
     cfg::{labelled_statements, CFGStatement},
+    dsl::neg,
     eval::{self, evaluate},
     lexer::tokens,
     parser_pom::parse,
-    stack::{StackFrame, lookup_in_stack},
+    stack::{lookup_in_stack, StackFrame},
     syntax::{
         BinOp, DeclarationMember, Expression, Identifier, Invocation, Lhs, Lit, NonVoidType,
         Parameter, Reference, Rhs, RuntimeType, Statement, UnOp,
     },
-    typeable::Typeable, dsl::neg, z3_checker,
+    typeable::Typeable,
+    z3_checker,
 };
 
 fn retval() -> String {
@@ -101,32 +104,54 @@ fn sym_exec(state: &mut State, flows: &HashMap<u64, Vec<u64>>, k: u64) -> SymRes
 
     dbg!(&state.pc);
 
-    if let Some(next) = next {
-        // function call or return
-        state.pc = next;
-        sym_exec(state, flows, k - 1);
-    } else {
-        if let Some(neighbours) = flows.get(&state.pc) {
-            dbg!(&neighbours);
-            for neighbour_pc in neighbours {
-                let mut new_state = state.clone();
-                new_state.pc = *neighbour_pc;
-
-                let result = sym_exec(&mut new_state, flows, k - 1);
-                if result != SymResult::Valid {
-                    return result;
+    match next {
+        ActionResult::FunctionCall(next)=> {
+            // function call or return
+            state.pc = next;
+            sym_exec(state, flows, k - 1);
+        }, 
+        ActionResult::Return(return_pc) => {
+            if let Some(neighbours) = flows.get(&return_pc) {
+                for neighbour_pc in neighbours {
+                    let mut new_state = state.clone();
+                    new_state.pc = *neighbour_pc;
+    
+                    let result = sym_exec(&mut new_state, flows, k - 1);
+                    if result != SymResult::Valid {
+                        return result;
+                    }
+                }
+            } else { panic!("function pc does not exist"); }
+        },
+        ActionResult::Continue => {
+            if let Some(neighbours) = flows.get(&state.pc) {
+                dbg!(&neighbours);
+                for neighbour_pc in neighbours {
+                    let mut new_state = state.clone();
+                    new_state.pc = *neighbour_pc;
+    
+                    let result = sym_exec(&mut new_state, flows, k - 1);
+                    if result != SymResult::Valid {
+                        return result;
+                    }
+                }
+            } else {
+                // Function exit of the main function under verification
+                if let CFGStatement::FunctionExit(_) = state.program[&state.pc] {
+                    return SymResult::Valid;
+                } else {
+                    return SymResult::Invalid;
                 }
             }
-        } else {
-            // Function exit of the main function under verification
-            if let CFGStatement::FunctionExit(_) = state.program[&state.pc] {
-                return SymResult::Valid;
-            } else {
-                return SymResult::Invalid;
-            }
         }
-    }
+    };
     SymResult::Valid
+}
+
+enum ActionResult {
+    Continue,
+    Return(u64),
+    FunctionCall(u64),
 }
 
 fn action(
@@ -141,7 +166,7 @@ fn action(
         ref_counter,
     }: &mut State,
     k: u64,
-) -> Option<u64> {
+) -> ActionResult {
     let action = &program[&pc];
 
     match action {
@@ -149,16 +174,16 @@ fn action(
             let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
             params.insert(var.clone(), default(type_));
 
-            None
+            ActionResult::Continue
         }
         CFGStatement::Statement(Statement::Assign { lhs, rhs }) => {
-            if let Rhs::RhsCall { .. } = rhs {
-                return None;
+            if let Rhs::RhsCall { invocation, type_ } = rhs {
+                return exec_invocation(invocation, stack, &program, *pc, Some(lhs.clone()));
             }
             let value = evaluateRhs(heap, stack, alias_map, ref_counter, rhs);
             execute_assign(heap, stack, alias_map, ref_counter, lhs, &value);
 
-            None
+            ActionResult::Continue
         }
         CFGStatement::Statement(Statement::Assert { assertion }) => {
             let expression =
@@ -166,11 +191,16 @@ fn action(
             if expression == true_lit() {
                 panic!("invalid");
             } else if expression == false_lit() {
-                None
+                ActionResult::Continue
             } else {
                 dbg!("invoke Z3 with:", &expression);
-                dbg!(&z3_checker::verify(&expression));
-                None
+                let result = z3_checker::verify(&expression);
+                if let SatResult::Unsat = result {
+                } else {
+                    panic!("invalid")
+                }
+
+                ActionResult::Continue
             }
         }
         CFGStatement::Statement(Statement::Assume { assumption }) => {
@@ -180,14 +210,14 @@ fn action(
             } else if expression != true_lit() {
                 constraints.insert(expression);
             }
-            None
+            ActionResult::Continue
         }
         CFGStatement::Statement(Statement::Return { expression }) => {
             if let Some(expression) = expression {
                 let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
                 params.insert("retval".to_string(), expression.clone());
             }
-            None
+            ActionResult::Continue
         }
         CFGStatement::FunctionEntry(_name) => {
             // only check preconditions when it's the first method called??
@@ -197,7 +227,7 @@ fn action(
                 exec_assert(constraints, requires, heap, stack, alias_map, ref_counter);
                 // more?
             }
-            None
+            ActionResult::Continue
         }
         CFGStatement::FunctionExit(_name) => {
             let StackFrame {
@@ -217,7 +247,7 @@ fn action(
                 // some if true then unfeasible/invalid or something?
             }
             if stack.len() == 1 {
-                None
+                ActionResult::Continue
                 // we are pbobably done now
             } else {
                 let StackFrame { pc, t, params, .. } = stack.pop().unwrap();
@@ -228,55 +258,61 @@ fn action(
 
                     execute_assign(heap, stack, alias_map, ref_counter, &lhs, &retval);
                 }
-                Some(pc)
+                ActionResult::Return(pc)
             }
         }
         CFGStatement::Statement(Statement::Call { invocation }) => {
-            let (declaration, member) = invocation.resolved().unwrap(); // i don't get this
-
-            match member {
-                // ??
-                DeclarationMember::Method {
-                    is_static: true,
-                    return_type,
-                    name,
-                    params,
-                    specification,
-                    body,
-                } => {
-                    let arguments = invocation.arguments();
-                    exec_static_method(stack, *pc, member.clone(), None, arguments, params);
-                    let next_entry =
-                        find_entry_for_static_invocation(invocation.identifier(), program);
-
-                    Some(next_entry)
-                }
-                DeclarationMember::Method {
-                    is_static: false,
-                    return_type,
-                    name,
-                    params,
-                    specification,
-                    body,
-                } => todo!(),
-                DeclarationMember::Constructor {
-                    name,
-                    params,
-                    specification,
-                    body,
-                } => todo!(),
-                DeclarationMember::Field { type_, name } => todo!(),
-            }
+            exec_invocation(invocation, stack, &program, *pc, None)
         }
 
-        _ => None,
+        _ => ActionResult::Continue,
     }
 }
 
-fn find_entry_for_static_invocation(
-    invocation: &Identifier,
+fn exec_invocation(
+    invocation: &Invocation,
+    stack: &mut Vec<StackFrame>,
     program: &HashMap<u64, CFGStatement>,
-) -> u64 {
+    return_point: u64,
+    lhs: Option<Lhs>,
+) -> ActionResult {
+    let (declaration, member) = invocation.resolved().unwrap(); // i don't get this
+
+    match member {
+        // ??
+        DeclarationMember::Method {
+            is_static: true,
+            return_type,
+            name,
+            params,
+            specification,
+            body,
+        } => {
+            let arguments = invocation.arguments();
+            exec_static_method(stack, return_point, member.clone(), lhs, arguments, params);
+            let next_entry = find_entry_for_static_invocation(invocation.identifier(), program);
+
+            ActionResult::FunctionCall(next_entry)
+        }
+        DeclarationMember::Method {
+            is_static: false,
+            return_type,
+            name,
+            params,
+            specification,
+            body,
+        } => todo!(),
+        DeclarationMember::Constructor {
+            name,
+            params,
+            specification,
+            body,
+        } => todo!(),
+        DeclarationMember::Field { type_, name } => todo!(),
+    }
+}
+
+fn find_entry_for_static_invocation(invocation: &str, program: &HashMap<u64, CFGStatement>) -> u64 {
     let (entry, _) = program
         .iter()
         .find(|(k, v)| **v == CFGStatement::FunctionEntry(invocation.to_string()))
@@ -339,17 +375,26 @@ fn exec_assert(
     ref_counter: &mut i64,
 ) -> Expression {
     let expression = if constraints.len() >= 1 {
-        let assumptions = constraints.iter().cloned().reduce(|x, y| Expression::BinOp {
-            bin_op: BinOp::And,
-            lhs: Box::new(x),
-            rhs: Box::new(y),
-            type_: RuntimeType::BoolRuntimeType,
-        }).unwrap();
+        let assumptions = constraints
+            .iter()
+            .cloned()
+            .reduce(|x, y| Expression::BinOp {
+                bin_op: BinOp::And,
+                lhs: Box::new(x),
+                rhs: Box::new(y),
+                type_: RuntimeType::BoolRuntimeType,
+            })
+            .unwrap();
 
-        neg(Expression::BinOp { bin_op: BinOp::Implies, lhs: Box::new(assumptions), rhs: Box::new(assertion.clone()), type_: RuntimeType::BoolRuntimeType })
+        neg(Expression::BinOp {
+            bin_op: BinOp::Implies,
+            lhs: Box::new(assumptions),
+            rhs: Box::new(assertion.clone()),
+            type_: RuntimeType::BoolRuntimeType,
+        })
     } else {
         neg(assertion.clone())
-    }   ;
+    };
     // let expression = constraints.iter().fold(
     //     Expression::UnOp {
     //         un_op: UnOp::Negative,
@@ -363,7 +408,10 @@ fn exec_assert(
     //         type_: RuntimeType::BoolRuntimeType,
     //     },
     // );
-    evaluate(heap, stack, alias_map, &expression, ref_counter)
+    dbg!(&expression);
+    let z = evaluate(heap, stack, alias_map, &expression, ref_counter);
+    dbg!(&z);
+    z
 }
 
 fn read_field_concrete_ref(heap: &mut Heap, ref_: i64, field: &Identifier) -> Expression {
@@ -585,10 +633,8 @@ fn evaluateRhs(
     match rhs {
         Rhs::RhsExpression { value, type_ } => {
             match value {
-                Expression::Var { var, type_ } => {
-                    lookup_in_stack(var, stack).unwrap().clone()
-                },
-                _ => value.clone() // might have to expand on this when dealing with complex quantifying expressions and array
+                Expression::Var { var, type_ } => lookup_in_stack(var, stack).unwrap().clone(),
+                _ => value.clone(), // might have to expand on this when dealing with complex quantifying expressions and array
             }
         }
         Rhs::RhsField { var, field, type_ } => {
@@ -663,20 +709,17 @@ fn false_lit() -> Expression {
     }
 }
 
-#[test]
-fn sym_exec_of_absolute_simplest() {
-    let file_content = include_str!("../examples/absolute_simplest.oox");
-
+fn verify_file(file_content: &str, method: &str) -> SymResult {
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
 
     let c = parse(&tokens);
     let c = c.unwrap();
 
-    // dbg!(&c);
+    dbg!(&c);
 
     let mut i = 0;
-    let declaration_member_initial_function = c.find_declaration(&"f".to_string()).unwrap();
+    let declaration_member_initial_function = c.find_declaration(method).unwrap();
     let (result, flw) = labelled_statements(c, &mut i);
 
     let program = result.into_iter().collect();
@@ -690,7 +733,7 @@ fn sym_exec_of_absolute_simplest() {
     dbg!(&flows);
     // dbg!(&program);
 
-    let pc = find_entry_for_static_invocation(&"f".to_string(), &program);
+    let pc = find_entry_for_static_invocation(method, &program);
 
     if let DeclarationMember::Method { params, .. } = &declaration_member_initial_function {
         let params = params
@@ -722,77 +765,26 @@ fn sym_exec_of_absolute_simplest() {
             ref_counter: 0,
         };
 
-        assert_eq!(sym_exec(&mut state, &flows, 10), SymResult::Valid);
+        return sym_exec(&mut state, &flows, 20);
     } else {
         panic!()
     }
 }
 
 #[test]
+fn sym_exec_of_absolute_simplest() {
+    let file_content = include_str!("../examples/absolute_simplest.oox");
+    assert_eq!(verify_file(file_content, "f"), SymResult::Valid);
+}
+
+#[test]
 fn sym_exec_min() {
     let file_content = include_str!("../examples/psv/min.oox");
+    assert_eq!(verify_file(file_content, "min"), SymResult::Valid);
+}
 
-    let tokens = tokens(file_content);
-    let as_ref = tokens.as_slice();
-
-    let c = parse(&tokens);
-    let c = c.unwrap();
-
-    // dbg!(&c);
-
-    let mut i = 0;
-    let declaration_member_initial_function = c.find_declaration(&"min".to_string()).unwrap();
-    let (result, flw) = labelled_statements(c, &mut i);
-
-    let program = result.into_iter().collect();
-    // dbg!(&program);
-    // dbg!(&flw);
-    
-    let flows: HashMap<u64, Vec<u64>> = flw
-        .iter()
-        .group_by(|x| x.0)
-        .into_iter()
-        .map(|(k, group)| (k, group.map(|(_, x)| *x).collect()))
-        .collect();
-
-    dbg!(&flows);
-    // dbg!(&program);
-
-    let pc = find_entry_for_static_invocation(&"min".to_string(), &program);
-
-    if let DeclarationMember::Method { params, .. } = &declaration_member_initial_function {
-        let params = params
-            .iter()
-            .map(|p| {
-                (
-                    p.name.clone(),
-                    Expression::SymbolicVar {
-                        var: p.name.clone(),
-                        type_: p.type_.type_of(),
-                    },
-                )
-            })
-            .collect();
-
-        let mut state = State {
-            pc,
-            program,
-            stack: vec![StackFrame {
-                pc,
-                t: None,
-                params,
-                current_member: declaration_member_initial_function,
-            }],
-            heap: HashMap::new(),
-            precondition: true_lit(),
-            constraints: HashSet::new(),
-            alias_map: HashMap::new(),
-            ref_counter: 0,
-        };
-
-        assert_eq!(sym_exec(&mut state, &flows, 10), SymResult::Valid);
-    } else {
-        panic!()
-    }
-    panic!()
+#[test]
+fn sym_exec_method() {
+    let file_content = include_str!("../examples/psv/method.oox");
+    assert_eq!(verify_file(file_content, "min"), SymResult::Valid);
 }

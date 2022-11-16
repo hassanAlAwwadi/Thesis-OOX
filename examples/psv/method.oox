@@ -1,0 +1,13 @@
+class Main {
+
+    void min(int x, int y) {
+        int z := x;
+        if (y < x) { z := y; } else { ; }
+        bool zLtY := Main.zLessThanY(z, y);
+        assert ((z == x) || (z == y)) && (z <= x) && zLtY;
+    }
+
+    static bool zLessThanY(int z, int y) {
+        return (z <= y);
+    }
+}

@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    ops::{Add, Mul},
+    ops::{Add, Mul}, rc::Rc, borrow::Cow,
 };
 
 use z3::{
@@ -10,7 +10,7 @@ use z3::{
 };
 
 use crate::{
-    syntax::{BinOp, Expression, Identifier, RuntimeType, UnOp},
+    syntax::{BinOp, Expression, Identifier, RuntimeType, UnOp, Lit},
     typeable::Typeable,
 };
 
@@ -22,6 +22,34 @@ pub fn verify(expression: &Expression) -> SatResult {
     let z3_assertion = expression_to_z3_node(&ctx, expression);
     solver.assert(&z3_assertion);
     solver.check()
+}
+
+
+enum IOP {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+}
+
+enum IE {
+    Value(i64),
+    Op(IOP, Box<IE>, Box<IE>),
+    Cond(BE, Box<IE>, Box<IE>),
+
+}
+
+enum BOP {
+    And,
+    Or,
+    Implies
+}
+
+enum BE {
+    Value(i64),
+    Op(BOP, Box<IE>, Box<IE>),
+    Cond(Box<BE>, Box<BE>, Box<BE>),
 }
 
 #[derive(Clone)]
@@ -112,27 +140,51 @@ impl<'ctx> TryFrom<AstNode<'ctx>> for Int<'ctx> {
     }
 }
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+enum NodeEntry<'a> {
+    Lit(Lit),
+    Var(Cow<'a, Identifier>)
+}
+
+impl<'a> NodeEntry<'a> {
+    fn var(s: &'a String) -> NodeEntry {
+        NodeEntry::Var(Cow::Borrowed(s))
+    }
+}
+
 // Assuming that expression is a boolean type
 fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> Bool<'ctx> {
     assert!(expression.type_of() == RuntimeType::BoolRuntimeType);
 
-    let id_to_z3_node = symbolic_variables(expression)
+    let (symbolic_variables, literals) = symbolic_variables(expression);
+
+    let id_to_z3_node = symbolic_variables
         .into_iter()
         .map(|(id, type_)| match type_ {
-            RuntimeType::BoolRuntimeType => (id.clone(), AstNode::Bool(Bool::new_const(ctx, id))),
-            RuntimeType::IntRuntimeType => (id.clone(), AstNode::Int(Int::new_const(ctx, id))),
+            RuntimeType::BoolRuntimeType => (NodeEntry::Var(Cow::Owned(id.clone())), AstNode::Bool(Bool::new_const(ctx, id))),
+            RuntimeType::IntRuntimeType => (NodeEntry::Var(Cow::Owned(id.clone())), AstNode::Int(Int::new_const(ctx, id))),
             _ => todo!(),
         })
+        .chain(
+            literals.into_iter().map(|lit| {
+                let z3_node = match &lit {
+                    Lit::BoolLit { bool_value } =>  AstNode::Bool(Bool::from_bool(ctx, *bool_value)),
+                    Lit::IntLit { int_value } => todo!(),
+                    _ => todo!()
+                };
+                (NodeEntry::Lit(lit), z3_node)
+            }
+        ))
         .collect::<HashMap<_, _>>();
 
     fn helper<'ctx>(
         expression: &Expression,
-        vars: &HashMap<String, AstNode<'ctx>>,
+        vars: &HashMap<NodeEntry, AstNode<'ctx>>,
     ) -> AstNode<'ctx> {
         match expression {
             Expression::SymbolicVar { var, type_ } => match type_ {
-                RuntimeType::BoolRuntimeType => vars.get(var).unwrap().clone(),
-                RuntimeType::IntRuntimeType => vars.get(var).unwrap().clone(),
+                RuntimeType::BoolRuntimeType => vars.get(&NodeEntry::var(&var)).unwrap().clone(),
+                RuntimeType::IntRuntimeType => vars.get(&NodeEntry::var(&var)).unwrap().clone(),
                 _ => todo!(),
             },
             Expression::BinOp {
@@ -158,6 +210,9 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
                     UnOp::Negative => todo!(),
                     UnOp::Negate => AstNode::not(helper(&value, vars)).unwrap(),
                 }
+            },
+            Expression::Lit { lit, .. } => {
+                vars.get(&NodeEntry::Lit(lit.clone())).unwrap().clone()
             }
             _ => todo!(),
         }
@@ -234,32 +289,36 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
     // todo!()
 }
 
-fn symbolic_variables(expression: &Expression) -> HashSet<(Identifier, RuntimeType)> {
+fn symbolic_variables(expression: &Expression) -> (HashSet<(Identifier, RuntimeType)>, HashSet<Lit>) {
     let mut variables = HashSet::new();
+    let mut literals = HashSet::new();
 
-    fn helper(variables: &mut HashSet<(Identifier, RuntimeType)>, expression: &Expression) {
+    fn helper(variables: &mut HashSet<(Identifier, RuntimeType)>, literals: &mut HashSet<Lit>, expression: &Expression) {
         match expression {
             Expression::BinOp { lhs, rhs, .. } => {
-                helper(variables, lhs);
-                helper(variables, rhs);
+                helper(variables, literals, lhs);
+                helper(variables, literals,rhs);
             }
             Expression::UnOp { value, .. } => {
-                helper(variables, &value);
+                helper(variables, literals,&value);
             }
             Expression::Conditional { true_, false_, .. } => {
-                helper(variables, &true_);
-                helper(variables, &false_);
+                helper(variables, literals,&true_);
+                helper(variables, literals,&false_);
             }
             Expression::SymbolicVar { var, type_ } => {
                 variables.insert((var.clone(), type_.clone()));
-            }
+            },
+            Expression::Lit { lit, type_ } => {
+                literals.insert(lit.clone());
+            } // Lits are handled elsewhere
             _ => todo!("Yet to figure out: {:?}", expression),
         }
     }
 
-    helper(&mut variables, expression);
+    helper(&mut variables, &mut literals, expression);
 
-    variables
+    (variables, literals)
 }
 
 pub fn playground() {

@@ -14,7 +14,8 @@ pub fn evaluate(
     ref_counter: &mut i64,
 ) -> Expression {
     // if substitute
-    // dbg!(&stack);
+    dbg!(&stack);
+
     substitute(heap, stack, alias_map, expression, ref_counter)
 }
 
@@ -76,7 +77,7 @@ fn substitute(
 
                     value.clone()
                 }
-                value => value.clone(),
+                value => substitute(heap, stack, alias_map, value, ref_counter),
             }
         }
         sv @ Expression::SymbolicVar { .. } => sv.clone(),
@@ -124,4 +125,10 @@ fn substitute(
             type_,
         } => todo!(),
     }
+}
+
+
+#[test]
+fn substituting_test1() {
+    
 }
