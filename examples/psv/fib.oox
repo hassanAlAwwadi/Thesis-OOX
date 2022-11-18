@@ -8,7 +8,7 @@ class Main
         requires(n>=0)
     {
         // prove that the two versions of Fibonacci return the same values:
-        int f1 := Main.fib(1);
+        int f1 := Main.fib(2);
         //int f2 := Main.impFib(n) ;
         //assert f1 == f2 ;
 

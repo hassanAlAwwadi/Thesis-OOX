@@ -4,6 +4,7 @@ pub type Identifier = String;
 pub type Reference = i64;
 
 pub type Float = NotNan<f64>;
+use std::fmt::Debug;
 
 #[derive(Debug)]
 pub struct CompilationUnit {
@@ -141,7 +142,7 @@ pub enum Statement {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Invocation {
     InvokeMethod {
         lhs: Identifier,
@@ -175,6 +176,15 @@ impl Invocation {
         match &self {
             Invocation::InvokeMethod { rhs, .. } => rhs,
             Invocation::InvokeConstructor { class_name, .. } => class_name,
+        }
+    }
+}
+
+impl Debug for Invocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvokeMethod { lhs, rhs, arguments, resolved } => f.debug_struct("InvokeMethod").field("lhs", lhs).field("rhs", rhs).field("arguments", arguments).finish(),
+            Self::InvokeConstructor { class_name, arguments, resolved } => f.debug_struct("InvokeConstructor").field("class_name", class_name).field("arguments", arguments).finish(),
         }
     }
 }

@@ -63,6 +63,10 @@ impl<'ctx> AstNode<'ctx> {
         Ok(AstNode::Int(Int::try_from(self)? + Int::try_from(other)?))
     }
 
+    fn sub(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
+        Ok(AstNode::Int(Int::try_from(self)? - Int::try_from(other)?))
+    }
+
     fn mul(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
         Ok(AstNode::Int(Int::try_from(self)? * Int::try_from(other)?))
     }
@@ -202,6 +206,8 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
                 BinOp::LessThanEqual => AstNode::lte(helper(lhs, vars), helper(rhs, vars)).unwrap(),
 
                 BinOp::Implies => AstNode::implies(helper(lhs, vars), helper(rhs, vars)).unwrap(),
+                BinOp::Minus => AstNode::sub(helper(lhs, vars), helper(rhs, vars)).unwrap(),
+                BinOp::Plus => AstNode::add(helper(lhs, vars), helper(rhs, vars)).unwrap(),
                 _ => todo!(),
             },
 

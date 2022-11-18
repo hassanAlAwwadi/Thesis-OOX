@@ -102,6 +102,7 @@ enum SymResult {
 fn sym_exec(state: &mut State, flows: &HashMap<u64, Vec<u64>>, k: u64) -> SymResult {
     if k == 0 {
         // finishing current branch
+        dbg!("FINITO");
         return SymResult::Valid;
     }
     let next = action(state, k);
@@ -109,31 +110,33 @@ fn sym_exec(state: &mut State, flows: &HashMap<u64, Vec<u64>>, k: u64) -> SymRes
     // dbg!(&state.pc);
 
     match next {
-        ActionResult::FunctionCall(next)=> {
+        ActionResult::FunctionCall(next) => {
             // function call or return
             state.pc = next;
             sym_exec(state, flows, k - 1);
-        }, 
+        }
         ActionResult::Return(return_pc) => {
             if let Some(neighbours) = flows.get(&return_pc) {
                 for neighbour_pc in neighbours {
                     let mut new_state = state.clone();
                     new_state.pc = *neighbour_pc;
-    
+
                     let result = sym_exec(&mut new_state, flows, k - 1);
                     if result != SymResult::Valid {
                         return result;
                     }
                 }
-            } else { panic!("function pc does not exist"); }
-        },
+            } else {
+                panic!("function pc does not exist");
+            }
+        }
         ActionResult::Continue => {
             if let Some(neighbours) = flows.get(&state.pc) {
                 // dbg!(&neighbours);
                 for neighbour_pc in neighbours {
                     let mut new_state = state.clone();
                     new_state.pc = *neighbour_pc;
-    
+
                     let result = sym_exec(&mut new_state, flows, k - 1);
                     if result != SymResult::Valid {
                         return result;
@@ -184,8 +187,16 @@ fn action(
         }
         CFGStatement::Statement(Statement::Assign { lhs, rhs }) => {
             if let Rhs::RhsCall { invocation, type_ } = rhs {
-
-                return exec_invocation(heap, invocation, stack, alias_map, &program, *pc, Some(lhs.clone()), ref_counter);
+                return exec_invocation(
+                    heap,
+                    invocation,
+                    stack,
+                    alias_map,
+                    &program,
+                    *pc,
+                    Some(lhs.clone()),
+                    ref_counter,
+                );
             }
             let value = evaluateRhs(heap, stack, alias_map, ref_counter, rhs);
             execute_assign(heap, stack, alias_map, ref_counter, lhs, &value);
@@ -238,6 +249,9 @@ fn action(
             ActionResult::Continue
         }
         CFGStatement::FunctionExit(_name) => {
+
+
+
             let StackFrame {
                 current_member,
                 params,
@@ -258,20 +272,31 @@ fn action(
                 ActionResult::Continue
                 // we are pbobably done now
             } else {
-                let StackFrame { pc, t, params, .. } = stack.pop().unwrap();
+
+            
+                let rv = stack.last().unwrap().params.get(&retval()).unwrap();
+                let return_value = evaluate(heap, stack, alias_map, rv, ref_counter);
+
+                let StackFrame { pc, t,  .. } = stack.pop().unwrap();
                 if let Some(lhs) = t {
-                    let retval = params.get(&retval()).unwrap();
                     // perhaps also write retval to current stack?
                     // will need to do this due to this case: `return o.func();`
 
-                    execute_assign(heap, stack, alias_map, ref_counter, &lhs, &retval);
+                    execute_assign(heap, stack, alias_map, ref_counter, &lhs, &return_value);
                 }
                 ActionResult::Return(pc)
             }
         }
-        CFGStatement::Statement(Statement::Call { invocation }) => {
-            exec_invocation(heap, invocation, stack, alias_map, &program, *pc, None, ref_counter)
-        }
+        CFGStatement::Statement(Statement::Call { invocation }) => exec_invocation(
+            heap,
+            invocation,
+            stack,
+            alias_map,
+            &program,
+            *pc,
+            None,
+            ref_counter,
+        ),
 
         _ => ActionResult::Continue,
     }
@@ -300,10 +325,11 @@ fn exec_invocation(
             body,
         } => {
             // evaluate arguments
-            let arguments = invocation.arguments().into_iter().map(|arg| {
-                evaluate(heap, stack, alias_map, arg, ref_counter)
-            }).collect::<Vec<_>>();
-            
+            let arguments = invocation
+                .arguments()
+                .into_iter()
+                .map(|arg| evaluate(heap, stack, alias_map, arg, ref_counter))
+                .collect::<Vec<_>>();
 
             exec_static_method(stack, return_point, member.clone(), lhs, &arguments, params);
             let next_entry = find_entry_for_static_invocation(invocation.identifier(), program);
@@ -725,7 +751,7 @@ fn false_lit() -> Expression {
     }
 }
 
-fn verify_file(file_content: &str, method: &str) -> SymResult {
+fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
 
@@ -781,7 +807,7 @@ fn verify_file(file_content: &str, method: &str) -> SymResult {
             ref_counter: 0,
         };
 
-        return sym_exec(&mut state, &flows, 20);
+        return sym_exec(&mut state, &flows, k);
     } else {
         panic!()
     }
@@ -790,25 +816,23 @@ fn verify_file(file_content: &str, method: &str) -> SymResult {
 #[test]
 fn sym_exec_of_absolute_simplest() {
     let file_content = include_str!("../examples/absolute_simplest.oox");
-    assert_eq!(verify_file(file_content, "f"), SymResult::Valid);
+    assert_eq!(verify_file(file_content, "f", 20), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_min() {
     let file_content = include_str!("../examples/psv/min.oox");
-    assert_eq!(verify_file(file_content, "min"), SymResult::Valid);
+    assert_eq!(verify_file(file_content, "min", 20), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_method() {
     let file_content = include_str!("../examples/psv/method.oox");
-    assert_eq!(verify_file(file_content, "min"), SymResult::Valid);
+    assert_eq!(verify_file(file_content, "min", 20), SymResult::Valid);
 }
-
 
 #[test]
 fn sym_exec_fib() {
-    let file_content = 
-    std::fs::read_to_string("./examples/psv/fib.oox").unwrap();;
-    assert_eq!(verify_file(&file_content, "main"), SymResult::Valid);
+    let file_content = std::fs::read_to_string("./examples/psv/fib.oox").unwrap();
+    assert_eq!(verify_file(&file_content, "main", 40), SymResult::Valid);
 }
