@@ -77,7 +77,7 @@ fn constructor<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
 }
 
 fn body<'a>() -> Parser<'a, Token<'a>, Statement> {
-    punct("{") * statement() - punct("}")
+    (punct("{") * statement().opt() - punct("}")).map(|s| s.unwrap_or(Statement::Skip))
 }
 
 fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
@@ -114,14 +114,14 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         .map(|assumption| Statement::Assume { assumption });
 
     let while_ = (keyword("while") * punct("(") * expression() - punct(")")
-        + (punct("{") * call(statement) - punct("}")))
+        + (punct("{") * call(statement).opt() - punct("}")))
     .map(|(guard, body)| Statement::While {
         guard,
-        body: Box::new(body),
+        body: Box::new(body.unwrap_or(Statement::Skip)),
     });
     let ite = (keyword("if") * punct("(") * expression() - punct(")")
         + ((punct("{") * call(statement) - punct("}")) | call(statement))
-        + (keyword("else") * (punct("{") * call(statement) - punct("}"))).opt())
+        + (keyword("else") * ((punct("{") * call(statement) - punct("}")) | call(statement))).opt())
     .map(|((guard, true_body), false_body)| create_ite(guard, true_body, false_body));
     let continue_ = (keyword("continue") * punct(";")).map(|_| Statement::Continue);
     let break_ = (keyword("break") * punct(";")).map(|_| Statement::Break);
@@ -137,11 +137,11 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         try_body: Box::new(try_body),
         catch_body: Box::new(catch_body),
     });
-    let block = (punct("{") * call(statement) - punct("}"))
+    let block = (punct("{") * call(statement).opt() - punct("}"))
         // .map(|body| Statement::Block {
         //     body: Box::new(body),
         // });
-        .map(|body| body);
+        .map(|body| body.unwrap_or(Statement::Skip));
 
     // lock, fork & join are left out
     let p_statement = declaration
@@ -660,7 +660,6 @@ fn test_statement() {
     dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
     dbg!(c);
-    assert!(false);
 }
 
 #[test]
@@ -702,7 +701,6 @@ fn this_dot() {
     dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
     dbg!(c);
-    assert!(false);
 }
 
 #[test]
@@ -720,7 +718,6 @@ fn ite() {
     dbg!(&as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
     dbg!(c);
-    assert!(false);
 }
 
 #[test]
@@ -731,7 +728,6 @@ fn boolean() {
     dbg!(as_ref);
     let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
     dbg!(c);
-    assert!(false);
 }
 
 #[test]
@@ -745,7 +741,6 @@ fn test_statement2() {
     dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
     dbg!(c);
-    assert!(false);
 }
 
 #[test]
@@ -756,7 +751,6 @@ fn forall() {
     // dbg!(as_ref);
     let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
     dbg!(c);
-    assert!(false);
 }
 #[test]
 fn absolute_simplest() {
@@ -769,6 +763,69 @@ fn absolute_simplest() {
     // dbg!(&c);
     c.unwrap(); // should not panic;
 }
+
+#[test]
+fn parsing_empty_function() {
+    let file_content = "class X { static int fib(int n) {  } }";
+
+    let tokens = tokens(&file_content);
+    let as_ref = tokens.as_slice();
+    // dbg!(as_ref);
+    let c = (program() - end()).parse(&as_ref);
+    // dbg!(&c);
+    c.unwrap(); // should not panic;
+}
+
+#[test]
+fn parsing_else_if() {
+    let file_content = "if (n == 0) return 0;
+    else if (n == 1) return 1;
+    else {
+        ;
+    }
+    ";
+
+    let tokens = tokens(&file_content);
+    let as_ref = tokens.as_slice();
+    // dbg!(as_ref);
+    let c = (statement() - end()).parse(&as_ref);
+    // dbg!(&c);
+    c.unwrap(); // should not panic;
+}
+
+
+#[test]
+fn parsing_while() {
+    let file_content = "while (t<n) {
+        int newborn := mature ;
+        mature := total ;
+        total := total ;
+       }";
+
+    let tokens = tokens(&file_content);
+    dbg!(&tokens);
+    let as_ref = tokens.as_slice();
+    // dbg!(as_ref);
+    let c = (statement() - end()).parse(&as_ref);
+    // dbg!(&c);
+    c.unwrap(); // should not panic;
+}
+
+
+#[test]
+fn parsing_fib() {
+    let file_content = 
+    std::fs::read_to_string("./examples/psv/fib.oox").unwrap();
+
+    let tokens = tokens(&file_content);
+    let as_ref = tokens.as_slice();
+    // dbg!(as_ref);
+    let c = (program() - end()).parse(&as_ref);
+    // dbg!(&c);
+    c.unwrap(); // should not panic;
+}
+
+
 
 // fn is_literal<'a>() -> Parser<'a, Token<'a>, Token<'a>> {
 // 	is_a(|t: Token<'a>| match t {

@@ -100,9 +100,13 @@ enum SymResult {
 }
 
 fn sym_exec(state: &mut State, flows: &HashMap<u64, Vec<u64>>, k: u64) -> SymResult {
+    if k == 0 {
+        // finishing current branch
+        return SymResult::Valid;
+    }
     let next = action(state, k);
 
-    dbg!(&state.pc);
+    // dbg!(&state.pc);
 
     match next {
         ActionResult::FunctionCall(next)=> {
@@ -125,7 +129,7 @@ fn sym_exec(state: &mut State, flows: &HashMap<u64, Vec<u64>>, k: u64) -> SymRes
         },
         ActionResult::Continue => {
             if let Some(neighbours) = flows.get(&state.pc) {
-                dbg!(&neighbours);
+                // dbg!(&neighbours);
                 for neighbour_pc in neighbours {
                     let mut new_state = state.clone();
                     new_state.pc = *neighbour_pc;
@@ -169,6 +173,8 @@ fn action(
 ) -> ActionResult {
     let action = &program[&pc];
 
+    dbg!(&action, stack.last().map(|s| &s.params));
+
     match action {
         CFGStatement::Statement(Statement::Declare { type_, var }) => {
             let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
@@ -178,7 +184,8 @@ fn action(
         }
         CFGStatement::Statement(Statement::Assign { lhs, rhs }) => {
             if let Rhs::RhsCall { invocation, type_ } = rhs {
-                return exec_invocation(invocation, stack, &program, *pc, Some(lhs.clone()));
+
+                return exec_invocation(heap, invocation, stack, alias_map, &program, *pc, Some(lhs.clone()), ref_counter);
             }
             let value = evaluateRhs(heap, stack, alias_map, ref_counter, rhs);
             execute_assign(heap, stack, alias_map, ref_counter, lhs, &value);
@@ -205,6 +212,7 @@ fn action(
         }
         CFGStatement::Statement(Statement::Assume { assumption }) => {
             let expression = evaluate(heap, stack, alias_map, assumption, ref_counter);
+            dbg!(&assumption, &expression, stack.last().map(|s| &s.params));
             if expression == false_lit() {
                 panic!("infeasible");
             } else if expression != true_lit() {
@@ -262,7 +270,7 @@ fn action(
             }
         }
         CFGStatement::Statement(Statement::Call { invocation }) => {
-            exec_invocation(invocation, stack, &program, *pc, None)
+            exec_invocation(heap, invocation, stack, alias_map, &program, *pc, None, ref_counter)
         }
 
         _ => ActionResult::Continue,
@@ -270,11 +278,14 @@ fn action(
 }
 
 fn exec_invocation(
+    heap: &mut Heap,
     invocation: &Invocation,
     stack: &mut Vec<StackFrame>,
+    alias_map: &mut AliasMap,
     program: &HashMap<u64, CFGStatement>,
     return_point: u64,
     lhs: Option<Lhs>,
+    ref_counter: &mut i64,
 ) -> ActionResult {
     let (declaration, member) = invocation.resolved().unwrap(); // i don't get this
 
@@ -288,8 +299,13 @@ fn exec_invocation(
             specification,
             body,
         } => {
-            let arguments = invocation.arguments();
-            exec_static_method(stack, return_point, member.clone(), lhs, arguments, params);
+            // evaluate arguments
+            let arguments = invocation.arguments().into_iter().map(|arg| {
+                evaluate(heap, stack, alias_map, arg, ref_counter)
+            }).collect::<Vec<_>>();
+            
+
+            exec_static_method(stack, return_point, member.clone(), lhs, &arguments, params);
             let next_entry = find_entry_for_static_invocation(invocation.identifier(), program);
 
             ActionResult::FunctionCall(next_entry)
@@ -408,9 +424,9 @@ fn exec_assert(
     //         type_: RuntimeType::BoolRuntimeType,
     //     },
     // );
-    dbg!(&expression);
+    // dbg!(&expression);
     let z = evaluate(heap, stack, alias_map, &expression, ref_counter);
-    dbg!(&z);
+    // dbg!(&z);
     z
 }
 
@@ -716,7 +732,7 @@ fn verify_file(file_content: &str, method: &str) -> SymResult {
     let c = parse(&tokens);
     let c = c.unwrap();
 
-    dbg!(&c);
+    // dbg!(&c);
 
     let mut i = 0;
     let declaration_member_initial_function = c.find_declaration(method).unwrap();
@@ -787,4 +803,12 @@ fn sym_exec_min() {
 fn sym_exec_method() {
     let file_content = include_str!("../examples/psv/method.oox");
     assert_eq!(verify_file(file_content, "min"), SymResult::Valid);
+}
+
+
+#[test]
+fn sym_exec_fib() {
+    let file_content = 
+    std::fs::read_to_string("./examples/psv/fib.oox").unwrap();;
+    assert_eq!(verify_file(&file_content, "main"), SymResult::Valid);
 }

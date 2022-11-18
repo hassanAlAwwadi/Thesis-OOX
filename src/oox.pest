@@ -4,7 +4,7 @@ section = { " " | "\t" | comment | token }
 
 comment = { "//" ~ (LETTER | NUMBER | MARK | PUNCTUATION | SYMBOL | SEPARATOR )* }
 
-token = { keyword | literal | identifier | punctuator }
+token = { (keyword ~ !ALPHABETIC) | literal | identifier | punctuator }
 
 identifier = { (LETTER | NUMBER | "_")+ }
 

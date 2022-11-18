@@ -14,7 +14,7 @@ pub fn evaluate(
     ref_counter: &mut i64,
 ) -> Expression {
     // if substitute
-    dbg!(&stack);
+    //dbg!(&stack);
 
     substitute(heap, stack, alias_map, expression, ref_counter)
 }

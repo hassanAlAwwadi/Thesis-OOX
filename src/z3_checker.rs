@@ -169,7 +169,7 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
             literals.into_iter().map(|lit| {
                 let z3_node = match &lit {
                     Lit::BoolLit { bool_value } =>  AstNode::Bool(Bool::from_bool(ctx, *bool_value)),
-                    Lit::IntLit { int_value } => todo!(),
+                    Lit::IntLit { int_value } => AstNode::Int(Int::from_i64(ctx, *int_value)),
                     _ => todo!()
                 };
                 (NodeEntry::Lit(lit), z3_node)

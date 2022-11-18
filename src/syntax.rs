@@ -225,7 +225,7 @@ pub enum Rhs {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum Expression {
     Forall {
         elem: Identifier,

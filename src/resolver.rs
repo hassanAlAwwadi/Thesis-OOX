@@ -39,7 +39,9 @@ fn helper(statement: &mut Statement, declarations: &Vec<Declaration>) {
             helper(stat1, declarations);
             helper(stat2, declarations);
         },
-        Statement::While { guard, body } => todo!(),
+        Statement::While { guard, body } => {
+            helper(body, declarations);
+        },
         Statement::Throw { message } => todo!(),
         Statement::Try { try_body, catch_body } => todo!(),
         Statement::Block { body } => todo!(),
