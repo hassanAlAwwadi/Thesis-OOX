@@ -115,13 +115,11 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
 
     let while_ = (keyword("while") * punct("(") * expression() - punct(")")
         + (punct("{") * call(statement).opt() - punct("}")))
-    .map(|(guard, body)| Statement::While {
-        guard,
-        body: Box::new(body.unwrap_or(Statement::Skip)),
-    });
+    .map(|(guard, body)| create_while(guard, body));
     let ite = (keyword("if") * punct("(") * expression() - punct(")")
         + ((punct("{") * call(statement) - punct("}")) | call(statement))
-        + (keyword("else") * ((punct("{") * call(statement) - punct("}")) | call(statement))).opt())
+        + (keyword("else") * ((punct("{") * call(statement) - punct("}")) | call(statement)))
+            .opt())
     .map(|((guard, true_body), false_body)| create_ite(guard, true_body, false_body));
     let continue_ = (keyword("continue") * punct(";")).map(|_| Statement::Continue);
     let break_ = (keyword("break") * punct(";")).map(|_| Statement::Break);
@@ -198,6 +196,25 @@ fn create_ite(guard: Expression, true_body: Statement, false_body: Option<Statem
             Box::new(Statement::Skip)
         },
     }
+}
+
+fn create_while(guard: Expression, body: Option<Statement>) -> Statement {
+    if let Some(body) = body {
+    Statement::Seq {
+        stat1: Box::new(Statement::While {
+            guard: guard.clone(),
+            body: Box::new(Statement::Seq {
+                stat1: Box::new(Statement::Assume {
+                    assumption: guard.clone(),
+                }),
+                stat2: Box::new(body),
+            }),
+        }),
+        stat2: Box::new(Statement::Assume {
+            assumption: neg(guard),
+        }),
+    }
+} else { Statement::Skip }
 }
 
 fn expression1<'a>() -> Parser<'a, Token<'a>, Expression> {
@@ -793,7 +810,6 @@ fn parsing_else_if() {
     c.unwrap(); // should not panic;
 }
 
-
 #[test]
 fn parsing_while() {
     let file_content = "while (t<n) {
@@ -811,11 +827,9 @@ fn parsing_while() {
     c.unwrap(); // should not panic;
 }
 
-
 #[test]
 fn parsing_fib() {
-    let file_content = 
-    std::fs::read_to_string("./examples/psv/fib.oox").unwrap();
+    let file_content = std::fs::read_to_string("./examples/psv/fib.oox").unwrap();
 
     let tokens = tokens(&file_content);
     let as_ref = tokens.as_slice();
@@ -824,8 +838,6 @@ fn parsing_fib() {
     // dbg!(&c);
     c.unwrap(); // should not panic;
 }
-
-
 
 // fn is_literal<'a>() -> Parser<'a, Token<'a>, Token<'a>> {
 // 	is_a(|t: Token<'a>| match t {

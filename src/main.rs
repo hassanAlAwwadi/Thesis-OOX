@@ -19,6 +19,8 @@ mod resolver;
 
 mod pretty_print;
 
+mod utils;
+
 #[macro_use]
 extern crate pest_derive;
 

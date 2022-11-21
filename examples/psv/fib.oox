@@ -8,22 +8,20 @@ class Main
         requires(n>=0)
     {
         // prove that the two versions of Fibonacci return the same values:
-        int f1 := Main.fib(2);
-        //int f2 := Main.impFib(n) ;
-        //assert f1 == f2 ;
-
-        assert f1 == 1;
+        int f1 := Main.fib(n);
+        int f2 := Main.impFib(n) ;
+        assert f1 == f2 ;
     }
 
-    static int fib(int n1)
-        requires(n1 >= 0)
+    static int fib(int n)
+        requires(n >= 0)
     {
-        if (n1 == 0) return 0;
-        else if (n1 == 1) return 1;
+        if (n == 0) return 0;
+        else if (n == 1) return 1;
         else
         {
-            int a := Main.fib(n1 - 1);
-            int b := Main.fib(n1 - 2);
+            int a := Main.fib(n - 1);
+            int b := Main.fib(n - 2);
             return a + b;
         }
     }
@@ -40,11 +38,10 @@ class Main
              int newborn := mature ;
              mature := total ;
              total := total + newborn ;
+             t := t + 1;
           }
           return total ;
        }
     }
-
-
 
 }

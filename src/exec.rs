@@ -17,7 +17,7 @@ use crate::{
         Parameter, Reference, Rhs, RuntimeType, Statement, UnOp,
     },
     typeable::Typeable,
-    z3_checker,
+    z3_checker, utils,
 };
 
 fn retval() -> String {
@@ -199,7 +199,8 @@ fn action(
                 );
             }
             let value = evaluateRhs(heap, stack, alias_map, ref_counter, rhs);
-            execute_assign(heap, stack, alias_map, ref_counter, lhs, &value);
+            let e = evaluate(heap, stack, alias_map, &value, ref_counter);
+            execute_assign(heap, stack, alias_map, ref_counter, lhs, e);
 
             ActionResult::Continue
         }
@@ -282,7 +283,7 @@ fn action(
                     // perhaps also write retval to current stack?
                     // will need to do this due to this case: `return o.func();`
 
-                    execute_assign(heap, stack, alias_map, ref_counter, &lhs, &return_value);
+                    execute_assign(heap, stack, alias_map, ref_counter, &lhs, return_value);
                 }
                 ActionResult::Return(pc)
             }
@@ -526,12 +527,12 @@ fn write_field_symbolic_ref(
     concrete_refs: &Vec<Expression>,
     field: &Identifier,
     sym_ref: &Expression,
-    value: &Expression,
+    value: Expression,
 ) -> () {
     match concrete_refs.as_slice() {
         [] => panic!(),
         [Expression::Ref { ref_, type_ }] => {
-            write_field_concrete_ref(heap, *ref_, field, value.clone());
+            write_field_concrete_ref(heap, *ref_, field, value);
         }
         rs => {
             for r in rs {
@@ -611,12 +612,12 @@ fn execute_assign(
     alias_map: &mut AliasMap,
     ref_counter: &mut i64,
     lhs: &Lhs,
-    e: &Expression,
+    e: Expression,
 ) {
     match lhs {
         Lhs::LhsVar { var, type_ } => {
             let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
-            params.insert(var.clone(), e.clone());
+            params.insert(var.clone(), e);
         }
         Lhs::LhsField {
             var,
@@ -772,6 +773,8 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
         .map(|(k, group)| (k, group.map(|(_, x)| *x).collect()))
         .collect();
 
+
+    let flows: HashMap<u64, Vec<u64>> = utils::group_by(flw.into_iter());
     dbg!(&flows);
     // dbg!(&program);
 
@@ -834,5 +837,12 @@ fn sym_exec_method() {
 #[test]
 fn sym_exec_fib() {
     let file_content = std::fs::read_to_string("./examples/psv/fib.oox").unwrap();
-    assert_eq!(verify_file(&file_content, "main", 40), SymResult::Valid);
+    assert_eq!(verify_file(&file_content, "main", 70), SymResult::Valid);
+}
+
+
+#[test]
+fn sym_idk() {
+    let file_content = std::fs::read_to_string("./examples/psv/test.oox").unwrap();
+    assert_eq!(verify_file(&file_content, "main", 30), SymResult::Valid);
 }

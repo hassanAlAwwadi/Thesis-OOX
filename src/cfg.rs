@@ -1,5 +1,10 @@
 // use std::intrinsics::unreachable;
 
+use std::collections::HashMap;
+
+use itertools::Itertools;
+use std::hash::Hash;
+
 use crate::{lexer::tokens, parser_pom::parse, syntax::*};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -552,6 +557,45 @@ fn cfg_for_min() {
         (2, 5),
         (0, 2),
         (18, 19),
+    ];
+
+    assert_eq!(expected, flw);
+}
+
+
+#[test]
+fn cfg_for_test() {
+    let file_content = include_str!("../examples/psv/test.oox");
+
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+
+    let c = parse(&tokens);
+    let c = c.unwrap();
+
+    // dbg!(&c);
+
+    let mut i = 0;
+    let (result, flw) = labelled_statements(c, &mut i);
+
+    // dbg!(&result);
+
+    // dbg!(&flw);
+    let expected = vec![
+        (17, 19),
+        (15, 17),
+        (15, 20),
+        (13, 15),
+        (10, 13),
+        (8, 10),
+        (19, 8),
+        (20, 8),
+        (23, 25),
+        (8, 23),
+        (5, 8),
+        (2, 5),
+        (0, 2),
+        (25, 26),
     ];
 
     assert_eq!(expected, flw);
