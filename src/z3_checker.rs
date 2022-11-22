@@ -1,6 +1,8 @@
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet},
-    ops::{Add, Mul}, rc::Rc, borrow::Cow,
+    ops::{Add, Mul},
+    rc::Rc,
 };
 
 use z3::{
@@ -10,7 +12,7 @@ use z3::{
 };
 
 use crate::{
-    syntax::{BinOp, Expression, Identifier, RuntimeType, UnOp, Lit},
+    syntax::{BinOp, Expression, Identifier, Lit, RuntimeType, UnOp},
     typeable::Typeable,
 };
 
@@ -24,7 +26,6 @@ pub fn verify(expression: &Expression) -> SatResult {
     solver.check()
 }
 
-
 enum IOP {
     Add,
     Sub,
@@ -37,13 +38,12 @@ enum IE {
     Value(i64),
     Op(IOP, Box<IE>, Box<IE>),
     Cond(BE, Box<IE>, Box<IE>),
-
 }
 
 enum BOP {
     And,
     Or,
-    Implies
+    Implies,
 }
 
 enum BE {
@@ -71,45 +71,79 @@ impl<'ctx> AstNode<'ctx> {
         Ok(AstNode::Int(Int::try_from(self)? * Int::try_from(other)?))
     }
 
+    fn div(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
+        Ok(AstNode::Int(Int::try_from(self)? / Int::try_from(other)?))
+    }
+
+    fn _mod(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
+        Ok(AstNode::Int(Int::try_from(self)? % Int::try_from(other)?))
+    }
+
     fn eq(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
-        Ok(AstNode::Bool(Int::try_from(self)?._eq(&Int::try_from(other)?)))
+        match self {
+            AstNode::Bool(b) => Ok(AstNode::Bool(b._eq(&Bool::try_from(other)?))),
+            AstNode::Int(i) => Ok(AstNode::Bool(i._eq(&Int::try_from(other)?))),
+        }
     }
 
     fn lt(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
-        Ok(AstNode::Bool(Int::try_from(self)?.lt(&Int::try_from(other)?)))
+        Ok(AstNode::Bool(
+            Int::try_from(self)?.lt(&Int::try_from(other)?),
+        ))
     }
 
     fn gt(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
-        Ok(AstNode::Bool(Int::try_from(self)?.gt(&Int::try_from(other)?)))
+        Ok(AstNode::Bool(
+            Int::try_from(self)?.gt(&Int::try_from(other)?),
+        ))
     }
 
     fn lte(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
-        Ok(AstNode::Bool(Int::try_from(self)?.le(&Int::try_from(other)?)))
+        Ok(AstNode::Bool(
+            Int::try_from(self)?.le(&Int::try_from(other)?),
+        ))
     }
 
     fn gte(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
-        Ok(AstNode::Bool(Int::try_from(self)?.ge(&Int::try_from(other)?)))
+        Ok(AstNode::Bool(
+            Int::try_from(self)?.ge(&Int::try_from(other)?),
+        ))
     }
 
     fn and(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
         let ctx = self.get_ctx();
-        Ok(AstNode::Bool(Bool::and(&ctx, &[&Bool::try_from(self)?,&Bool::try_from(other)?])))
+        Ok(AstNode::Bool(Bool::and(
+            &ctx,
+            &[&Bool::try_from(self)?, &Bool::try_from(other)?],
+        )))
     }
 
     fn or(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
         let ctx = self.get_ctx();
-        Ok(AstNode::Bool(Bool::or(&ctx, &[&Bool::try_from(self)?,&Bool::try_from(other)?])))
+        Ok(AstNode::Bool(Bool::or(
+            &ctx,
+            &[&Bool::try_from(self)?, &Bool::try_from(other)?],
+        )))
     }
-
 
     fn implies(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
-        Ok(AstNode::Bool(Bool::try_from(self)?.implies(&Bool::try_from(other)?)))
+        Ok(AstNode::Bool(
+            Bool::try_from(self)?.implies(&Bool::try_from(other)?),
+        ))
     }
+
+    fn neq(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
+        match self {
+            AstNode::Bool(b) => Ok(AstNode::Bool(!b._eq(&Bool::try_from(other)?))),
+            AstNode::Int(i) => Ok(AstNode::Bool(!i._eq(&Int::try_from(other)?))),
+        }
+    }
+
+    
 
     fn not(self) -> Result<AstNode<'ctx>, ()> {
         Ok(AstNode::Bool(Bool::try_from(self)?.not()))
     }
-
 }
 
 impl<'ctx> AstNode<'ctx> {
@@ -147,7 +181,7 @@ impl<'ctx> TryFrom<AstNode<'ctx>> for Int<'ctx> {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 enum NodeEntry<'a> {
     Lit(Lit),
-    Var(Cow<'a, Identifier>)
+    Var(Cow<'a, Identifier>),
 }
 
 impl<'a> NodeEntry<'a> {
@@ -165,20 +199,24 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
     let id_to_z3_node = symbolic_variables
         .into_iter()
         .map(|(id, type_)| match type_ {
-            RuntimeType::BoolRuntimeType => (NodeEntry::Var(Cow::Owned(id.clone())), AstNode::Bool(Bool::new_const(ctx, id))),
-            RuntimeType::IntRuntimeType => (NodeEntry::Var(Cow::Owned(id.clone())), AstNode::Int(Int::new_const(ctx, id))),
+            RuntimeType::BoolRuntimeType => (
+                NodeEntry::Var(Cow::Owned(id.clone())),
+                AstNode::Bool(Bool::new_const(ctx, id)),
+            ),
+            RuntimeType::IntRuntimeType => (
+                NodeEntry::Var(Cow::Owned(id.clone())),
+                AstNode::Int(Int::new_const(ctx, id)),
+            ),
             _ => todo!(),
         })
-        .chain(
-            literals.into_iter().map(|lit| {
-                let z3_node = match &lit {
-                    Lit::BoolLit { bool_value } =>  AstNode::Bool(Bool::from_bool(ctx, *bool_value)),
-                    Lit::IntLit { int_value } => AstNode::Int(Int::from_i64(ctx, *int_value)),
-                    _ => todo!()
-                };
-                (NodeEntry::Lit(lit), z3_node)
-            }
-        ))
+        .chain(literals.into_iter().map(|lit| {
+            let z3_node = match &lit {
+                Lit::BoolLit { bool_value } => AstNode::Bool(Bool::from_bool(ctx, *bool_value)),
+                Lit::IntLit { int_value } => AstNode::Int(Int::from_i64(ctx, *int_value)),
+                _ => todo!(),
+            };
+            (NodeEntry::Lit(lit), z3_node)
+        }))
         .collect::<HashMap<_, _>>();
 
     fn helper<'ctx>(
@@ -201,25 +239,30 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
                 BinOp::Or => AstNode::or(helper(lhs, vars), helper(rhs, vars)).unwrap(),
                 BinOp::Equal => AstNode::eq(helper(lhs, vars), helper(rhs, vars)).unwrap(),
                 BinOp::GreaterThan => AstNode::gt(helper(lhs, vars), helper(rhs, vars)).unwrap(),
-                BinOp::GreaterThanEqual => AstNode::gte(helper(lhs, vars), helper(rhs, vars)).unwrap(),
+                BinOp::GreaterThanEqual => {
+                    AstNode::gte(helper(lhs, vars), helper(rhs, vars)).unwrap()
+                }
                 BinOp::LessThan => AstNode::lt(helper(lhs, vars), helper(rhs, vars)).unwrap(),
                 BinOp::LessThanEqual => AstNode::lte(helper(lhs, vars), helper(rhs, vars)).unwrap(),
 
                 BinOp::Implies => AstNode::implies(helper(lhs, vars), helper(rhs, vars)).unwrap(),
                 BinOp::Minus => AstNode::sub(helper(lhs, vars), helper(rhs, vars)).unwrap(),
                 BinOp::Plus => AstNode::add(helper(lhs, vars), helper(rhs, vars)).unwrap(),
-                _ => todo!(),
+                BinOp::Multiply => AstNode::mul(helper(lhs, vars), helper(rhs, vars)).unwrap(),
+                BinOp::NotEqual => AstNode::neq(helper(lhs, vars), helper(rhs, vars)).unwrap(),
+                BinOp::Divide => AstNode::div(helper(lhs, vars), helper(rhs, vars)).unwrap(),
+                BinOp::Modulo => AstNode::_mod(helper(lhs, vars), helper(rhs, vars)).unwrap(),
             },
 
-            Expression::UnOp { un_op, value, type_ } => {
-                match un_op {
-                    UnOp::Negative => todo!(),
-                    UnOp::Negate => AstNode::not(helper(&value, vars)).unwrap(),
-                }
+            Expression::UnOp {
+                un_op,
+                value,
+                type_,
+            } => match un_op {
+                UnOp::Negative => todo!(),
+                UnOp::Negate => AstNode::not(helper(&value, vars)).unwrap(),
             },
-            Expression::Lit { lit, .. } => {
-                vars.get(&NodeEntry::Lit(lit.clone())).unwrap().clone()
-            }
+            Expression::Lit { lit, .. } => vars.get(&NodeEntry::Lit(lit.clone())).unwrap().clone(),
             _ => todo!(),
         }
     }
@@ -295,26 +338,32 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
     // todo!()
 }
 
-fn symbolic_variables(expression: &Expression) -> (HashSet<(Identifier, RuntimeType)>, HashSet<Lit>) {
+fn symbolic_variables(
+    expression: &Expression,
+) -> (HashSet<(Identifier, RuntimeType)>, HashSet<Lit>) {
     let mut variables = HashSet::new();
     let mut literals = HashSet::new();
 
-    fn helper(variables: &mut HashSet<(Identifier, RuntimeType)>, literals: &mut HashSet<Lit>, expression: &Expression) {
+    fn helper(
+        variables: &mut HashSet<(Identifier, RuntimeType)>,
+        literals: &mut HashSet<Lit>,
+        expression: &Expression,
+    ) {
         match expression {
             Expression::BinOp { lhs, rhs, .. } => {
                 helper(variables, literals, lhs);
-                helper(variables, literals,rhs);
+                helper(variables, literals, rhs);
             }
             Expression::UnOp { value, .. } => {
-                helper(variables, literals,&value);
+                helper(variables, literals, &value);
             }
             Expression::Conditional { true_, false_, .. } => {
-                helper(variables, literals,&true_);
-                helper(variables, literals,&false_);
+                helper(variables, literals, &true_);
+                helper(variables, literals, &false_);
             }
             Expression::SymbolicVar { var, type_ } => {
                 variables.insert((var.clone(), type_.clone()));
-            },
+            }
             Expression::Lit { lit, type_ } => {
                 literals.insert(lit.clone());
             } // Lits are handled elsewhere
@@ -347,9 +396,9 @@ fn demorgan() {
 
     let result = solver.check();
 
-    dbg!(result);
-    dbg!(solver.get_proof());
-    dbg!(solver.get_model());
+    //dbg!(result);
+    //dbg!(solver.get_proof());
+    //dbg!(solver.get_model());
 }
 
 fn form1() {

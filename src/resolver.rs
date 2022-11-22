@@ -54,7 +54,7 @@ fn helper(statement: &mut Statement, declarations: &Vec<Declaration>) {
             for member in members {
                 match &member {
                     DeclarationMember::Method {  name: member_name, .. } => {
-                        dbg!("{:?}, {:?}, {:?}, {:?}", lhs, rhs, class_name, member_name);
+                        //dbg!("{:?}, {:?}, {:?}, {:?}", lhs, rhs, class_name, member_name);
                         if lhs == class_name && rhs == member_name {
                             *resolved = Some(Box::new((class.clone(), member.clone()))); // very bad
                         }

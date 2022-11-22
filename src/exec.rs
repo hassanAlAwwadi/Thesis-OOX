@@ -102,12 +102,12 @@ enum SymResult {
 fn sym_exec(state: &mut State, flows: &HashMap<u64, Vec<u64>>, k: u64) -> SymResult {
     if k == 0 {
         // finishing current branch
-        dbg!("FINITO");
+        //dbg!("FINITO");
         return SymResult::Valid;
     }
     let next = action(state, k);
 
-    // dbg!(&state.pc);
+    // //dbg!(&state.pc);
 
     match next {
         ActionResult::FunctionCall(next) => {
@@ -132,7 +132,7 @@ fn sym_exec(state: &mut State, flows: &HashMap<u64, Vec<u64>>, k: u64) -> SymRes
         }
         ActionResult::Continue => {
             if let Some(neighbours) = flows.get(&state.pc) {
-                // dbg!(&neighbours);
+                // //dbg!(&neighbours);
                 for neighbour_pc in neighbours {
                     let mut new_state = state.clone();
                     new_state.pc = *neighbour_pc;
@@ -176,7 +176,7 @@ fn action(
 ) -> ActionResult {
     let action = &program[&pc];
 
-    dbg!(&action, stack.last().map(|s| &s.params));
+    //dbg!(&action, stack.last().map(|s| &s.params));
 
     match action {
         CFGStatement::Statement(Statement::Declare { type_, var }) => {
@@ -212,7 +212,7 @@ fn action(
             } else if expression == false_lit() {
                 ActionResult::Continue
             } else {
-                dbg!("invoke Z3 with:", &expression);
+                //dbg!("invoke Z3 with:", &expression);
                 let result = z3_checker::verify(&expression);
                 if let SatResult::Unsat = result {
                 } else {
@@ -224,7 +224,7 @@ fn action(
         }
         CFGStatement::Statement(Statement::Assume { assumption }) => {
             let expression = evaluate(heap, stack, alias_map, assumption, ref_counter);
-            dbg!(&assumption, &expression, stack.last().map(|s| &s.params));
+            //dbg!(&assumption, &expression, stack.last().map(|s| &s.params));
             if expression == false_lit() {
                 panic!("infeasible");
             } else if expression != true_lit() {
@@ -451,9 +451,9 @@ fn exec_assert(
     //         type_: RuntimeType::BoolRuntimeType,
     //     },
     // );
-    // dbg!(&expression);
+    // //dbg!(&expression);
     let z = evaluate(heap, stack, alias_map, &expression, ref_counter);
-    // dbg!(&z);
+    // //dbg!(&z);
     z
 }
 
@@ -759,7 +759,7 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
     let c = parse(&tokens);
     let c = c.unwrap();
 
-    // dbg!(&c);
+    // //dbg!(&c);
 
     let mut i = 0;
     let declaration_member_initial_function = c.find_declaration(method).unwrap();
@@ -775,8 +775,8 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
 
 
     let flows: HashMap<u64, Vec<u64>> = utils::group_by(flw.into_iter());
-    dbg!(&flows);
-    // dbg!(&program);
+    //dbg!(&flows);
+    // //dbg!(&program);
 
     let pc = find_entry_for_static_invocation(method, &program);
 
@@ -844,5 +844,13 @@ fn sym_exec_fib() {
 #[test]
 fn sym_idk() {
     let file_content = std::fs::read_to_string("./examples/psv/test.oox").unwrap();
-    assert_eq!(verify_file(&file_content, "main", 30), SymResult::Valid);
+    assert_eq!(verify_file(&file_content, "main", 30), SymResult::Invalid);
 }
+
+#[test]
+fn sym_exec_div_by_n() {
+    let file_content = std::fs::read_to_string("./examples/psv/divByN.oox").unwrap();
+    // so this one is invalid at k = 100, in OOX it's invalid at k=105 🤨
+    assert_eq!(verify_file(&file_content, "divByN_invalid", 70), SymResult::Valid);
+}
+

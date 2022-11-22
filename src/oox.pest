@@ -6,7 +6,7 @@ comment = { "//" ~ (LETTER | NUMBER | MARK | PUNCTUATION | SYMBOL | SEPARATOR )*
 
 token = { (keyword ~ !ALPHABETIC) | literal | identifier | punctuator }
 
-identifier = { (LETTER | NUMBER | "_")+ }
+identifier = { (LETTER | NUMBER | "_")+ }  // uhm identifiers starting with numbers are possible?
 
 keyword = { "assert" | "catch" | "else"
 | "if"
@@ -50,7 +50,7 @@ literal = { boolean | integer | float | char | string | "null" }
 
 boolean = { "true" | "false" }
 
-integer = { OTHER_NUMBER }
+integer = { ASCII_DIGIT ~ ASCII_DIGIT* }
 
 float = { DECIMAL_NUMBER }
 

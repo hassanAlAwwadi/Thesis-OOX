@@ -77,13 +77,13 @@ fn memberCFG(
 
             flw.push((entry_label, init.0));
 
-            // dbg!(&v[1]);
+            // //dbg!(&v[1]);
             // final(S)
             for l in r#final(&v[1], &v) {
                 flw.push((l, exit_label));
             }
             // fallthrough(S)
-            // dbg!(&fallthrough(&v[1], &v));
+            // //dbg!(&fallthrough(&v[1], &v));
             for (l, _s) in fallthrough(&v[1], &v) {
                 flw.push((l, exit_label));
             }
@@ -179,7 +179,7 @@ fn fallthrough(
     s_l @ (_l, stmt): &(u64, CFGStatement),
     all_smts: &Vec<(u64, CFGStatement)>,
 ) -> Vec<(u64, CFGStatement)> {
-    // dbg!(&s_l);
+    // //dbg!(&s_l);
     match stmt {
         CFGStatement::Statement(Statement::Break { .. }) => vec![s_l.clone()],
         CFGStatement::Statement(Statement::Continue { .. }) => vec![s_l.clone()],
@@ -258,7 +258,7 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
             let mut final_s2 = r#final(&(*s2, lookup(*s2, all_smts)), all_smts);
             final_s1.append(&mut final_s2);
 
-            dbg!(s1, s2, &final_s1);
+            //dbg!(s1, s2, &final_s1);
             final_s1
         }
         CFGStatement::Seq(l1, l2) => {
@@ -286,7 +286,7 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
                 })
                 .collect::<Vec<_>>();
             v.push(*l);
-            dbg!(&v);
+            //dbg!(&v);
             v
         } // to be fixed
         CFGStatement::FunctionEntry(_) => unreachable!(),
@@ -367,16 +367,16 @@ fn cfg_for_simpleclass() {
 
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-    // dbg!(as_ref);
+    // //dbg!(as_ref);
     let c = parse(&tokens);
     let c = c.unwrap();
-    // dbg!(&c);
+    // //dbg!(&c);
 
     let mut i = 0;
     let (result, flw) = labelled_statements(c, &mut i);
-    // dbg!(&result);
+    // //dbg!(&result);
 
-    // dbg!(&flw);
+    // //dbg!(&flw);
 
     let expected = vec![
         (9, 11),
@@ -407,14 +407,14 @@ fn cfg_for_simpleclass2() {
     let c = parse(&tokens);
     let c = c.unwrap();
 
-    // dbg!(&c);
+    // //dbg!(&c);
 
     let mut i = 0;
     let (result, flw) = labelled_statements(c, &mut i);
 
-    dbg!(&result);
+    //dbg!(&result);
 
-    dbg!(&flw);
+    //dbg!(&flw);
     let expected = vec![
         (33, 35),
         (30, 33),
@@ -450,14 +450,14 @@ fn cfg_for_simpleclass3() {
     let c = parse(&tokens);
     let c = c.unwrap();
 
-    // dbg!(&c);
+    // //dbg!(&c);
 
     let mut i = 0;
     let (result, flw) = labelled_statements(c, &mut i);
 
-    dbg!(&result);
+    //dbg!(&result);
 
-    dbg!(&flw);
+    //dbg!(&flw);
     let expected = vec![
         (36, 38),
         (33, 36),
@@ -494,14 +494,14 @@ fn cfg_for_simpleclass4() {
     let c = parse(&tokens);
     let c = c.unwrap();
 
-    // dbg!(&c);
+    // //dbg!(&c);
 
     let mut i = 0;
     let (result, flw) = labelled_statements(c, &mut i);
 
-    dbg!(&result);
+    //dbg!(&result);
 
-    dbg!(&flw);
+    //dbg!(&flw);
     let expected = vec![
         (36, 38),
         (33, 36),
@@ -538,14 +538,14 @@ fn cfg_for_min() {
     let c = parse(&tokens);
     let c = c.unwrap();
 
-    // dbg!(&c);
+    // //dbg!(&c);
 
     let mut i = 0;
     let (result, flw) = labelled_statements(c, &mut i);
 
-    // dbg!(&result);
+    // //dbg!(&result);
 
-    // dbg!(&flw);
+    // //dbg!(&flw);
     let expected = vec![
         (10, 12),
         (14, 16),
@@ -573,14 +573,14 @@ fn cfg_for_test() {
     let c = parse(&tokens);
     let c = c.unwrap();
 
-    // dbg!(&c);
+    // //dbg!(&c);
 
     let mut i = 0;
     let (result, flw) = labelled_statements(c, &mut i);
 
-    // dbg!(&result);
+    // //dbg!(&result);
 
-    // dbg!(&flw);
+    // //dbg!(&flw);
     let expected = vec![
         (17, 19),
         (15, 17),

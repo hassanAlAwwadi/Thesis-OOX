@@ -114,7 +114,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         .map(|assumption| Statement::Assume { assumption });
 
     let while_ = (keyword("while") * punct("(") * expression() - punct(")")
-        + (punct("{") * call(statement).opt() - punct("}")))
+        + ((punct("{") * call(statement).opt() - punct("}")) | call(statement).map(Some)))
     .map(|(guard, body)| create_while(guard, body));
     let ite = (keyword("if") * punct("(") * expression() - punct(")")
         + ((punct("{") * call(statement) - punct("}")) | call(statement))
@@ -663,9 +663,9 @@ fn class_with_constructor() {
 
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-    dbg!(as_ref);
+    //dbg!(as_ref);
     let c = program().parse(&as_ref).unwrap(); // should not panic;
-    dbg!(c);
+    //dbg!(c);
 }
 
 #[test]
@@ -674,9 +674,9 @@ fn test_statement() {
 
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-    dbg!(as_ref);
+    //dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
-    dbg!(c);
+    //dbg!(c);
 }
 
 #[test]
@@ -685,12 +685,12 @@ fn class_with_methods() {
 
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-    // dbg!(as_ref);
+    // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
-    // dbg!(&c);
+    // //dbg!(&c);
     c.unwrap(); // should not panic;
 
-    // dbg!(c);
+    // //dbg!(c);
     // assert!(false);
 }
 
@@ -700,12 +700,12 @@ fn bsort_test() {
 
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-    // dbg!(as_ref);
+    // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
-    // dbg!(&c);
+    // //dbg!(&c);
     c.unwrap(); // should not panic;
 
-    // dbg!(c);
+    // //dbg!(c);
     // assert!(false);
 }
 
@@ -715,9 +715,9 @@ fn this_dot() {
 
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-    dbg!(as_ref);
+    //dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
-    dbg!(c);
+    //dbg!(c);
 }
 
 #[test]
@@ -732,9 +732,9 @@ fn ite() {
     }";
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-    dbg!(&as_ref);
+    //dbg!(&as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
-    dbg!(c);
+    //dbg!(c);
 }
 
 #[test]
@@ -742,9 +742,9 @@ fn boolean() {
     let file_content = "true";
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-    dbg!(as_ref);
+    //dbg!(as_ref);
     let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
-    dbg!(c);
+    //dbg!(c);
 }
 
 #[test]
@@ -755,9 +755,9 @@ fn test_statement2() {
     return b;";
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-    dbg!(as_ref);
+    //dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
-    dbg!(c);
+    //dbg!(c);
 }
 
 #[test]
@@ -765,9 +765,9 @@ fn forall() {
     let file_content = "(forall x, i : a : i<k ==> (forall x, i : a : i<k ==> true))";
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-    // dbg!(as_ref);
+    // //dbg!(as_ref);
     let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
-    dbg!(c);
+    //dbg!(c);
 }
 #[test]
 fn absolute_simplest() {
@@ -775,9 +775,9 @@ fn absolute_simplest() {
 
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-    // dbg!(as_ref);
+    // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
-    // dbg!(&c);
+    // //dbg!(&c);
     c.unwrap(); // should not panic;
 }
 
@@ -787,9 +787,9 @@ fn parsing_empty_function() {
 
     let tokens = tokens(&file_content);
     let as_ref = tokens.as_slice();
-    // dbg!(as_ref);
+    // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
-    // dbg!(&c);
+    // //dbg!(&c);
     c.unwrap(); // should not panic;
 }
 
@@ -804,9 +804,9 @@ fn parsing_else_if() {
 
     let tokens = tokens(&file_content);
     let as_ref = tokens.as_slice();
-    // dbg!(as_ref);
+    // //dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref);
-    // dbg!(&c);
+    // //dbg!(&c);
     c.unwrap(); // should not panic;
 }
 
@@ -819,11 +819,11 @@ fn parsing_while() {
        }";
 
     let tokens = tokens(&file_content);
-    dbg!(&tokens);
+    //dbg!(&tokens);
     let as_ref = tokens.as_slice();
-    // dbg!(as_ref);
+    // //dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref);
-    // dbg!(&c);
+    // //dbg!(&c);
     c.unwrap(); // should not panic;
 }
 
@@ -833,10 +833,40 @@ fn parsing_fib() {
 
     let tokens = tokens(&file_content);
     let as_ref = tokens.as_slice();
-    // dbg!(as_ref);
+    // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
-    // dbg!(&c);
+    // //dbg!(&c);
     c.unwrap(); // should not panic;
+}
+
+#[test]
+fn parse_capital_variable() {
+    let file_content = "int N := 10;";
+
+    let tokens = tokens(&file_content);
+    dbg!(&tokens);
+    let as_ref = tokens.as_slice();
+    // //dbg!(as_ref);
+    let c = (statement() - end()).parse(&as_ref);
+    // //dbg!(&c);
+    c.unwrap(); // should not panic;
+}
+
+#[test]
+fn parse_while_loop() {
+    
+    let file_content = "
+    while (i<N)
+        i := i+1 ;";
+
+    let tokens = tokens(&file_content);
+    dbg!(&tokens);
+    let as_ref = tokens.as_slice();
+    // //dbg!(as_ref);
+    let c = (statement() - end()).parse(&as_ref);
+    // //dbg!(&c);
+    c.unwrap(); // should not panic;
+
 }
 
 // fn is_literal<'a>() -> Parser<'a, Token<'a>, Token<'a>> {
