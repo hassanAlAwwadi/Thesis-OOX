@@ -58,8 +58,8 @@ impl Debug for Expression {
                     }
                 },
                 Expression::SizeOf { var, type_ } => todo!(),
-                Expression::Ref { ref_, type_ } => todo!(),
-                Expression::SymbolicRef { var, type_ } => todo!(),
+                Expression::Ref { ref_, type_ } => f.write_fmt(format_args!("#{}", ref_))?,
+                Expression::SymbolicRef { var, type_ } => f.write_fmt(format_args!("%{}", var))?,
                 Expression::Conditional { guard, true_, false_, type_ } => todo!(),
                 Expression::Forall { elem, range, domain, formula, type_ } => todo!(),
                 Expression::Exists { elem, range, domain, formula, type_ } => todo!(),

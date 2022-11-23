@@ -1,9 +1,9 @@
 // simplify the expression
 
 use crate::{
-    exec::{init, AliasMap, Heap},
+    exec::{init_symbolic_reference, AliasMap, Heap},
     stack::StackFrame,
-    syntax::Expression,
+    syntax::Expression, symbolic_table::SymbolicTable,
 };
 
 pub fn evaluate(
@@ -12,11 +12,12 @@ pub fn evaluate(
     alias_map: &mut AliasMap,
     expression: &Expression,
     ref_counter: &mut i64,
+    st: &SymbolicTable,
 ) -> Expression {
     // if substitute
     ////dbg!(&stack);
 
-    substitute(heap, stack, alias_map, expression, ref_counter)
+    substitute(heap, stack, alias_map, expression, ref_counter, st)
 }
 
 fn substitute(
@@ -25,6 +26,7 @@ fn substitute(
     alias_map: &mut AliasMap,
     expression: &Expression,
     ref_counter: &mut i64,
+    st: &SymbolicTable,
 ) -> Expression {
     match expression {
         Expression::BinOp {
@@ -33,8 +35,8 @@ fn substitute(
             rhs,
             type_,
         } => {
-            let lhs = Box::new(substitute(heap, stack, alias_map, lhs, ref_counter));
-            let rhs = Box::new(substitute(heap, stack, alias_map, rhs, ref_counter));
+            let lhs = Box::new(substitute(heap, stack, alias_map, lhs, ref_counter, st));
+            let rhs = Box::new(substitute(heap, stack, alias_map, rhs, ref_counter, st));
             return Expression::BinOp {
                 bin_op: bin_op.clone(),
                 lhs,
@@ -47,7 +49,7 @@ fn substitute(
             value,
             type_,
         } => {
-            let value = Box::new(substitute(heap, stack, alias_map, value, ref_counter));
+            let value = Box::new(substitute(heap, stack, alias_map, value, ref_counter, st));
             Expression::UnOp {
                 un_op: un_op.clone(),
                 value,
@@ -73,11 +75,11 @@ fn substitute(
                         }
                     };
 
-                    init(heap, alias_map, var, type_, ref_counter);
+                    init_symbolic_reference(heap, alias_map, var, type_, ref_counter, st);
 
                     value.clone()
                 }
-                value => substitute(heap, stack, alias_map, value, ref_counter),
+                value => substitute(heap, stack, alias_map, value, ref_counter, st),
             }
         }
         sv @ Expression::SymbolicVar { .. } => sv.clone(),
@@ -87,7 +89,7 @@ fn substitute(
         }
         ref_ @ Expression::Ref { .. } => ref_.clone(),
         Expression::SymbolicRef { var, type_ } => {
-            init(heap, alias_map, var, type_, ref_counter);
+            init_symbolic_reference(heap, alias_map, var, type_, ref_counter, st);
 
             Expression::SymbolicRef {
                 var: var.clone(),
@@ -100,9 +102,9 @@ fn substitute(
             false_,
             type_,
         } => {
-            let guard = Box::new(substitute(heap, stack, alias_map, guard, ref_counter));
-            let false_ = Box::new(substitute(heap, stack, alias_map, false_, ref_counter));
-            let true_ = Box::new(substitute(heap, stack, alias_map, true_, ref_counter));
+            let guard = Box::new(substitute(heap, stack, alias_map, guard, ref_counter, st));
+            let false_ = Box::new(substitute(heap, stack, alias_map, false_, ref_counter, st));
+            let true_ = Box::new(substitute(heap, stack, alias_map, true_, ref_counter, st));
             Expression::Conditional {
                 guard,
                 true_,

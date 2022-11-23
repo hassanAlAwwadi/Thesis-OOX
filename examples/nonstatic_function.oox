@@ -1,0 +1,17 @@
+class Main {
+    int x;
+
+
+    bool isX(int y) {
+        int x := this.x;
+        return x == y;
+    }
+
+
+    static void f(Main m) {
+        int x := m.x;
+        int y := m.x;
+        bool z := m.isX(x);
+        assert(x == y && z);
+    }
+}

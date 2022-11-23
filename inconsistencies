@@ -6,3 +6,7 @@ expression9:
  fallthrough missing for ite en seq
 
  execRhsField is niet consistent met doc (thesis versie die ik heb)
+
+
+
+ Something weird is going on with null, why add it to only then immediately remove it?

@@ -200,21 +200,23 @@ fn create_ite(guard: Expression, true_body: Statement, false_body: Option<Statem
 
 fn create_while(guard: Expression, body: Option<Statement>) -> Statement {
     if let Some(body) = body {
-    Statement::Seq {
-        stat1: Box::new(Statement::While {
-            guard: guard.clone(),
-            body: Box::new(Statement::Seq {
-                stat1: Box::new(Statement::Assume {
-                    assumption: guard.clone(),
+        Statement::Seq {
+            stat1: Box::new(Statement::While {
+                guard: guard.clone(),
+                body: Box::new(Statement::Seq {
+                    stat1: Box::new(Statement::Assume {
+                        assumption: guard.clone(),
+                    }),
+                    stat2: Box::new(body),
                 }),
-                stat2: Box::new(body),
             }),
-        }),
-        stat2: Box::new(Statement::Assume {
-            assumption: neg(guard),
-        }),
+            stat2: Box::new(Statement::Assume {
+                assumption: neg(guard),
+            }),
+        }
+    } else {
+        Statement::Skip
     }
-} else { Statement::Skip }
 }
 
 fn expression1<'a>() -> Parser<'a, Token<'a>, Expression> {
@@ -511,11 +513,12 @@ fn rhs<'a>() -> Parser<'a, Token<'a>, Rhs> {
         type_: RuntimeType::UnknownRuntimeType,
     });
 
-    let rhs_field = (expression() - punct(".") + identifier()).map(|(var, field)| Rhs::RhsField {
-        var,
-        field,
-        type_: RuntimeType::UnknownRuntimeType,
-    });
+    let rhs_field =
+        (expression() - punct(".") + identifier()).map(|(var, field)| Rhs::RhsField {
+            var,
+            field,
+            type_: RuntimeType::UnknownRuntimeType,
+        });
     let rhs_call = invocation().map(|invocation| Rhs::RhsCall {
         invocation,
         type_: RuntimeType::UnknownRuntimeType,
@@ -649,6 +652,17 @@ fn identifier<'a>() -> Parser<'a, Token<'a>, Identifier> {
     })
 }
 
+// fn identifier_or_this<'a>() -> Parser<'a, Token<'a>, Identifier> {
+//     take(1).convert(|tokens| {
+//         let token = tokens[0]; // only one taken
+//         if let Token::Identifier(s) = token {
+//             Ok(s.to_string())
+//         } else {
+//             Err(())
+//         }
+//     }) | keyword("this").map(|_| "this".to_string())
+// }
+
 fn punct<'a>(p: &'a str) -> Parser<'a, Token<'a>, Token> {
     sym(Token::Punctuator(p))
 }
@@ -656,6 +670,14 @@ fn punct<'a>(p: &'a str) -> Parser<'a, Token<'a>, Token> {
 fn keyword<'a>(kw: &'a str) -> Parser<'a, Token<'a>, Token> {
     sym(Token::Keyword(kw))
 }
+
+// fn expression_or_this<'a>() -> Parser<'a, Token<'a>, Expression> {
+//     expression()
+//         | keyword("this").map(|_| Expression::Var {
+//             var: "this".to_string(),
+//             type_: RuntimeType::StringRuntimeType,
+//         })
+// }
 
 #[test]
 fn class_with_constructor() {
@@ -665,7 +687,7 @@ fn class_with_constructor() {
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = program().parse(&as_ref).unwrap(); // should not panic;
-    //dbg!(c);
+                                               //dbg!(c);
 }
 
 #[test]
@@ -676,7 +698,7 @@ fn test_statement() {
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
-    //dbg!(c);
+                                                           //dbg!(c);
 }
 
 #[test]
@@ -717,7 +739,7 @@ fn this_dot() {
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
-    //dbg!(c);
+                                                           //dbg!(c);
 }
 
 #[test]
@@ -734,7 +756,7 @@ fn ite() {
     let as_ref = tokens.as_slice();
     //dbg!(&as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
-    //dbg!(c);
+                                                           //dbg!(c);
 }
 
 #[test]
@@ -744,7 +766,7 @@ fn boolean() {
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
-    //dbg!(c);
+                                                            //dbg!(c);
 }
 
 #[test]
@@ -757,7 +779,7 @@ fn test_statement2() {
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
-    //dbg!(c);
+                                                           //dbg!(c);
 }
 
 #[test]
@@ -767,7 +789,7 @@ fn forall() {
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
-    //dbg!(c);
+                                                            //dbg!(c);
 }
 #[test]
 fn absolute_simplest() {
@@ -854,7 +876,6 @@ fn parse_capital_variable() {
 
 #[test]
 fn parse_while_loop() {
-    
     let file_content = "
     while (i<N)
         i := i+1 ;";
@@ -866,8 +887,20 @@ fn parse_while_loop() {
     let c = (statement() - end()).parse(&as_ref);
     // //dbg!(&c);
     c.unwrap(); // should not panic;
-
 }
+
+#[test]
+fn parsing_linked_list() {
+    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+
+    let tokens = tokens(&file_content);
+    let as_ref = tokens.as_slice();
+    // //dbg!(as_ref);
+    let c = (program() - end()).parse(&as_ref);
+    // //dbg!(&c);
+    c.unwrap(); // should not panic;
+}
+
 
 // fn is_literal<'a>() -> Parser<'a, Token<'a>, Token<'a>> {
 // 	is_a(|t: Token<'a>| match t {

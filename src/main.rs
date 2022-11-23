@@ -21,6 +21,8 @@ mod pretty_print;
 
 mod utils;
 
+mod symbolic_table;
+
 #[macro_use]
 extern crate pest_derive;
 

@@ -1,0 +1,125 @@
+//
+// Linked-list, with several methods.
+//
+class Node {
+    int value ;
+    Node next ;
+
+    bool member(int x) {
+        int v := this.value ;
+        if(x==v) return true ;
+        else {
+            Node n := this.next ;
+            bool b := n.member(x) ;
+            return b ;
+        }
+    }
+
+    int length() {
+        Node n := this.next ;
+        if (n==null) return 1 ;
+        else {
+            int k := n.length() ;
+            return k+1 ;
+        }
+    }
+
+    Node min()
+    {
+       Node p := this ;
+       Node min := p ;
+       int minval := min.value ;
+
+       while ( p != null) {
+          int value := p.value ;
+          if ( value < minval) {
+               min := p ;
+               minval := value ;
+          }
+          p := p.next;
+       }
+       return min ;
+    }
+
+    static void test1(Node node)
+        requires(node != null)
+        exceptional(false)
+    {
+        Node min := node.min() ;
+        assert min == null ;
+    }
+
+    static void test2(Node node)
+        requires(node != null)
+        exceptional(false)
+    {
+        Node min := node.min() ;
+        int x := min.value ;
+        bool ok := node.member(x) ;
+        assert ok ;
+    }
+
+    static void test2_invalid(Node node)
+        requires(node != null)
+        exceptional(false)
+    {
+        Node min := node.min() ;
+        int x := min.value ;
+        bool ok := node.member(x) ;
+        assert !ok ;
+    }
+
+    static void test3(Node node)
+        requires(node != null)
+        exceptional(false)
+    {
+        Node min := node.min() ;
+        int minval := min.value ;
+        int n := node.length() ;
+        Node p := node ;
+        int k := 0 ;
+        while (p != null) {
+          int x := p.value ;
+          assert minval <= x ;
+          p := p.next ;
+          k := k+1 ;
+        }
+        assert n == k ;
+    }
+
+    static void test3_invalid1(Node node)
+        requires(node != null)
+        exceptional(false)
+    {
+        Node min := node.min() ;
+        int minval := min.value ;
+        int n := node.length() ;
+        Node p := node ;
+        int k := 0 ;
+        while (p != null) {
+          int x := p.value ;
+          assert minval == x ; // should be <=
+          p := p.next ;
+          k := k+1 ;
+        }
+        assert n == k ;
+    }
+
+    static void test3_invalid2(Node node)
+        requires(node != null)
+        exceptional(false)
+    {
+        Node min := node.min() ;
+        int minval := min.value ;
+        int n := node.length() ;
+        Node p := node ;
+        int k := 0 ;
+        while (p != null) {
+          int x := p.value ;
+          assert minval <= x ;
+          p := p.next ;
+          k := k+1 ;
+        }
+        assert n > k ; // should be equal
+    }
+}
