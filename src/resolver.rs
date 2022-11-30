@@ -19,16 +19,17 @@ pub fn set_resolvers(compilation_unit: &mut CompilationUnit) {
             _ => None,
         });
         for (body, params) in method_bodies {
-            helper(body, &declarations, name, params);
+
+        let mut local_variables: HashMap<&String, NonVoidType> = HashMap::new(); // 'this' must also be set
+        for param in params {
+            local_variables.insert(&param.name, param.type_.to_owned());
+        }
+            helper(body, &declarations, name, &mut local_variables);
         }
     }
 }
 
-fn helper(statement: &mut Statement, declarations: &Vec<Declaration>, class_name: &String, params: &Vec<Parameter>) {
-    let mut local_variables: HashMap<&String, NonVoidType> = HashMap::new(); // 'this' must also be set
-    for param in params {
-        local_variables.insert(&param.name, param.type_.to_owned());
-    }
+fn helper<'a>(statement: &'a mut Statement, declarations: &Vec<Declaration>, class_name: &String, local_variables: &mut HashMap<&'a String, NonVoidType>) {
     match statement {
         Statement::Call { invocation: Invocation::InvokeMethod { lhs, rhs, resolved, .. } } => {
             if let Some(NonVoidType::ReferenceType { identifier }) = &local_variables.get(lhs) {
@@ -51,20 +52,22 @@ fn helper(statement: &mut Statement, declarations: &Vec<Declaration>, class_name
             }
         }
         Statement::Ite { guard, true_body, false_body } => {
-            helper(true_body, declarations, class_name, params);
-            helper(false_body, declarations, class_name, params);
+            helper(true_body, declarations, class_name, local_variables);
+            helper(false_body, declarations, class_name, local_variables);
         },
         Statement::Seq { stat1, stat2 } => {
-            helper(stat1, declarations, class_name, params);
-            helper(stat2, declarations, class_name, params);
+            helper(stat1, declarations, class_name, local_variables);
+            helper(stat2, declarations, class_name, local_variables);
         },
         Statement::While { guard, body } => {
-            helper(body, declarations, class_name, params);
+            helper(body, declarations, class_name, local_variables);
         },
         Statement::Throw { message } => todo!(),
         Statement::Try { try_body, catch_body } => todo!(),
         Statement::Block { body } => todo!(),
-        Statement::Declare { type_, var } => {local_variables.insert(var, type_.clone());}
+        Statement::Declare { type_, var } => {
+            local_variables.insert(var, type_.clone());
+        }
         _ => ()
     }
 

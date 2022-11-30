@@ -18,7 +18,7 @@ use crate::{
         Parameter, Reference, Rhs, RuntimeType, Statement, UnOp, Declaration,
     },
     typeable::Typeable,
-    utils, z3_checker,
+    utils, z3_checker, concretization::{concretizations, find_symbolic_refs},
 };
 
 const NULL: Expression = Expression::Lit {
@@ -188,7 +188,7 @@ fn action(
 ) -> ActionResult {
     let action = &program[&pc];
 
-    //dbg!(&action, stack.last().map(|s| &s.params));
+    dbg!(&action, stack.last().map(|s| &s.params));
 
     match action {
         CFGStatement::Statement(Statement::Declare { type_, var }) => {
@@ -233,10 +233,18 @@ fn action(
                 ActionResult::Continue
             } else {
                 //dbg!("invoke Z3 with:", &expression);
-                let result = z3_checker::verify(&expression);
-                if let SatResult::Unsat = result {
-                } else {
-                    panic!("invalid")
+                // dbg!(&alias_map);
+                let symbolic_refs = find_symbolic_refs(&expression);
+                // dbg!(&symbolic_refs);
+                let expressions = concretizations(&expression, &symbolic_refs, alias_map);
+                // dbg!(&expressions);
+
+                for expression in expressions {
+                    let result = z3_checker::verify(&expression);
+                    if let SatResult::Unsat = result {
+                    } else {
+                        panic!("invalid")
+                    }
                 }
 
                 ActionResult::Continue
@@ -339,6 +347,7 @@ fn exec_invocation(
     ref_counter: &mut i64,
     st: &SymbolicTable,
 ) -> ActionResult {
+    dbg!(invocation);
     let (Declaration::Class { name: class_name, .. }, member) = invocation.resolved().unwrap(); // i don't get this
 
     match member {
@@ -691,7 +700,7 @@ pub fn init_symbolic_reference(
         let existing_aliases = alias_map
             .values()
             .filter(|x| x.iter().any(|x| x.type_of() == *type_ref))
-            .flat_map(|x| x.iter());
+            .flat_map(|x| x.iter()).unique();
 
         let aliases = existing_aliases
             .cloned()
@@ -858,7 +867,7 @@ fn exec_rhs_field(
             init_symbolic_reference(heap, alias_map, var, type_, ref_counter, st);
             remove_symbolic_null(alias_map, var);
             let concrete_refs = &alias_map[var];
-            dbg!(&concrete_refs);
+            dbg!(&alias_map);
             dbg!(&heap);
             read_field_symbolic_ref(heap, concrete_refs, sym_ref, field)
         }
@@ -915,7 +924,7 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
     let c = parse(&tokens);
     let c = c.unwrap();
 
-    dbg!(&c);
+    // dbg!(&c);
 
     let mut i = 0;
     let declaration_member_initial_function = c.find_declaration(method).unwrap();
@@ -935,7 +944,7 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
     let pc = find_entry_for_static_invocation(method, &program);
 
     if let DeclarationMember::Method { params, .. } = &declaration_member_initial_function {
-        dbg!(&params);
+        // dbg!(&params);
         let params = params
             .iter()
             .map(|p| {
@@ -945,7 +954,7 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
                 )
             })
             .collect();
-        dbg!(&params);
+        // dbg!(&params);
 
         let mut state = State {
             pc,
@@ -960,7 +969,7 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
             precondition: true_lit(),
             constraints: HashSet::new(),
             alias_map: HashMap::new(),
-            ref_counter: 0,
+            ref_counter: 1,
         };
 
         return sym_exec(&mut state, &flows, k, &symbolic_table);
@@ -1015,4 +1024,23 @@ fn sym_exec_nonstatic_function() {
     let file_content = std::fs::read_to_string("./examples/nonstatic_function.oox").unwrap();
     // so this one is invalid at k = 100, in OOX it's invalid at k=105 🤨
     assert_eq!(verify_file(&file_content, "f", 20), SymResult::Valid);
+}
+
+#[test]
+fn sym_exec_linked_list1() {
+    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    assert_eq!(verify_file(&file_content, "test2", 50), SymResult::Valid);
+}
+
+
+// #[test]
+// fn sym_exec_linked_list1_invalid() {
+//     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+//     assert_eq!(verify_file(&file_content, "test2_invalid", 50), SymResult::Valid);
+// }
+
+#[test]
+fn sym_exec_linked_list3() {
+    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    assert_eq!(verify_file(&file_content, "test3_invalid1", 50), SymResult::Valid);
 }

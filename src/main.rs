@@ -1,16 +1,16 @@
 #![allow(dead_code)]
 
 use z3_checker::playground;
-mod syntax;
 mod lexer;
 mod parser_pom;
 mod stack;
+mod syntax;
 
 mod cfg;
 mod exec;
 
-mod typeable;
 mod eval;
+mod typeable;
 
 mod dsl;
 mod z3_checker;
@@ -21,7 +21,9 @@ mod pretty_print;
 
 mod utils;
 
+mod concretization;
 mod symbolic_table;
+mod fold;
 
 #[macro_use]
 extern crate pest_derive;

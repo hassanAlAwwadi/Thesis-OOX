@@ -10,3 +10,27 @@ expression9:
 
 
  Something weird is going on with null, why add it to only then immediately remove it?
+
+
+Original OOX deals with symbolic references in Z3 expressions as follows:
+Find all concrete references (aliasMap) for each of the symbolic references 
+create for each combination of these an expression with their concrete references
+this results in multiple expressions that need to be solved
+
+
+_node = [null, ref(1)] 
+_next1 = [null, ref(1), ref(2)]
+
+
+_node + _next1
+becomes len(_node) * len(_next1) z3 invocations
+
+null + null
+null + ref(1)
+null + ref(2)
+ref(1) + null
+ref(1) + ref(1)
+ref(1) + ref(2)
+
+Might it be better to keep _node and _next1 as variables in Z3? idk
+as the number of symbolic references increases... this explodes!

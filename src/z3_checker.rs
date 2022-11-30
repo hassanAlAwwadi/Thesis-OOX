@@ -132,14 +132,22 @@ impl<'ctx> AstNode<'ctx> {
         ))
     }
 
+    fn conditional(self, true_: AstNode<'ctx>, false_: AstNode<'ctx>) -> Result<AstNode, ()> {
+        let guard = Bool::try_from(self)?;
+
+        guard.ite(&guard, &guard);
+        match true_ {
+            AstNode::Bool(true_) => Ok(AstNode::Bool(guard.ite(&true_, &Bool::try_from(false_)? ))),
+            AstNode::Int(true_) => Ok(AstNode::Int(guard.ite(&true_, &Int::try_from(false_)? ))),
+        }
+    }
+
     fn neq(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
         match self {
             AstNode::Bool(b) => Ok(AstNode::Bool(!b._eq(&Bool::try_from(other)?))),
             AstNode::Int(i) => Ok(AstNode::Bool(!i._eq(&Int::try_from(other)?))),
         }
     }
-
-    
 
     fn not(self) -> Result<AstNode<'ctx>, ()> {
         Ok(AstNode::Bool(Bool::try_from(self)?.not()))
@@ -194,8 +202,10 @@ impl<'a> NodeEntry<'a> {
 fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> Bool<'ctx> {
     assert!(expression.type_of() == RuntimeType::BoolRuntimeType);
 
-    let (symbolic_variables, literals) = symbolic_variables(expression);
-
+    dbg!(expression);
+    let (symbolic_variables, literals, symbolic_refs) = symbolic_variables(expression);
+    assert!(symbolic_refs.len() == 0);
+    // dbg!(&literals);
     let id_to_z3_node = symbolic_variables
         .into_iter()
         .map(|(id, type_)| match type_ {
@@ -213,11 +223,13 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
             let z3_node = match &lit {
                 Lit::BoolLit { bool_value } => AstNode::Bool(Bool::from_bool(ctx, *bool_value)),
                 Lit::IntLit { int_value } => AstNode::Int(Int::from_i64(ctx, *int_value)),
+                Lit::NullLit => AstNode::Int(Int::from_i64(ctx, 0)),
                 _ => todo!(),
             };
             (NodeEntry::Lit(lit), z3_node)
         }))
         .collect::<HashMap<_, _>>();
+    
 
     fn helper<'ctx>(
         expression: &Expression,
@@ -263,103 +275,50 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
                 UnOp::Negate => AstNode::not(helper(&value, vars)).unwrap(),
             },
             Expression::Lit { lit, .. } => vars.get(&NodeEntry::Lit(lit.clone())).unwrap().clone(),
+            Expression::Ref { ref_, type_ } => {
+                // dbg!(*ref_);
+                vars.get(&NodeEntry::Lit(Lit::IntLit { int_value: *ref_ })).unwrap().clone()
+            },
+            Expression::Conditional { guard, true_, false_, type_ } => {
+                AstNode::conditional(helper(guard, vars), helper(true_, vars), helper(false_, vars)).unwrap()
+            }
             _ => todo!(),
         }
     }
 
+    // generate all possible concrete expressions from symbolic references.
+    
+
     let ast_node = helper(expression, &id_to_z3_node);
 
     Bool::try_from(ast_node).unwrap()
-
-    // let (bools, ints) = symbolic_variables(expression).into_iter().fold(
-    //     (
-    //         HashMap::<Identifier, Bool<'ctx>>::new(),
-    //         HashMap::<Identifier, Int<'ctx>>::new(),
-    //     ),
-    //     |(mut bools, mut ints), (id, type_)| {
-    //         match type_ {
-    //             RuntimeType::BoolRuntimeType => {
-    //                 bools.insert(id.clone(), Bool::new_const(ctx, id));
-    //             }
-    //             RuntimeType::IntRuntimeType => {
-    //                 ints.insert(id.clone(), Int::new_const(ctx, id));
-    //             }
-    //             _ => todo!(),
-    //         };
-    //         (bools, ints)
-    //     },
-    // );
-
-    // fn helper<'ctx> (expression: &Expression, bools: &HashMap<String, Bool>) -> Int<'ctx> {
-    //     match expression {
-    //         Expression::SymbolicVar { var, type_ } =>
-    //             // ints.get(var).unwrap().clone()
-    //             todo!()
-    //         ,
-    //         Expression::BinOp { bin_op: BinOp::And, lhs, rhs, type_ } => {
-    //             // helper()
-    //             todo!()
-    //         }
-
-    //         _ => todo!()
-    //     }
-    // };
-
-    // fn int_helper<'ctx> (expression: &Expression, ints: &HashMap<String, Int>) -> Int<'ctx> {
-    //     match expression {
-    //         Expression::SymbolicVar { var, type_ } =>
-    //             // ints.get(var).unwrap().clone()
-    //             todo!()
-    //         ,
-    //         Expression::BinOp { bin_op, lhs, rhs, type_ } => {
-    //             match bin_op {
-    //                 BinOp::Equal => int_helper(lhs, ints)._eq(&int_helper(rhs, ints)),
-    //                 BinOp::NotEqual => todo!(),
-    //                 BinOp::LessThan => todo!(),
-    //                 BinOp::LessThanEqual => todo!(),
-    //                 BinOp::GreaterThan => todo!(),
-    //                 BinOp::GreaterThanEqual => todo!(),
-    //                 BinOp::Plus => todo!(),
-    //                 BinOp::Minus => todo!(),
-    //                 BinOp::Multiply => todo!(),
-    //                 BinOp::Modulo => todo!(),
-    //                 // BinOp::Implies => todo!(),
-    //                 // BinOp::And => todo!(),
-    //                 // BinOp::Or => todo!(),
-    //                 // BinOp::Divide => todo!(),
-    //             }
-    //             // helper()
-    //         }
-
-    //         _ => todo!()
-    //     }
-    // }
-    // let int_expression = |expression: &Expression| -> Int<'ctx> { todo!() };
-    // todo!()
 }
 
 fn symbolic_variables(
     expression: &Expression,
-) -> (HashSet<(Identifier, RuntimeType)>, HashSet<Lit>) {
+) -> (HashSet<(Identifier, RuntimeType)>, HashSet<Lit>, HashSet<Identifier>) {
     let mut variables = HashSet::new();
     let mut literals = HashSet::new();
+    let mut symbolic_refs = HashSet::new();
 
     fn helper(
         variables: &mut HashSet<(Identifier, RuntimeType)>,
         literals: &mut HashSet<Lit>,
+        symbolic_refs: &mut HashSet<Identifier>,
         expression: &Expression,
     ) {
         match expression {
             Expression::BinOp { lhs, rhs, .. } => {
-                helper(variables, literals, lhs);
-                helper(variables, literals, rhs);
+                helper(variables, literals, symbolic_refs, lhs);
+                helper(variables, literals, symbolic_refs, rhs);
             }
             Expression::UnOp { value, .. } => {
-                helper(variables, literals, &value);
+                helper(variables, literals, symbolic_refs, &value);
             }
-            Expression::Conditional { true_, false_, .. } => {
-                helper(variables, literals, &true_);
-                helper(variables, literals, &false_);
+            Expression::Conditional { guard, true_, false_, .. } => {
+                helper(variables, literals, symbolic_refs, &guard);
+                helper(variables, literals, symbolic_refs, &true_);
+                helper(variables, literals, symbolic_refs, &false_);
             }
             Expression::SymbolicVar { var, type_ } => {
                 variables.insert((var.clone(), type_.clone()));
@@ -367,13 +326,19 @@ fn symbolic_variables(
             Expression::Lit { lit, type_ } => {
                 literals.insert(lit.clone());
             } // Lits are handled elsewhere
+            Expression::Ref { ref_, type_ } => {
+                literals.insert(Lit::IntLit { int_value: *ref_ });
+            },
+            Expression::SymbolicRef { var, type_ } => {
+                symbolic_refs.insert(var.to_owned());
+            }
             _ => todo!("Yet to figure out: {:?}", expression),
         }
     }
 
-    helper(&mut variables, &mut literals, expression);
+    helper(&mut variables, &mut literals, &mut symbolic_refs, expression);
 
-    (variables, literals)
+    (variables, literals, symbolic_refs)
 }
 
 pub fn playground() {
