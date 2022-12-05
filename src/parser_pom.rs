@@ -4,7 +4,7 @@ use pom::parser::*;
 
 use std::str::{self, FromStr};
 
-use crate::dsl::neg;
+use crate::dsl::negate;
 use crate::resolver;
 use crate::syntax::*;
 
@@ -188,7 +188,7 @@ fn create_ite(guard: Expression, true_body: Statement, false_body: Option<Statem
         false_body: if let Some(false_body) = false_body {
             Box::new(Statement::Seq {
                 stat1: Box::new(Statement::Assume {
-                    assumption: neg(guard.clone()),
+                    assumption: negate(guard.clone()),
                 }),
                 stat2: Box::new(false_body),
             })
@@ -211,7 +211,7 @@ fn create_while(guard: Expression, body: Option<Statement>) -> Statement {
                 }),
             }),
             stat2: Box::new(Statement::Assume {
-                assumption: neg(guard),
+                assumption: negate(guard),
             }),
         }
     } else {

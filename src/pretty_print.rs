@@ -9,8 +9,7 @@ impl Debug for Expression {
         fn helper(expression: &Expression, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match expression {
                 Expression::BinOp { bin_op, lhs, rhs, type_ } => {
-                    helper(lhs, f)?;
-                    f.write_str(" ")?;
+
                     let op_str = match bin_op {
                         BinOp::Implies => "==>",
                         BinOp::And => "&&",
@@ -27,9 +26,24 @@ impl Debug for Expression {
                         BinOp::Divide => "/",
                         BinOp::Modulo => "%",
                     };
-                    f.write_str(op_str)?;
-                    f.write_str(" ")?;
-                    helper(rhs, f)?;
+                    if bin_op == &BinOp::Implies {
+                        f.write_str("(")?;
+                        helper(lhs, f)?;
+                        f.write_str(")")?;
+                        f.write_str(" ")?;
+                        f.write_str(op_str)?;
+                        f.write_str(" ")?;
+
+                        f.write_str("(")?;
+                        helper(rhs, f)?;
+                        f.write_str(")")?;
+                    } else {
+                        helper(lhs, f)?;
+                        f.write_str(" ")?;
+                        f.write_str(op_str)?;
+                        f.write_str(" ")?;
+                        helper(rhs, f)?;
+                    }
                 },
                 Expression::UnOp { un_op, value, type_ } => {
                     match un_op {

@@ -149,7 +149,7 @@ impl<'ctx> AstNode<'ctx> {
         }
     }
 
-    fn not(self) -> Result<AstNode<'ctx>, ()> {
+    fn negate(self) -> Result<AstNode<'ctx>, ()> {
         Ok(AstNode::Bool(Bool::try_from(self)?.not()))
     }
 }
@@ -272,7 +272,7 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
                 type_,
             } => match un_op {
                 UnOp::Negative => todo!(),
-                UnOp::Negate => AstNode::not(helper(&value, vars)).unwrap(),
+                UnOp::Negate => AstNode::negate(helper(&value, vars)).unwrap(),
             },
             Expression::Lit { lit, .. } => vars.get(&NodeEntry::Lit(lit.clone())).unwrap().clone(),
             Expression::Ref { ref_, type_ } => {

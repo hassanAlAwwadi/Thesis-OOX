@@ -14,16 +14,16 @@ pub struct CompilationUnit {
 impl CompilationUnit {
     pub fn find_declaration(&self, identifier: &str) -> Option<DeclarationMember> {
         for member in &self.members {
-            let Declaration::Class {members, ..} = member;
-            for declaration_member in  members {
+            let Declaration::Class { members, .. } = member;
+            for declaration_member in members {
                 match declaration_member {
                     DeclarationMember::Constructor { name, .. } if identifier == name => {
                         return Some(declaration_member.clone());
-                    },
-                    DeclarationMember::Method { name, .. } if identifier == name =>  {
+                    }
+                    DeclarationMember::Method { name, .. } if identifier == name => {
                         return Some(declaration_member.clone());
-                    },
-                    _ => ()
+                    }
+                    _ => (),
                 }
             }
         }
@@ -45,7 +45,7 @@ pub enum DeclarationMember {
         name: Identifier,
         params: Vec<Parameter>,
         specification: Specification,
-        body: Statement
+        body: Statement,
     },
     Method {
         is_static: bool,
@@ -53,7 +53,7 @@ pub enum DeclarationMember {
         name: Identifier,
         params: Vec<Parameter>,
         specification: Specification,
-        body: Statement
+        body: Statement,
     },
     Field {
         type_: NonVoidType,
@@ -183,8 +183,26 @@ impl Invocation {
 impl Debug for Invocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvokeMethod { lhs, rhs, arguments, resolved } => f.debug_struct("InvokeMethod").field("lhs", lhs).field("rhs", rhs).field("arguments", arguments).finish(),
-            Self::InvokeConstructor { class_name, arguments, resolved } => f.debug_struct("InvokeConstructor").field("class_name", class_name).field("arguments", arguments).finish(),
+            Self::InvokeMethod {
+                lhs,
+                rhs,
+                arguments,
+                resolved,
+            } => f
+                .debug_struct("InvokeMethod")
+                .field("lhs", lhs)
+                .field("rhs", rhs)
+                .field("arguments", arguments)
+                .finish(),
+            Self::InvokeConstructor {
+                class_name,
+                arguments,
+                resolved,
+            } => f
+                .debug_struct("InvokeConstructor")
+                .field("class_name", class_name)
+                .field("arguments", arguments)
+                .finish(),
         }
     }
 }
@@ -234,6 +252,8 @@ pub enum Rhs {
         type_: RuntimeType,
     },
 }
+
+
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum Expression {
@@ -292,6 +312,25 @@ pub enum Expression {
         false_: Box<Expression>,
         type_: RuntimeType,
     },
+}
+
+impl Expression {
+    pub const TRUE: Expression = Expression::Lit {
+        lit: Lit::BoolLit { bool_value: true },
+        type_: RuntimeType::BoolRuntimeType,
+    };
+    pub const FALSE: Expression = Expression::Lit {
+        lit: Lit::BoolLit { bool_value: false },
+        type_: RuntimeType::BoolRuntimeType,
+    };
+
+    pub fn bool(v: bool) -> Expression {
+        if v { Expression::TRUE } else { Expression::FALSE }
+    }
+
+    pub fn int(v: i64) -> Expression {
+        Expression::Lit { lit: Lit::IntLit { int_value: v }, type_: RuntimeType::IntRuntimeType }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

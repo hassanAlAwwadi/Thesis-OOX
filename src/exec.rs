@@ -7,7 +7,7 @@ use z3::SatResult;
 
 use crate::{
     cfg::{labelled_statements, CFGStatement},
-    dsl::neg,
+    dsl::negate,
     eval::{self, evaluate},
     lexer::tokens,
     parser_pom::parse,
@@ -245,14 +245,24 @@ fn action(
                 } else {
                     // dbg!(&symbolic_refs);
                     let expressions = concretizations(&expression, &symbolic_refs, alias_map);
-                    // dbg!(&expressions);
+                    dbg!(&expressions);
 
                     for expression in expressions {
-                        let result = z3_checker::verify(&expression);
-                        if let SatResult::Unsat = result {
+                        let expression = evaluate(heap, stack, alias_map, &expression, ref_counter, st);
+                        if expression == true_lit() {
+                            panic!("invalid");
+                        } else if expression == false_lit() {
+                            // valid, keep going
+                            dbg!("locally solved!");
                         } else {
-                            panic!("invalid")
+                            // panic!("should not do that right now");
+                            let result = z3_checker::verify(&expression);
+                            if let SatResult::Unsat = result {
+                            } else {
+                                panic!("invalid")
+                            }
                         }
+                        
                     }
                 }
                 
@@ -262,9 +272,10 @@ fn action(
         }
         CFGStatement::Statement(Statement::Assume { assumption }) => {
             let expression = evaluate(heap, stack, alias_map, assumption, ref_counter, st);
+            dbg!(assumption, &expression);
             //dbg!(&assumption, &expression, stack.last().map(|s| &s.params));
             if expression == false_lit() {
-                panic!("infeasible");
+                panic!("infeasible, prune this path");
             } else if expression != true_lit() {
                 constraints.insert(expression);
             }
@@ -538,14 +549,14 @@ fn exec_assert(
             })
             .unwrap();
 
-        neg(Expression::BinOp {
+        negate(Expression::BinOp {
             bin_op: BinOp::Implies,
             lhs: Box::new(assumptions),
             rhs: Box::new(assertion.clone()),
             type_: RuntimeType::BoolRuntimeType,
         })
     } else {
-        neg(assertion.clone())
+        negate(assertion.clone())
     };
     // let expression = constraints.iter().fold(
     //     Expression::UnOp {
@@ -1012,12 +1023,12 @@ fn sym_exec_fib() {
     assert_eq!(verify_file(&file_content, "main", 70), SymResult::Valid);
 }
 
-#[test]
-fn sym_idk() {
-    // Expect a panic atm
-    // let file_content = std::fs::read_to_string("./examples/psv/test.oox").unwrap();
-    // assert_eq!(verify_file(&file_content, "main", 30), SymResult::Invalid);
-}
+// #[test]
+// fn sym_idk() {
+//     // Expect a panic atm
+//     let file_content = std::fs::read_to_string("./examples/psv/test.oox").unwrap();
+//     assert_eq!(verify_file(&file_content, "main", 30), SymResult::Invalid);
+// }
 
 #[test]
 fn sym_exec_div_by_n() {
@@ -1052,5 +1063,5 @@ fn sym_exec_linked_list1() {
 #[test]
 fn sym_exec_linked_list3() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
-    assert_eq!(verify_file(&file_content, "test3_invalid1", 50), SymResult::Valid);
+    assert_eq!(verify_file(&file_content, "test3_invalid1", 40), SymResult::Valid);
 }

@@ -5,7 +5,7 @@ use crate::syntax::{Identifier, NonVoidType, CompilationUnit, Declaration, Decla
 pub type Fields = Vec<(Identifier, NonVoidType)>;
 
 pub struct SymbolicTable {
-    class_to_fields: HashMap<String, Vec<(Identifier, NonVoidType)>>
+    pub class_to_fields: HashMap<String, Vec<(Identifier, NonVoidType)>>
 }
 
 impl SymbolicTable {
