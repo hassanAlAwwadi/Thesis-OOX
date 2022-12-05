@@ -232,20 +232,30 @@ fn action(
             } else if expression == false_lit() {
                 ActionResult::Continue
             } else {
-                //dbg!("invoke Z3 with:", &expression);
+                dbg!("invoke Z3 with:", &expression);
                 // dbg!(&alias_map);
                 let symbolic_refs = find_symbolic_refs(&expression);
-                // dbg!(&symbolic_refs);
-                let expressions = concretizations(&expression, &symbolic_refs, alias_map);
-                // dbg!(&expressions);
-
-                for expression in expressions {
+                if symbolic_refs.len() == 0 {
                     let result = z3_checker::verify(&expression);
                     if let SatResult::Unsat = result {
+                        
                     } else {
                         panic!("invalid")
                     }
+                } else {
+                    // dbg!(&symbolic_refs);
+                    let expressions = concretizations(&expression, &symbolic_refs, alias_map);
+                    // dbg!(&expressions);
+
+                    for expression in expressions {
+                        let result = z3_checker::verify(&expression);
+                        if let SatResult::Unsat = result {
+                        } else {
+                            panic!("invalid")
+                        }
+                    }
                 }
+                
 
                 ActionResult::Continue
             }
