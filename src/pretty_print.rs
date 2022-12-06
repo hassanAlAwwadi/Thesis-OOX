@@ -26,24 +26,24 @@ impl Debug for Expression {
                         BinOp::Divide => "/",
                         BinOp::Modulo => "%",
                     };
-                    if bin_op == &BinOp::Implies {
-                        f.write_str("(")?;
-                        helper(lhs, f)?;
-                        f.write_str(")")?;
-                        f.write_str(" ")?;
-                        f.write_str(op_str)?;
-                        f.write_str(" ")?;
+                    // if bin_op == &BinOp::Implies {
+                    //     f.write_str("(")?;
+                    //     helper(lhs, f)?;
+                    //     f.write_str(")")?;
+                    //     f.write_str(" ")?;
+                    //     f.write_str(op_str)?;
+                    //     f.write_str(" ")?;
 
-                        f.write_str("(")?;
-                        helper(rhs, f)?;
-                        f.write_str(")")?;
-                    } else {
+                    //     f.write_str("(")?;
+                    //     helper(rhs, f)?;
+                    //     f.write_str(")")?;
+                    // } else {
                         helper(lhs, f)?;
                         f.write_str(" ")?;
                         f.write_str(op_str)?;
                         f.write_str(" ")?;
                         helper(rhs, f)?;
-                    }
+                    // }
                 },
                 Expression::UnOp { un_op, value, type_ } => {
                     match un_op {

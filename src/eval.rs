@@ -482,7 +482,7 @@ fn test_local_solver() {
     let expression = Expression::BinOp { bin_op: BinOp::Implies, lhs: Box::new(expression), rhs: Box::new(Expression::TRUE), type_: RuntimeType::ANYRuntimeType };
 
     let expression = Expression::UnOp { un_op: UnOp::Negate, value: Box::new(expression), type_: RuntimeType::ANYRuntimeType };
-    dbg!(&expression);
+    // dbg!(&expression);
 
     let mut heap = HashMap::new();
     let mut stack = Vec::new();

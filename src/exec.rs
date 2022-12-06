@@ -188,7 +188,7 @@ fn action(
 ) -> ActionResult {
     let action = &program[&pc];
 
-    dbg!(&action, stack.last().map(|s| &s.params));
+    // dbg!(&action, stack.last().map(|s| &s.params));
 
     match action {
         CFGStatement::Statement(Statement::Declare { type_, var }) => {
@@ -232,7 +232,7 @@ fn action(
             } else if expression == false_lit() {
                 ActionResult::Continue
             } else {
-                dbg!("invoke Z3 with:", &expression);
+                // dbg!("invoke Z3 with:", &expression);
                 // dbg!(&alias_map);
                 let symbolic_refs = find_symbolic_refs(&expression);
                 if symbolic_refs.len() == 0 {
@@ -245,7 +245,7 @@ fn action(
                 } else {
                     // dbg!(&symbolic_refs);
                     let expressions = concretizations(&expression, &symbolic_refs, alias_map);
-                    dbg!(&expressions);
+                    // dbg!(&expressions);
 
                     for expression in expressions {
                         let expression = evaluate(heap, stack, alias_map, &expression, ref_counter, st);
@@ -253,7 +253,7 @@ fn action(
                             panic!("invalid");
                         } else if expression == false_lit() {
                             // valid, keep going
-                            dbg!("locally solved!");
+                            // dbg!("locally solved!");
                         } else {
                             // panic!("should not do that right now");
                             let result = z3_checker::verify(&expression);
@@ -272,7 +272,7 @@ fn action(
         }
         CFGStatement::Statement(Statement::Assume { assumption }) => {
             let expression = evaluate(heap, stack, alias_map, assumption, ref_counter, st);
-            dbg!(assumption, &expression);
+            // dbg!(assumption, &expression);
             //dbg!(&assumption, &expression, stack.last().map(|s| &s.params));
             if expression == false_lit() {
                 panic!("infeasible, prune this path");
@@ -368,7 +368,7 @@ fn exec_invocation(
     ref_counter: &mut i64,
     st: &SymbolicTable,
 ) -> ActionResult {
-    dbg!(invocation);
+    // dbg!(invocation);
     let (Declaration::Class { name: class_name, .. }, member) = invocation.resolved().unwrap(); // i don't get this
 
     match member {
@@ -888,8 +888,8 @@ fn exec_rhs_field(
             init_symbolic_reference(heap, alias_map, var, type_, ref_counter, st);
             remove_symbolic_null(alias_map, var);
             let concrete_refs = &alias_map[var];
-            dbg!(&alias_map);
-            dbg!(&heap);
+            // dbg!(&alias_map);
+            // dbg!(&heap);
             read_field_symbolic_ref(heap, concrete_refs, sym_ref, field)
         }
         _ => todo!("Expected reference here, found: {:?}", object),
@@ -1023,27 +1023,27 @@ fn sym_exec_fib() {
     assert_eq!(verify_file(&file_content, "main", 70), SymResult::Valid);
 }
 
-// #[test]
-// fn sym_idk() {
-//     // Expect a panic atm
-//     let file_content = std::fs::read_to_string("./examples/psv/test.oox").unwrap();
-//     assert_eq!(verify_file(&file_content, "main", 30), SymResult::Invalid);
-// }
+#[test]
+fn sym_test_failure() {
+    // Expect a panic atm
+    let file_content = std::fs::read_to_string("./examples/psv/test.oox").unwrap();
+    assert_eq!(verify_file(&file_content, "main", 30), SymResult::Invalid);
+}
 
 #[test]
 fn sym_exec_div_by_n() {
     let file_content = std::fs::read_to_string("./examples/psv/divByN.oox").unwrap();
-    // so this one is invalid at k = 100, in OOX it's invalid at k=105 🤨
+    // so this one is invalid at k = 100, in OOX it's invalid at k=105, due to exceptions (more if statements are added)
     assert_eq!(
-        verify_file(&file_content, "divByN_invalid", 30),
-        SymResult::Valid
+        verify_file(&file_content, "divByN_invalid", 100),
+        SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_nonstatic_function() {
     let file_content = std::fs::read_to_string("./examples/nonstatic_function.oox").unwrap();
-    // so this one is invalid at k = 100, in OOX it's invalid at k=105 🤨
+    // so this one is invalid at k = 100, in OOX it's invalid at k=105, due to exceptions (more if statements are added)
     assert_eq!(verify_file(&file_content, "f", 20), SymResult::Valid);
 }
 
@@ -1054,14 +1054,15 @@ fn sym_exec_linked_list1() {
 }
 
 
-// #[test]
-// fn sym_exec_linked_list1_invalid() {
-//     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
-//     assert_eq!(verify_file(&file_content, "test2_invalid", 50), SymResult::Valid);
-// }
+#[test]
+fn sym_exec_linked_list1_invalid() {
+    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    assert_eq!(verify_file(&file_content, "test2_invalid", 50), SymResult::Invalid);
+}
 
 #[test]
-fn sym_exec_linked_list3() {
+fn sym_exec_linked_list3_invalid() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
-    assert_eq!(verify_file(&file_content, "test3_invalid1", 40), SymResult::Valid);
+    // at k=80 it fails, after ~170 sec in hs oox, rs oox does this in ~90 sec
+    assert_eq!(verify_file(&file_content, "test3_invalid1", 80), SymResult::Invalid);
 }

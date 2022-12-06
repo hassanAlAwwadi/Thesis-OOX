@@ -202,7 +202,7 @@ impl<'a> NodeEntry<'a> {
 fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> Bool<'ctx> {
     assert!(expression.type_of() == RuntimeType::BoolRuntimeType);
 
-    dbg!(expression);
+    // dbg!(expression);
     let (symbolic_variables, literals, symbolic_refs) = symbolic_variables(expression);
     assert!(symbolic_refs.len() == 0);
     // dbg!(&literals);

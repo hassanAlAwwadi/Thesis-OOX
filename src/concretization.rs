@@ -42,7 +42,7 @@ pub fn concretizations<'a>(
         }).collect::<Option<HashMap<_,_>>>();
 
         if let Some(concretization) = concretization {
-            dbg!(&concretization);
+            // dbg!(&concretization);
             replaced_expressions.push(helper(expression, &concretization));
         } else {
             return replaced_expressions;
