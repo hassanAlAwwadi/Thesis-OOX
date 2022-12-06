@@ -124,7 +124,10 @@ fn sym_exec(
         ActionResult::FunctionCall(next) => {
             // function call or return
             state.pc = next;
-            sym_exec(state, flows, k - 1, st);
+            let result = sym_exec(state, flows, k - 1, st);
+            if result != SymResult::Valid {
+                return result;
+            }
         }
         ActionResult::Return(return_pc) => {
             if let Some(neighbours) = flows.get(&return_pc) {
@@ -162,6 +165,13 @@ fn sym_exec(
                 }
             }
         }
+        ActionResult::InvalidAssertion => {
+            return SymResult::Invalid;
+        },
+        ActionResult::InfeasiblePath => {
+            // Finish this branch
+            return SymResult::Valid;
+        },
     };
     SymResult::Valid
 }
@@ -170,6 +180,8 @@ enum ActionResult {
     Continue,
     Return(u64),
     FunctionCall(u64),
+    InvalidAssertion,
+    InfeasiblePath
 }
 
 fn action(
@@ -228,7 +240,7 @@ fn action(
                 st,
             );
             if expression == true_lit() {
-                panic!("invalid");
+                ActionResult::InvalidAssertion
             } else if expression == false_lit() {
                 ActionResult::Continue
             } else {
@@ -240,7 +252,7 @@ fn action(
                     if let SatResult::Unsat = result {
                         
                     } else {
-                        panic!("invalid")
+                        return ActionResult::InvalidAssertion;
                     }
                 } else {
                     // dbg!(&symbolic_refs);
@@ -250,7 +262,7 @@ fn action(
                     for expression in expressions {
                         let expression = evaluate(heap, stack, alias_map, &expression, ref_counter, st);
                         if expression == true_lit() {
-                            panic!("invalid");
+                            return ActionResult::InvalidAssertion;
                         } else if expression == false_lit() {
                             // valid, keep going
                             // dbg!("locally solved!");
@@ -259,7 +271,8 @@ fn action(
                             let result = z3_checker::verify(&expression);
                             if let SatResult::Unsat = result {
                             } else {
-                                panic!("invalid")
+                                // panic!("invalid");
+                                return ActionResult::InvalidAssertion;
                             }
                         }
                         
@@ -275,7 +288,7 @@ fn action(
             // dbg!(assumption, &expression);
             //dbg!(&assumption, &expression, stack.last().map(|s| &s.params));
             if expression == false_lit() {
-                panic!("infeasible, prune this path");
+                return ActionResult::InfeasiblePath;
             } else if expression != true_lit() {
                 constraints.insert(expression);
             }
