@@ -1,11 +1,16 @@
-use std::{ops::Deref, borrow::Borrow};
+use std::{borrow::Borrow, ops::Deref};
 
-use crate::syntax::{RuntimeType, NonVoidType, Expression};
+use crate::syntax::{Expression, NonVoidType, RuntimeType};
 
 pub trait Typeable {
     fn type_of(&self) -> RuntimeType;
 
-    const NUM_TYPES: &'static [RuntimeType] = &[RuntimeType::NUMRuntimeType, RuntimeType::IntRuntimeType, RuntimeType::UIntRuntimeType, RuntimeType::FloatRuntimeType];
+    const NUM_TYPES: &'static [RuntimeType] = &[
+        RuntimeType::NUMRuntimeType,
+        RuntimeType::IntRuntimeType,
+        RuntimeType::UIntRuntimeType,
+        RuntimeType::FloatRuntimeType,
+    ];
 
     fn is_of_type(&self, other: impl Typeable) -> bool {
         use RuntimeType::*;
@@ -16,18 +21,18 @@ pub trait Typeable {
             (a, NUMRuntimeType) => Self::NUM_TYPES.contains(&a),
             // matching REF types
             (REFRuntimeType, REFRuntimeType) => true,
-            (REFRuntimeType, ReferenceRuntimeType {..}) => true,
-            (REFRuntimeType, ArrayRuntimeType {.. }) => true,
+            (REFRuntimeType, ReferenceRuntimeType { .. }) => true,
+            (REFRuntimeType, ArrayRuntimeType { .. }) => true,
             (REFRuntimeType, StringRuntimeType) => true,
             (REFRuntimeType, ARRAYRuntimeType) => true,
-            (ReferenceRuntimeType {..}, REFRuntimeType) => true,
-            (ArrayRuntimeType {.. }, REFRuntimeType) => true,
+            (ReferenceRuntimeType { .. }, REFRuntimeType) => true,
+            (ArrayRuntimeType { .. }, REFRuntimeType) => true,
             (StringRuntimeType, REFRuntimeType) => true,
             (ARRAYRuntimeType, REFRuntimeType) => true,
             // Matching ARRAY types
-            (ARRAYRuntimeType, (ArrayRuntimeType {..})) => true,
-            (ArrayRuntimeType{..}, ARRAYRuntimeType) => true,
-            (a, b) => a == b
+            (ARRAYRuntimeType, (ArrayRuntimeType { .. })) => true,
+            (ArrayRuntimeType { .. }, ARRAYRuntimeType) => true,
+            (a, b) => a == b,
         }
     }
 }
@@ -51,22 +56,22 @@ impl<B: Borrow<NonVoidType>> Typeable for B {
     }
 }
 
-
 impl Typeable for Expression {
     fn type_of(&self) -> RuntimeType {
         use Expression::*;
         match &self {
-            Forall {  type_,.. } => type_,
-            Exists { type_ ,.. } => type_,
-            BinOp { type_ ,.. } => type_,
-            UnOp {  type_ ,.. } => type_,
-            Var {  type_ ,.. } => type_,
-            SymbolicVar { type_ ,.. } => type_,
-            Lit { type_ ,.. } => type_,
-            SizeOf {  type_ ,.. } => type_,
-            Ref { type_ ,.. } => type_,
-            SymbolicRef {  type_ ,.. } => type_,
-            Conditional {  type_ ,.. } => type_,
-        }.clone()
+            Forall { type_, .. } => type_,
+            Exists { type_, .. } => type_,
+            BinOp { type_, .. } => type_,
+            UnOp { type_, .. } => type_,
+            Var { type_, .. } => type_,
+            SymbolicVar { type_, .. } => type_,
+            Lit { type_, .. } => type_,
+            SizeOf { type_, .. } => type_,
+            Ref { type_, .. } => type_,
+            SymbolicRef { type_, .. } => type_,
+            Conditional { type_, .. } => type_,
+        }
+        .clone()
     }
 }

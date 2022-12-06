@@ -1,18 +1,19 @@
 use std::{
     collections::{HashMap, HashSet},
+    rc::Rc,
 };
 
 use crate::{
     exec::AliasMap,
-    syntax::{Expression, Identifier, RuntimeType}, fold::{ExprFoldCollection},
+    fold::ExprFoldCollection,
+    syntax::{Expression, Identifier, RuntimeType},
 };
 
-
 pub fn concretizations<'a>(
-    expression: &Expression,
+    expression: Rc<Expression>,
     symbolic_refs: &HashSet<&Identifier>,
     alias_map: &'a AliasMap,
-) -> Vec<Expression> {
+) -> Vec<Rc<Expression>> {
     let mut replaced_expressions = Vec::new();
     let n_combinations = alias_map.iter().fold(1, |a, (_, refs)| a * refs.len());
 
@@ -22,71 +23,73 @@ pub fn concretizations<'a>(
         .map(|(id, refs)| (id, refs.iter().cycle().take(n_combinations)))
         .collect::<HashMap<_, _>>();
 
-        // let (combinations, id_to_idx) = alias_map
-        // .iter()
-        // .map(|(key, refs)|  (key, refs.iter().cycle().take(n_combinations)))
-        // .fold((Vec::new(), HashMap::new()), |(mut refs, mut id_to_idx), (id, refs_iter)| {
-        //     let idx = refs.len();
-        //     refs.push(refs_iter);
-        //     id_to_idx.insert(id, idx);
-        //     (refs, id_to_idx)
-        // });
+    // let (combinations, id_to_idx) = alias_map
+    // .iter()
+    // .map(|(key, refs)|  (key, refs.iter().cycle().take(n_combinations)))
+    // .fold((Vec::new(), HashMap::new()), |(mut refs, mut id_to_idx), (id, refs_iter)| {
+    //     let idx = refs.len();
+    //     refs.push(refs_iter);
+    //     id_to_idx.insert(id, idx);
+    //     (refs, id_to_idx)
+    // });
 
     if concretizations.len() == 0 {
         return replaced_expressions;
     }
 
     loop {
-        let concretization = concretizations.iter_mut().map(|(id, refs)| {
-            refs.next().map(|ref_| (*id, ref_) )
-        }).collect::<Option<HashMap<_,_>>>();
+        let concretization = concretizations
+            .iter_mut()
+            .map(|(id, refs)| refs.next().map(|ref_| (*id, ref_)))
+            .collect::<Option<HashMap<_, _>>>();
 
         if let Some(concretization) = concretization {
             // dbg!(&concretization);
-            replaced_expressions.push(helper(expression, &concretization));
+            replaced_expressions.push(helper(expression.clone(), &concretization));
         } else {
             return replaced_expressions;
         }
     }
 }
 
-fn helper(expression: &Expression, concretization: &HashMap<&String, &Expression>) -> Expression {
-    match expression {
-        Expression::SymbolicRef { var, .. } => {
-            concretization[var].clone()
-        },
+fn helper(
+    expression: Rc<Expression>,
+    concretization: &HashMap<&String, &Rc<Expression>>,
+) -> Rc<Expression> {
+    match expression.as_ref() {
+        Expression::SymbolicRef { var, .. } => concretization[&var].clone(),
         Expression::BinOp {
             bin_op,
             lhs,
             rhs,
             type_,
-        } => Expression::BinOp {
+        } => Rc::new(Expression::BinOp {
             bin_op: bin_op.clone(),
-            lhs: Box::new(helper(lhs, concretization)),
-            rhs: Box::new(helper(rhs, concretization)),
+            lhs: helper(lhs.clone(), concretization),
+            rhs: helper(rhs.clone(), concretization),
             type_: type_.clone(),
-        },
+        }),
         Expression::UnOp {
             un_op,
             value,
             type_,
-        } => Expression::UnOp {
+        } => Rc::new(Expression::UnOp {
             un_op: un_op.clone(),
-            value: Box::new(helper(value, concretization)),
+            value: helper(value.clone(), concretization),
             type_: type_.clone(),
-        },
+        }),
 
         Expression::Conditional {
             guard,
             true_,
             false_,
             type_,
-        } => Expression::Conditional {
-            guard: Box::new(helper(guard, concretization)),
-            true_: Box::new(helper(&true_, concretization)),
-            false_: Box::new(helper(false_, concretization)),
+        } => Rc::new(Expression::Conditional {
+            guard: helper(guard.clone(), concretization),
+            true_: helper(true_.clone(), concretization),
+            false_: helper(false_.clone(), concretization),
             type_: type_.clone(),
-        },
+        }),
         Expression::Forall {
             elem,
             range,
@@ -177,13 +180,11 @@ fn helper(expression: &Expression, concretization: &HashMap<&String, &Expression
 
 // returns the identifiers of all Expression::SymbolicRef in expression.
 pub fn find_symbolic_refs<'a>(expression: &Expression) -> HashSet<&Identifier> {
-
     struct SymbolicRefFold;
     impl<'a> ExprFoldCollection<'a, HashSet<&'a Identifier>> for SymbolicRefFold {
         fn fold_sym_ref(var: &'a Identifier, _: &RuntimeType) -> HashSet<&'a Identifier> {
             HashSet::from_iter(std::iter::once(var))
         }
-
     }
 
     SymbolicRefFold::fold_expr(expression)

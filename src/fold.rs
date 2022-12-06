@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
 use crate::syntax::{BinOp, Expression, Identifier, Lit, Reference, RuntimeType, UnOp};
 
@@ -10,8 +10,8 @@ where
 {
     fn fold_binop(
         bin_op: &'a BinOp,
-        lhs: &'a Box<Expression>,
-        rhs: &'a Box<Expression>,
+        lhs: &'a Rc<Expression>,
+        rhs: &'a Rc<Expression>,
         type_: &'a RuntimeType,
     ) -> R {
         let mut r = Self::fold_expr(lhs);
@@ -19,7 +19,7 @@ where
         r
     }
 
-    fn fold_unop(un_op: &'a UnOp, value: &'a Box<Expression>, type_: &'a RuntimeType) -> R {
+    fn fold_unop(un_op: &'a UnOp, value: &'a Rc<Expression>, type_: &'a RuntimeType) -> R {
         Self::fold_expr(value)
     }
 
@@ -48,9 +48,9 @@ where
     }
 
     fn fold_cond(
-        guard: &'a Box<Expression>,
-        true_: &'a Box<Expression>,
-        false_: &'a Box<Expression>,
+        guard: &'a Rc<Expression>,
+        true_: &'a Rc<Expression>,
+        false_: &'a Rc<Expression>,
         type_: &'a RuntimeType,
     ) -> R {
         let mut r = Self::fold_expr(guard);

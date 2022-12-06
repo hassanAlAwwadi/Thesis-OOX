@@ -1,5 +1,9 @@
 use core::panic;
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Deref,
+    rc::Rc,
+};
 
 use itertools::Itertools;
 use ordered_float::NotNan;
@@ -7,18 +11,19 @@ use z3::SatResult;
 
 use crate::{
     cfg::{labelled_statements, CFGStatement},
-    dsl::negate,
+    concretization::{concretizations, find_symbolic_refs},
+    dsl::{equal, ite, negate},
     eval::{self, evaluate},
     lexer::tokens,
     parser_pom::parse,
     stack::{lookup_in_stack, StackFrame},
     symbolic_table::SymbolicTable,
     syntax::{
-        BinOp, DeclarationMember, Expression, Identifier, Invocation, Lhs, Lit, NonVoidType,
-        Parameter, Reference, Rhs, RuntimeType, Statement, UnOp, Declaration,
+        BinOp, Declaration, DeclarationMember, Expression, Identifier, Invocation, Lhs, Lit,
+        NonVoidType, Parameter, Reference, Rhs, RuntimeType, Statement, UnOp,
     },
     typeable::Typeable,
-    utils, z3_checker, concretization::{concretizations, find_symbolic_refs},
+    utils, z3_checker,
 };
 
 const NULL: Expression = Expression::Lit {
@@ -35,7 +40,7 @@ pub type Heap = HashMap<Reference, HeapValue>;
 #[derive(Clone, Debug)]
 pub enum HeapValue {
     ObjectValue {
-        fields: HashMap<Identifier, Expression>,
+        fields: HashMap<Identifier, Rc<Expression>>,
         type_: RuntimeType,
     },
     ArrayValue(Vec<Expression>),
@@ -52,8 +57,8 @@ impl HeapValue {
 
 type PathConstraints = HashSet<Expression>;
 
-// refactor to Vec<Reference>? neins, since it can also be ITE and stuff
-pub type AliasMap = HashMap<String, Vec<Expression>>;
+// refactor to Vec<Reference>? neins, since it can also be ITE and stuff, can it though?
+pub type AliasMap = HashMap<String, Vec<Rc<Expression>>>;
 
 enum Output {
     Valid,
@@ -167,11 +172,11 @@ fn sym_exec(
         }
         ActionResult::InvalidAssertion => {
             return SymResult::Invalid;
-        },
+        }
         ActionResult::InfeasiblePath => {
             // Finish this branch
             return SymResult::Valid;
-        },
+        }
     };
     SymResult::Valid
 }
@@ -181,7 +186,7 @@ enum ActionResult {
     Return(u64),
     FunctionCall(u64),
     InvalidAssertion,
-    InfeasiblePath
+    InfeasiblePath,
 }
 
 fn action(
@@ -205,7 +210,7 @@ fn action(
     match action {
         CFGStatement::Statement(Statement::Declare { type_, var }) => {
             let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
-            params.insert(var.clone(), default(type_));
+            params.insert(var.clone(), Rc::new(default(type_)));
 
             ActionResult::Continue
         }
@@ -224,7 +229,7 @@ fn action(
                 );
             }
             let value = evaluateRhs(heap, stack, alias_map, ref_counter, rhs, st);
-            let e = evaluate(heap, stack, alias_map, &value, ref_counter, st);
+            let e = evaluate(heap, stack, alias_map, value, ref_counter, st);
             execute_assign(heap, stack, alias_map, ref_counter, lhs, e, st);
 
             ActionResult::Continue
@@ -239,9 +244,9 @@ fn action(
                 ref_counter,
                 st,
             );
-            if expression == true_lit() {
+            if *expression == true_lit() {
                 ActionResult::InvalidAssertion
-            } else if expression == false_lit() {
+            } else if *expression == false_lit() {
                 ActionResult::Continue
             } else {
                 // dbg!("invoke Z3 with:", &expression);
@@ -250,20 +255,21 @@ fn action(
                 if symbolic_refs.len() == 0 {
                     let result = z3_checker::verify(&expression);
                     if let SatResult::Unsat = result {
-                        
                     } else {
                         return ActionResult::InvalidAssertion;
                     }
                 } else {
                     // dbg!(&symbolic_refs);
-                    let expressions = concretizations(&expression, &symbolic_refs, alias_map);
+                    let expressions =
+                        concretizations(expression.clone(), &symbolic_refs, alias_map);
                     // dbg!(&expressions);
 
                     for expression in expressions {
-                        let expression = evaluate(heap, stack, alias_map, &expression, ref_counter, st);
-                        if expression == true_lit() {
+                        let expression =
+                            evaluate(heap, stack, alias_map, expression, ref_counter, st);
+                        if *expression == true_lit() {
                             return ActionResult::InvalidAssertion;
-                        } else if expression == false_lit() {
+                        } else if *expression == false_lit() {
                             // valid, keep going
                             // dbg!("locally solved!");
                         } else {
@@ -275,29 +281,34 @@ fn action(
                                 return ActionResult::InvalidAssertion;
                             }
                         }
-                        
                     }
                 }
-                
 
                 ActionResult::Continue
             }
         }
         CFGStatement::Statement(Statement::Assume { assumption }) => {
-            let expression = evaluate(heap, stack, alias_map, assumption, ref_counter, st);
+            let expression = evaluate(
+                heap,
+                stack,
+                alias_map,
+                Rc::new(assumption.clone()),
+                ref_counter,
+                st,
+            );
             // dbg!(assumption, &expression);
             //dbg!(&assumption, &expression, stack.last().map(|s| &s.params));
-            if expression == false_lit() {
+            if *expression == false_lit() {
                 return ActionResult::InfeasiblePath;
-            } else if expression != true_lit() {
-                constraints.insert(expression);
+            } else if *expression != true_lit() {
+                constraints.insert(expression.deref().clone());
             }
             ActionResult::Continue
         }
         CFGStatement::Statement(Statement::Return { expression }) => {
             if let Some(expression) = expression {
                 let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
-                params.insert("retval".to_string(), expression.clone());
+                params.insert("retval".to_string(), Rc::new(expression.clone()));
             }
             ActionResult::Continue
         }
@@ -342,7 +353,7 @@ fn action(
                 // we are pbobably done now
             } else {
                 let rv = stack.last().unwrap().params.get(&retval()).unwrap();
-                let return_value = evaluate(heap, stack, alias_map, rv, ref_counter, st);
+                let return_value = evaluate(heap, stack, alias_map, rv.clone(), ref_counter, st);
 
                 let StackFrame { pc, t, .. } = stack.pop().unwrap();
                 if let Some(lhs) = t {
@@ -382,7 +393,12 @@ fn exec_invocation(
     st: &SymbolicTable,
 ) -> ActionResult {
     // dbg!(invocation);
-    let (Declaration::Class { name: class_name, .. }, member) = invocation.resolved().unwrap(); // i don't get this
+    let (
+        Declaration::Class {
+            name: class_name, ..
+        },
+        member,
+    ) = invocation.resolved().unwrap(); // i don't get this
 
     match member {
         // ??
@@ -398,10 +414,30 @@ fn exec_invocation(
             let arguments = invocation
                 .arguments()
                 .into_iter()
-                .map(|arg| evaluate(heap, stack, alias_map, arg, ref_counter, st))
+                .map(|arg| {
+                    evaluate(
+                        heap,
+                        stack,
+                        alias_map,
+                        Rc::new(arg.clone()),
+                        ref_counter,
+                        st,
+                    )
+                })
                 .collect::<Vec<_>>();
 
-            exec_static_method(heap, stack, alias_map, return_point, member.clone(), lhs, &arguments, params, ref_counter, st);
+            exec_static_method(
+                heap,
+                stack,
+                alias_map,
+                return_point,
+                member.clone(),
+                lhs,
+                &arguments,
+                params,
+                ref_counter,
+                st,
+            );
             let next_entry = find_entry_for_static_invocation(invocation.identifier(), program);
 
             ActionResult::FunctionCall(next_entry)
@@ -418,7 +454,16 @@ fn exec_invocation(
             let arguments = invocation
                 .arguments()
                 .into_iter()
-                .map(|arg| evaluate(heap, stack, alias_map, arg, ref_counter, st))
+                .map(|arg| {
+                    evaluate(
+                        heap,
+                        stack,
+                        alias_map,
+                        Rc::new(arg.clone()),
+                        ref_counter,
+                        st,
+                    )
+                })
                 .collect::<Vec<_>>();
 
             let invocation_lhs = if let Invocation::InvokeMethod { lhs, .. } = invocation {
@@ -426,10 +471,27 @@ fn exec_invocation(
             } else {
                 panic!("expected invokemethod");
             };
-            
-            let this = (NonVoidType::ReferenceType { identifier: class_name.to_string() }, invocation_lhs. to_owned());
 
-            exec_method(heap, stack, alias_map, return_point, member.clone(), lhs, &arguments, params, ref_counter, st, this);
+            let this = (
+                NonVoidType::ReferenceType {
+                    identifier: class_name.to_string(),
+                },
+                invocation_lhs.to_owned(),
+            );
+
+            exec_method(
+                heap,
+                stack,
+                alias_map,
+                return_point,
+                member.clone(),
+                lhs,
+                &arguments,
+                params,
+                ref_counter,
+                st,
+                this,
+            );
             let next_entry = find_entry_for_static_invocation(invocation.identifier(), program);
 
             ActionResult::FunctionCall(next_entry)
@@ -469,16 +531,22 @@ fn exec_method(
     return_point: u64,
     member: DeclarationMember,
     lhs: Option<Lhs>,
-    arguments: &[Expression],
+    arguments: &[Rc<Expression>],
     parameters: &[Parameter],
     ref_counter: &mut i64,
     st: &SymbolicTable,
-    this: (NonVoidType, Identifier)
+    this: (NonVoidType, Identifier),
 ) {
-    let this_param = Parameter { type_: this.0.clone(), name: "this".to_owned() };
-    let this_expr = Expression::Var { var: this.1.clone(), type_: this.0.type_of() };
+    let this_param = Parameter {
+        type_: this.0.clone(),
+        name: "this".to_owned(),
+    };
+    let this_expr = Expression::Var {
+        var: this.1.clone(),
+        type_: this.0.type_of(),
+    };
     let parameters = std::iter::once(&this_param).chain(parameters.iter());
-    let arguments = std::iter::once(&this_expr).chain(arguments.iter());
+    let arguments = std::iter::once(Rc::new(this_expr)).chain(arguments.iter().cloned());
 
     push_stack_frame(
         heap,
@@ -489,7 +557,7 @@ fn exec_method(
         lhs,
         parameters.zip(arguments),
         ref_counter,
-        st
+        st,
     )
 }
 
@@ -500,7 +568,7 @@ fn exec_static_method(
     return_point: u64,
     member: DeclarationMember,
     lhs: Option<Lhs>,
-    arguments: &[Expression],
+    arguments: &[Rc<Expression>],
     parameters: &[Parameter],
     ref_counter: &mut i64,
     st: &SymbolicTable,
@@ -512,9 +580,9 @@ fn exec_static_method(
         return_point,
         member,
         lhs,
-        parameters.iter().zip(arguments.iter()),
+        parameters.iter().zip(arguments.iter().cloned()),
         ref_counter,
-        st
+        st,
     )
 }
 
@@ -529,9 +597,16 @@ fn push_stack_frame<'a, P>(
     ref_counter: &mut i64,
     st: &SymbolicTable,
 ) where
-    P: Iterator<Item = (&'a Parameter, &'a Expression)>,
+    P: Iterator<Item = (&'a Parameter, Rc<Expression>)>,
 {
-    let params = params.map(|(p, e)| (p.name.clone(), evaluate(heap, stack, alias_map, e, ref_counter, st))).collect();
+    let params = params
+        .map(|(p, e)| {
+            (
+                p.name.clone(),
+                evaluate(heap, stack, alias_map, e, ref_counter, st),
+            )
+        })
+        .collect();
     let stack_frame = StackFrame {
         pc: return_point,
         t: lhs,
@@ -549,27 +624,27 @@ fn exec_assert(
     alias_map: &mut AliasMap,
     ref_counter: &mut i64,
     st: &SymbolicTable,
-) -> Expression {
+) -> Rc<Expression> {
     let expression = if constraints.len() >= 1 {
         let assumptions = constraints
             .iter()
             .cloned()
             .reduce(|x, y| Expression::BinOp {
                 bin_op: BinOp::And,
-                lhs: Box::new(x),
-                rhs: Box::new(y),
+                lhs: Rc::new(x),
+                rhs: Rc::new(y),
                 type_: RuntimeType::BoolRuntimeType,
             })
             .unwrap();
 
-        negate(Expression::BinOp {
+        negate(Rc::new(Expression::BinOp {
             bin_op: BinOp::Implies,
-            lhs: Box::new(assumptions),
-            rhs: Box::new(assertion.clone()),
+            lhs: Rc::new(assumptions),
+            rhs: Rc::new(assertion.clone()),
             type_: RuntimeType::BoolRuntimeType,
-        })
+        }))
     } else {
-        negate(assertion.clone())
+        negate(Rc::new(assertion.clone()))
     };
     // let expression = constraints.iter().fold(
     //     Expression::UnOp {
@@ -585,57 +660,51 @@ fn exec_assert(
     //     },
     // );
     // //dbg!(&expression);
-    let z = evaluate(heap, stack, alias_map, &expression, ref_counter, st);
+    let z = evaluate(heap, stack, alias_map, Rc::new(expression), ref_counter, st);
     // //dbg!(&z);
     z
 }
 
-fn read_field_concrete_ref(heap: &mut Heap, ref_: i64, field: &Identifier) -> Expression {
+fn read_field_concrete_ref(heap: &mut Heap, ref_: i64, field: &Identifier) -> Rc<Expression> {
     match heap.get_mut(&ref_).unwrap() {
         HeapValue::ObjectValue { fields, type_ } => fields[field].clone(),
         _ => panic!("Expected object, found array heapvalue"),
     }
 }
 
-fn ite(guard: Expression, e1: Expression, e2: Expression) -> Expression {
-    Expression::Conditional {
-        guard: Box::new(guard),
-        true_: Box::new(e1),
-        false_: Box::new(e2),
-        type_: RuntimeType::ANYRuntimeType,
-    }
-}
-
-fn equal(e1: Expression, e2: Expression) -> Expression {
-    Expression::BinOp {
-        bin_op: BinOp::Equal,
-        lhs: Box::new(e1),
-        rhs: Box::new(e2),
-        type_: RuntimeType::ANYRuntimeType,
-    }
-}
-
 fn read_field_symbolic_ref(
     heap: &mut Heap,
-    concrete_refs: &[Expression],
-    sym_ref: &Expression,
+    concrete_refs: &[Rc<Expression>],
+    sym_ref: Rc<Expression>,
     field: &Identifier,
-) -> Expression {
+) -> Rc<Expression> {
     match concrete_refs {
         [] => panic!(),
-        [Expression::Ref { ref_, type_ }] => read_field_concrete_ref(heap, *ref_, field),
+        [r] => {
+            if let Expression::Ref { ref_, .. } = **r {
+                read_field_concrete_ref(heap, ref_, field)
+            } else {
+                panic!()
+            }
+        }
         // assuming here that concrete refs (perhaps in ITE expression)
-        [r @ Expression::Ref { ref_, .. }, rs @ ..] => Expression::Conditional {
-            guard: Box::new(Expression::BinOp {
-                bin_op: BinOp::Equal,
-                lhs: Box::new(sym_ref.clone()),
-                rhs: Box::new(r.clone()),
-                type_: RuntimeType::ANYRuntimeType,
-            }),
-            true_: Box::new(read_field_concrete_ref(heap, *ref_, &field)),
-            false_: Box::new(read_field_symbolic_ref(heap, rs, sym_ref, field)),
-            type_: RuntimeType::ANYRuntimeType,
-        },
+        [r, rs @ ..] => {
+            if let Expression::Ref { ref_, .. } = **r {
+                Rc::new(Expression::Conditional {
+                    guard: Rc::new(Expression::BinOp {
+                        bin_op: BinOp::Equal,
+                        lhs: sym_ref.clone(),
+                        rhs: r.clone(),
+                        type_: RuntimeType::ANYRuntimeType,
+                    }),
+                    true_: (read_field_concrete_ref(heap, ref_, &field)),
+                    false_: (read_field_symbolic_ref(heap, rs, sym_ref, field)),
+                    type_: RuntimeType::ANYRuntimeType,
+                })
+            } else {
+                panic!()
+            }
+        }
         // null is not possible here, will be caught with exceptional state
         _ => panic!(),
     }
@@ -645,7 +714,7 @@ fn write_field_concrete_ref(
     heap: &mut Heap,
     ref_: i64,
     field: &Identifier,
-    value: Expression,
+    value: Rc<Expression>,
 ) -> () {
     // let x = ;
 
@@ -658,25 +727,29 @@ fn write_field_concrete_ref(
 
 fn write_field_symbolic_ref(
     heap: &mut Heap,
-    concrete_refs: &Vec<Expression>,
+    concrete_refs: &Vec<Rc<Expression>>,
     field: &Identifier,
-    sym_ref: &Expression,
-    value: Expression,
+    sym_ref: Rc<Expression>,
+    value: Rc<Expression>,
 ) -> () {
     match concrete_refs.as_slice() {
         [] => panic!(),
-        [Expression::Ref { ref_, type_ }] => {
-            write_field_concrete_ref(heap, *ref_, field, value);
+        [r] => {
+            if let Expression::Ref { ref_, .. } = **r {
+                write_field_concrete_ref(heap, ref_, field, value);
+            } else {
+                panic!()
+            }
         }
         rs => {
             for r in rs {
-                if let Expression::Ref { ref_, type_ } = r {
+                if let Expression::Ref { ref_, type_ } = r.as_ref() {
                     let ite = ite(
-                        equal(sym_ref.clone(), r.clone()),
+                        Rc::new(equal(sym_ref.clone(), r.clone())),
                         value.clone(),
                         read_field_concrete_ref(heap, *ref_, &field),
                     );
-                    write_field_concrete_ref(heap, *ref_, field, ite)
+                    write_field_concrete_ref(heap, *ref_, field, Rc::new(ite))
                 } else {
                     panic!("Should only contain refs");
                 }
@@ -716,7 +789,11 @@ pub fn init_symbolic_reference(
             .map(|(field_name, type_)| {
                 (
                     field_name.clone(),
-                    initialize_symbolic_var(&field_name, &type_.type_of(), ref_counter),
+                    Rc::new(initialize_symbolic_var(
+                        &field_name,
+                        &type_.type_of(),
+                        ref_counter,
+                    )),
                 )
             })
             .collect();
@@ -734,17 +811,18 @@ pub fn init_symbolic_reference(
         let existing_aliases = alias_map
             .values()
             .filter(|x| x.iter().any(|x| x.type_of() == *type_ref))
-            .flat_map(|x| x.iter()).unique();
+            .flat_map(|x| x.iter())
+            .unique();
 
         let aliases = existing_aliases
             .cloned()
             .chain(
                 [
-                    null(),
-                    Expression::Ref {
+                    Rc::new(Expression::NULL),
+                    Rc::new(Expression::Ref {
                         ref_: ref_fresh,
                         type_: type_ref.clone(),
-                    },
+                    }),
                 ]
                 .into_iter(),
             )
@@ -771,7 +849,7 @@ fn execute_assign(
     alias_map: &mut AliasMap,
     ref_counter: &mut i64,
     lhs: &Lhs,
-    e: Expression,
+    e: Rc<Expression>,
     st: &SymbolicTable,
 ) {
     match lhs {
@@ -790,14 +868,20 @@ fn execute_assign(
                 .get(var)
                 .unwrap_or_else(|| panic!("infeasible, object does not exit"));
 
-            match o {
+            match o.as_ref() {
                 Expression::Ref { ref_, type_ } => {
-                    write_field_concrete_ref(heap, *ref_, field, e.clone());
+                    write_field_concrete_ref(heap, *ref_, field, e);
                 }
                 sym_ref @ Expression::SymbolicRef { var, type_ } => {
-                    init_symbolic_reference(heap, alias_map, var, type_, ref_counter, st);
+                    init_symbolic_reference(heap, alias_map, &var, &type_, ref_counter, st);
                     let concrete_refs = &alias_map[var];
-                    write_field_symbolic_ref(heap, concrete_refs, field, sym_ref, e);
+                    write_field_symbolic_ref(
+                        heap,
+                        concrete_refs,
+                        field,
+                        Rc::new(sym_ref.clone()),
+                        e,
+                    );
                 }
 
                 _ => todo!(),
@@ -833,12 +917,12 @@ fn evaluateRhs(
     ref_counter: &mut i64,
     rhs: &Rhs,
     st: &SymbolicTable,
-) -> Expression {
+) -> Rc<Expression> {
     match rhs {
         Rhs::RhsExpression { value, type_ } => {
             match value {
-                Expression::Var { var, type_ } => lookup_in_stack(var, stack).unwrap().clone(),
-                _ => value.clone(), // might have to expand on this when dealing with complex quantifying expressions and array
+                Expression::Var { var, type_ } => lookup_in_stack(var, stack).unwrap(),
+                _ => Rc::new(value.clone()), // might have to expand on this when dealing with complex quantifying expressions and array
             }
         }
         Rhs::RhsField { var, field, type_ } => {
@@ -873,7 +957,7 @@ fn exec_rhs_field(
     field: &Identifier,
     type_: &RuntimeType,
     st: &SymbolicTable,
-) -> Expression {
+) -> Rc<Expression> {
     match object {
         Expression::Conditional {
             guard,
@@ -886,12 +970,12 @@ fn exec_rhs_field(
             let true_ = exec_rhs_field(heap, alias_map, ref_counter, true_, field, type_, st);
             let false_ = exec_rhs_field(heap, alias_map, ref_counter, false_, field, type_, st);
 
-            Expression::Conditional {
+            Rc::new(Expression::Conditional {
                 guard: guard.clone(),
-                true_: Box::new(true_),
-                false_: Box::new(false_),
+                true_: true_,
+                false_: false_,
                 type_: type_.clone(),
-            }
+            })
         }
         Expression::Lit {
             lit: Lit::NullLit, ..
@@ -903,7 +987,7 @@ fn exec_rhs_field(
             let concrete_refs = &alias_map[var];
             // dbg!(&alias_map);
             // dbg!(&heap);
-            read_field_symbolic_ref(heap, concrete_refs, sym_ref, field)
+            read_field_symbolic_ref(heap, concrete_refs, Rc::new(sym_ref.clone()), field)
         }
         _ => todo!("Expected reference here, found: {:?}", object),
     }
@@ -924,12 +1008,15 @@ fn false_lit() -> Expression {
 }
 
 fn remove_symbolic_null(alias_map: &mut AliasMap, var: &String) {
-    alias_map.get_mut(var).unwrap().retain(|x| match x {
-        Expression::Lit {
-            lit: Lit::NullLit, ..
-        } => false,
-        _ => true,
-    });
+    alias_map
+        .get_mut(var)
+        .unwrap()
+        .retain(|x| match x.as_ref() {
+            Expression::Lit {
+                lit: Lit::NullLit, ..
+            } => false,
+            _ => true,
+        });
 }
 
 fn create_symbolic_var(name: String, type_: RuntimeType) -> Expression {
@@ -984,7 +1071,7 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
             .map(|p| {
                 (
                     p.name.clone(),
-                    create_symbolic_var(p.name.clone(), p.type_.type_of()),
+                    Rc::new(create_symbolic_var(p.name.clone(), p.type_.type_of())),
                 )
             })
             .collect();
@@ -1066,16 +1153,21 @@ fn sym_exec_linked_list1() {
     assert_eq!(verify_file(&file_content, "test2", 50), SymResult::Valid);
 }
 
-
 #[test]
 fn sym_exec_linked_list1_invalid() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
-    assert_eq!(verify_file(&file_content, "test2_invalid", 50), SymResult::Invalid);
+    assert_eq!(
+        verify_file(&file_content, "test2_invalid", 50),
+        SymResult::Invalid
+    );
 }
 
 #[test]
 fn sym_exec_linked_list3_invalid() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
     // at k=80 it fails, after ~170 sec in hs oox, rs oox does this in ~90 sec
-    assert_eq!(verify_file(&file_content, "test3_invalid1", 80), SymResult::Invalid);
+    assert_eq!(
+        verify_file(&file_content, "test3_invalid1", 80),
+        SymResult::Invalid
+    );
 }

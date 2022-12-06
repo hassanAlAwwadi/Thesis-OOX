@@ -4,7 +4,7 @@ pub type Identifier = String;
 pub type Reference = i64;
 
 pub type Float = NotNan<f64>;
-use std::fmt::Debug;
+use std::{fmt::Debug, rc::Rc};
 
 #[derive(Debug)]
 pub struct CompilationUnit {
@@ -148,7 +148,7 @@ pub enum Invocation {
         lhs: Identifier,
         rhs: Identifier,
         arguments: Vec<Expression>,
-        resolved: Option<Box<(Declaration, DeclarationMember)>>, // What is this?
+        resolved: Option<Box<(Declaration, DeclarationMember)>>, // What is this? -- potential case for Weak<..>
     },
     InvokeConstructor {
         class_name: Identifier,
@@ -253,8 +253,6 @@ pub enum Rhs {
     },
 }
 
-
-
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum Expression {
     Forall {
@@ -273,13 +271,13 @@ pub enum Expression {
     },
     BinOp {
         bin_op: BinOp,
-        lhs: Box<Expression>,
-        rhs: Box<Expression>,
+        lhs: Rc<Expression>,
+        rhs: Rc<Expression>,
         type_: RuntimeType,
     },
     UnOp {
         un_op: UnOp,
-        value: Box<Expression>,
+        value: Rc<Expression>,
         type_: RuntimeType,
     },
     Var {
@@ -307,9 +305,9 @@ pub enum Expression {
         type_: RuntimeType,
     },
     Conditional {
-        guard: Box<Expression>,
-        true_: Box<Expression>,
-        false_: Box<Expression>,
+        guard: Rc<Expression>,
+        true_: Rc<Expression>,
+        false_: Rc<Expression>,
         type_: RuntimeType,
     },
 }
@@ -324,12 +322,24 @@ impl Expression {
         type_: RuntimeType::BoolRuntimeType,
     };
 
-    pub fn bool(v: bool) -> Expression {
-        if v { Expression::TRUE } else { Expression::FALSE }
+    pub const NULL: Expression = Expression::Lit {
+        lit: Lit::NullLit,
+        type_: RuntimeType::REFRuntimeType,
+    };
+
+    pub fn bool(v: bool) -> Rc<Expression> {
+        if v {
+            Rc::new(Expression::TRUE)
+        } else {
+            Rc::new(Expression::FALSE)
+        }
     }
 
-    pub fn int(v: i64) -> Expression {
-        Expression::Lit { lit: Lit::IntLit { int_value: v }, type_: RuntimeType::IntRuntimeType }
+    pub fn int(v: i64) -> Rc<Expression> {
+        Rc::new(Expression::Lit {
+            lit: Lit::IntLit { int_value: v },
+            type_: RuntimeType::IntRuntimeType,
+        })
     }
 }
 

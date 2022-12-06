@@ -137,8 +137,8 @@ impl<'ctx> AstNode<'ctx> {
 
         guard.ite(&guard, &guard);
         match true_ {
-            AstNode::Bool(true_) => Ok(AstNode::Bool(guard.ite(&true_, &Bool::try_from(false_)? ))),
-            AstNode::Int(true_) => Ok(AstNode::Int(guard.ite(&true_, &Int::try_from(false_)? ))),
+            AstNode::Bool(true_) => Ok(AstNode::Bool(guard.ite(&true_, &Bool::try_from(false_)?))),
+            AstNode::Int(true_) => Ok(AstNode::Int(guard.ite(&true_, &Int::try_from(false_)?))),
         }
     }
 
@@ -229,7 +229,6 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
             (NodeEntry::Lit(lit), z3_node)
         }))
         .collect::<HashMap<_, _>>();
-    
 
     fn helper<'ctx>(
         expression: &Expression,
@@ -277,17 +276,26 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
             Expression::Lit { lit, .. } => vars.get(&NodeEntry::Lit(lit.clone())).unwrap().clone(),
             Expression::Ref { ref_, type_ } => {
                 // dbg!(*ref_);
-                vars.get(&NodeEntry::Lit(Lit::IntLit { int_value: *ref_ })).unwrap().clone()
-            },
-            Expression::Conditional { guard, true_, false_, type_ } => {
-                AstNode::conditional(helper(guard, vars), helper(true_, vars), helper(false_, vars)).unwrap()
+                vars.get(&NodeEntry::Lit(Lit::IntLit { int_value: *ref_ }))
+                    .unwrap()
+                    .clone()
             }
+            Expression::Conditional {
+                guard,
+                true_,
+                false_,
+                type_,
+            } => AstNode::conditional(
+                helper(guard, vars),
+                helper(true_, vars),
+                helper(false_, vars),
+            )
+            .unwrap(),
             _ => todo!(),
         }
     }
 
     // generate all possible concrete expressions from symbolic references.
-    
 
     let ast_node = helper(expression, &id_to_z3_node);
 
@@ -296,7 +304,11 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
 
 fn symbolic_variables(
     expression: &Expression,
-) -> (HashSet<(Identifier, RuntimeType)>, HashSet<Lit>, HashSet<Identifier>) {
+) -> (
+    HashSet<(Identifier, RuntimeType)>,
+    HashSet<Lit>,
+    HashSet<Identifier>,
+) {
     let mut variables = HashSet::new();
     let mut literals = HashSet::new();
     let mut symbolic_refs = HashSet::new();
@@ -315,7 +327,12 @@ fn symbolic_variables(
             Expression::UnOp { value, .. } => {
                 helper(variables, literals, symbolic_refs, &value);
             }
-            Expression::Conditional { guard, true_, false_, .. } => {
+            Expression::Conditional {
+                guard,
+                true_,
+                false_,
+                ..
+            } => {
                 helper(variables, literals, symbolic_refs, &guard);
                 helper(variables, literals, symbolic_refs, &true_);
                 helper(variables, literals, symbolic_refs, &false_);
@@ -328,7 +345,7 @@ fn symbolic_variables(
             } // Lits are handled elsewhere
             Expression::Ref { ref_, type_ } => {
                 literals.insert(Lit::IntLit { int_value: *ref_ });
-            },
+            }
             Expression::SymbolicRef { var, type_ } => {
                 symbolic_refs.insert(var.to_owned());
             }
@@ -336,7 +353,12 @@ fn symbolic_variables(
         }
     }
 
-    helper(&mut variables, &mut literals, &mut symbolic_refs, expression);
+    helper(
+        &mut variables,
+        &mut literals,
+        &mut symbolic_refs,
+        expression,
+    );
 
     (variables, literals, symbolic_refs)
 }
