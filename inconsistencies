@@ -34,3 +34,32 @@ ref(1) + ref(2)
 
 Might it be better to keep _node and _next1 as variables in Z3? idk
 as the number of symbolic references increases... this explodes!
+
+Ok dus we halen null weg bij execLhs en execRhs want deze zijn al covered door de exception handling, behalve bij de concretization, 
+als een symbolic ref daar initialised wordt dan kan het wel null zijn.
+
+Vergeten om if !null checks te doen op rhsmethodcall?
+
+
+
+
+
+[14:49:55] Verifying: '!(!(_node != null) && _next1 == null && !(_node == null) && !(_value1 == _value1) && _node != null && true ==> false)'
+[14:49:55] Evaluating '!(!(_node != null) && _next1 == null && !(_node == null) && !(_value1 == _value1) && _node != null && true ==> false)' as a bool
+[14:49:55] Initializing symbolic reference '_next1:Node' to '{null,ref(1),ref(2)}
+[14:49:55] Evaluating '!(!(!(null != null) && null == null && !(null == null) && !(_value1 == _value1) && null != null))' as a bool
+[14:49:55] Evaluating '!(!(!(ref(1) != null) && null == null && !(ref(1) == null) && !(_value1 == _value1) && ref(1) != null))' as a bool
+[14:49:55] Evaluating '!(!(!(null != null) && ref(1) == null && !(null == null) && !(_value1 == _value1) && null != null))' as a bool
+[14:49:55] Evaluating '!(!(!(ref(1) != null) && ref(1) == null && !(ref(1) == null) && !(_value1 == _value1) && ref(1) != null))' as a bool
+[14:49:55] Evaluating '!(!(!(null != null) && ref(2) == null && !(null == null) && !(_value1 == _value1) && null != null))' as a bool
+[14:49:55] Evaluating '!(!(!(ref(1) != null) && ref(2) == null && !(ref(1) == null) && !(_value1 == _value1) && ref(1) != null))' as a bool
+
+
+vgm zorgt alias map voor heel veel infeasible values, snel
+_node kan niet null zijn als next1 bestaat want dat zou betekenen dat next1 nooit aangemaakt wordt,
+eigenlijk moet null uit de alias map gehaald worden voor die branch?
+
+hetzelfde geldt voor wanneer je een linked list hebt met 3 nodes,
+{_node, _next1, _next2}
+de aliasMap van next1 mag geen null of _node bevatten als het op een punt is gekomen dat _next2 is gegenereerd toch?
+dat is een nadeel aan lazy initialisation, je genereerd het object pas echt als 

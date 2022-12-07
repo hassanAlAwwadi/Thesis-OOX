@@ -874,6 +874,7 @@ fn execute_assign(
                 }
                 sym_ref @ Expression::SymbolicRef { var, type_ } => {
                     init_symbolic_reference(heap, alias_map, &var, &type_, ref_counter, st);
+                    // should also remove null here? --Assignemnt::45
                     let concrete_refs = &alias_map[var];
                     write_field_symbolic_ref(
                         heap,
@@ -1125,7 +1126,6 @@ fn sym_exec_fib() {
 
 #[test]
 fn sym_test_failure() {
-    // Expect a panic atm
     let file_content = std::fs::read_to_string("./examples/psv/test.oox").unwrap();
     assert_eq!(verify_file(&file_content, "main", 30), SymResult::Invalid);
 }
