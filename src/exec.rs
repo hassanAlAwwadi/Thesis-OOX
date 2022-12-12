@@ -68,16 +68,15 @@ enum Output {
 
 // perhaps separate program from this structure, such that we can have multiple references to it.
 #[derive(Clone)]
-struct State {
+pub struct State {
     pc: u64,
-    program: HashMap<u64, CFGStatement>,
-    stack: Vec<StackFrame>,
-    heap: Heap,
+    pub stack: Vec<StackFrame>,
+    pub heap: Heap,
     precondition: Expression,
 
     constraints: PathConstraints,
-    alias_map: AliasMap,
-    ref_counter: i64,
+    pub alias_map: AliasMap,
+    pub ref_counter: i64,
 }
 
 fn default(t: impl Typeable) -> Expression {
@@ -112,6 +111,7 @@ enum SymResult {
 
 fn sym_exec(
     state: &mut State,
+    program: &HashMap<u64, CFGStatement>,
     flows: &HashMap<u64, Vec<u64>>,
     k: u64,
     st: &SymbolicTable,
@@ -121,7 +121,7 @@ fn sym_exec(
         //dbg!("FINITO");
         return SymResult::Valid;
     }
-    let next = action(state, k, st);
+    let next = action(state, program, k, st);
 
     // //dbg!(&state.pc);
 
@@ -129,7 +129,7 @@ fn sym_exec(
         ActionResult::FunctionCall(next) => {
             // function call or return
             state.pc = next;
-            let result = sym_exec(state, flows, k - 1, st);
+            let result = sym_exec(state, program, flows, k - 1, st);
             if result != SymResult::Valid {
                 return result;
             }
@@ -140,7 +140,7 @@ fn sym_exec(
                     let mut new_state = state.clone();
                     new_state.pc = *neighbour_pc;
 
-                    let result = sym_exec(&mut new_state, flows, k - 1, st);
+                    let result = sym_exec(&mut new_state, program, flows, k - 1, st);
                     if result != SymResult::Valid {
                         return result;
                     }
@@ -156,14 +156,14 @@ fn sym_exec(
                     let mut new_state = state.clone();
                     new_state.pc = *neighbour_pc;
 
-                    let result = sym_exec(&mut new_state, flows, k - 1, st);
+                    let result = sym_exec(&mut new_state, program, flows, k - 1, st);
                     if result != SymResult::Valid {
                         return result;
                     }
                 }
             } else {
                 // Function exit of the main function under verification
-                if let CFGStatement::FunctionExit(_) = state.program[&state.pc] {
+                if let CFGStatement::FunctionExit(_) = program[&state.pc] {
                     return SymResult::Valid;
                 } else {
                     return SymResult::Invalid;
@@ -190,26 +190,19 @@ enum ActionResult {
 }
 
 fn action(
-    State {
-        pc,
-        program,
-        stack,
-        heap,
-        precondition,
-        constraints,
-        alias_map,
-        ref_counter,
-    }: &mut State,
+    state: &mut State,
+    program: &HashMap<u64, CFGStatement>,
     k: u64,
     st: &SymbolicTable,
 ) -> ActionResult {
+    let pc = state.pc;
     let action = &program[&pc];
 
     // dbg!(&action, stack.last().map(|s| &s.params));
 
     match action {
         CFGStatement::Statement(Statement::Declare { type_, var }) => {
-            let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
+            let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             params.insert(var.clone(), Rc::new(default(type_)));
 
             ActionResult::Continue
@@ -217,31 +210,24 @@ fn action(
         CFGStatement::Statement(Statement::Assign { lhs, rhs }) => {
             if let Rhs::RhsCall { invocation, type_ } = rhs {
                 return exec_invocation(
-                    heap,
+                    state,
                     invocation,
-                    stack,
-                    alias_map,
                     &program,
-                    *pc,
+                    pc,
                     Some(lhs.clone()),
-                    ref_counter,
                     st,
                 );
             }
-            let value = evaluateRhs(heap, stack, alias_map, ref_counter, rhs, st);
-            let e = evaluate(heap, stack, alias_map, value, ref_counter, st);
-            execute_assign(heap, stack, alias_map, ref_counter, lhs, e, st);
+            let value = evaluateRhs(state, rhs, st);
+            let e = evaluate(state, value, st);
+            execute_assign(state, lhs, e, st);
 
             ActionResult::Continue
         }
         CFGStatement::Statement(Statement::Assert { assertion }) => {
             let expression = exec_assert(
-                &constraints,
-                assertion,
-                heap,
-                stack,
-                alias_map,
-                ref_counter,
+                state,
+                assertion.clone(),
                 st,
             );
             if *expression == true_lit() {
@@ -261,12 +247,12 @@ fn action(
                 } else {
                     // dbg!(&symbolic_refs);
                     let expressions =
-                        concretizations(expression.clone(), &symbolic_refs, alias_map);
+                        concretizations(expression.clone(), &symbolic_refs, &state.alias_map);
                     // dbg!(&expressions);
 
                     for expression in expressions {
                         let expression =
-                            evaluate(heap, stack, alias_map, expression, ref_counter, st);
+                            evaluate(state, expression, st);
                         if *expression == true_lit() {
                             return ActionResult::InvalidAssertion;
                         } else if *expression == false_lit() {
@@ -283,17 +269,13 @@ fn action(
                         }
                     }
                 }
-
                 ActionResult::Continue
             }
         }
         CFGStatement::Statement(Statement::Assume { assumption }) => {
             let expression = evaluate(
-                heap,
-                stack,
-                alias_map,
+                state,
                 Rc::new(assumption.clone()),
-                ref_counter,
                 st,
             );
             // dbg!(assumption, &expression);
@@ -301,13 +283,13 @@ fn action(
             if *expression == false_lit() {
                 return ActionResult::InfeasiblePath;
             } else if *expression != true_lit() {
-                constraints.insert(expression.deref().clone());
+                state.constraints.insert(expression.deref().clone());
             }
             ActionResult::Continue
         }
         CFGStatement::Statement(Statement::Return { expression }) => {
             if let Some(expression) = expression {
-                let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
+                let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
                 params.insert("retval".to_string(), Rc::new(expression.clone()));
             }
             ActionResult::Continue
@@ -315,15 +297,12 @@ fn action(
         CFGStatement::FunctionEntry(_name) => {
             // only check preconditions when it's the first method called??
             // we assume that the previous stackframe is of this method
-            let StackFrame { current_member, .. } = stack.last().unwrap();
+            let StackFrame { current_member, .. } = state.stack.last().unwrap();
             if let Some(requires) = current_member.requires() {
+                let assertion = requires.as_ref().to_owned();
                 exec_assert(
-                    constraints,
-                    requires,
-                    heap,
-                    stack,
-                    alias_map,
-                    ref_counter,
+                    state,
+                    assertion,
                     st,
                 );
                 // more?
@@ -335,45 +314,39 @@ fn action(
                 current_member,
                 params,
                 ..
-            } = stack.last().unwrap();
-            if let Some(post_condition) = current_member.post_condition() {
+            } = state.stack.last().unwrap();
+            if let Some(post_condition) = current_member.post_condition().clone() {
+                let assertion = post_condition.as_ref().to_owned();
                 exec_assert(
-                    constraints,
-                    post_condition,
-                    heap,
-                    stack,
-                    alias_map,
-                    ref_counter,
+                    state,
+                    assertion,
                     st,
                 );
                 // some if true then unfeasible/invalid or something?
             }
-            if stack.len() == 1 {
+            if state.stack.len() == 1 {
                 ActionResult::Continue
                 // we are pbobably done now
             } else {
-                let rv = stack.last().unwrap().params.get(&retval()).unwrap();
-                let return_value = evaluate(heap, stack, alias_map, rv.clone(), ref_counter, st);
+                let rv = state.stack.last().unwrap().params.get(&retval()).unwrap();
+                let return_value = evaluate(state, rv.clone(), st);
 
-                let StackFrame { pc, t, .. } = stack.pop().unwrap();
+                let StackFrame { pc, t, .. } = state.stack.pop().unwrap();
                 if let Some(lhs) = t {
                     // perhaps also write retval to current stack?
                     // will need to do this due to this case: `return o.func();`
 
-                    execute_assign(heap, stack, alias_map, ref_counter, &lhs, return_value, st);
+                    execute_assign(state, &lhs, return_value, st);
                 }
                 ActionResult::Return(pc)
             }
         }
         CFGStatement::Statement(Statement::Call { invocation }) => exec_invocation(
-            heap,
+            state,
             invocation,
-            stack,
-            alias_map,
             &program,
-            *pc,
+            pc,
             None,
-            ref_counter,
             st,
         ),
 
@@ -382,14 +355,11 @@ fn action(
 }
 
 fn exec_invocation(
-    heap: &mut Heap,
+    state: &mut State,
     invocation: &Invocation,
-    stack: &mut Vec<StackFrame>,
-    alias_map: &mut AliasMap,
     program: &HashMap<u64, CFGStatement>,
     return_point: u64,
     lhs: Option<Lhs>,
-    ref_counter: &mut i64,
     st: &SymbolicTable,
 ) -> ActionResult {
     // dbg!(invocation);
@@ -416,26 +386,20 @@ fn exec_invocation(
                 .into_iter()
                 .map(|arg| {
                     evaluate(
-                        heap,
-                        stack,
-                        alias_map,
+                        state,
                         Rc::new(arg.clone()),
-                        ref_counter,
                         st,
                     )
                 })
                 .collect::<Vec<_>>();
 
             exec_static_method(
-                heap,
-                stack,
-                alias_map,
+                state,
                 return_point,
                 member.clone(),
                 lhs,
                 &arguments,
                 params,
-                ref_counter,
                 st,
             );
             let next_entry = find_entry_for_static_invocation(invocation.identifier(), program);
@@ -456,11 +420,8 @@ fn exec_invocation(
                 .into_iter()
                 .map(|arg| {
                     evaluate(
-                        heap,
-                        stack,
-                        alias_map,
+                        state,
                         Rc::new(arg.clone()),
-                        ref_counter,
                         st,
                     )
                 })
@@ -480,15 +441,12 @@ fn exec_invocation(
             );
 
             exec_method(
-                heap,
-                stack,
-                alias_map,
+                state,
                 return_point,
                 member.clone(),
                 lhs,
                 &arguments,
                 params,
-                ref_counter,
                 st,
                 this,
             );
@@ -525,15 +483,12 @@ fn find_entry_for_static_invocation(invocation: &str, program: &HashMap<u64, CFG
 // }
 
 fn exec_method(
-    heap: &mut Heap,
-    stack: &mut Vec<StackFrame>,
-    alias_map: &mut AliasMap,
+    state: &mut State,
     return_point: u64,
     member: DeclarationMember,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
-    ref_counter: &mut i64,
     st: &SymbolicTable,
     this: (NonVoidType, Identifier),
 ) {
@@ -549,52 +504,40 @@ fn exec_method(
     let arguments = std::iter::once(Rc::new(this_expr)).chain(arguments.iter().cloned());
 
     push_stack_frame(
-        heap,
-        stack,
-        alias_map,
+        state,
         return_point,
         member,
         lhs,
         parameters.zip(arguments),
-        ref_counter,
         st,
     )
 }
 
 fn exec_static_method(
-    heap: &mut Heap,
-    stack: &mut Vec<StackFrame>,
-    alias_map: &mut AliasMap,
+    state: &mut State,
     return_point: u64,
     member: DeclarationMember,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
-    ref_counter: &mut i64,
     st: &SymbolicTable,
 ) {
     push_stack_frame(
-        heap,
-        stack,
-        alias_map,
+        state,
         return_point,
         member,
         lhs,
         parameters.iter().zip(arguments.iter().cloned()),
-        ref_counter,
         st,
     )
 }
 
 fn push_stack_frame<'a, P>(
-    heap: &mut Heap,
-    stack: &mut Vec<StackFrame>,
-    alias_map: &mut AliasMap,
+    state: &mut State,
     return_point: u64,
     member: DeclarationMember,
     lhs: Option<Lhs>,
     params: P,
-    ref_counter: &mut i64,
     st: &SymbolicTable,
 ) where
     P: Iterator<Item = (&'a Parameter, Rc<Expression>)>,
@@ -603,7 +546,7 @@ fn push_stack_frame<'a, P>(
         .map(|(p, e)| {
             (
                 p.name.clone(),
-                evaluate(heap, stack, alias_map, e, ref_counter, st),
+                evaluate(state, e, st),
             )
         })
         .collect();
@@ -613,20 +556,16 @@ fn push_stack_frame<'a, P>(
         params,
         current_member: member,
     };
-    stack.push(stack_frame);
+    state.stack.push(stack_frame);
 }
 
 fn exec_assert(
-    constraints: &PathConstraints,
-    assertion: &Expression,
-    heap: &mut Heap,
-    stack: &Vec<StackFrame>,
-    alias_map: &mut AliasMap,
-    ref_counter: &mut i64,
+    state: &mut State,
+    assertion: Expression,
     st: &SymbolicTable,
 ) -> Rc<Expression> {
-    let expression = if constraints.len() >= 1 {
-        let assumptions = constraints
+    let expression = if state.constraints.len() >= 1 {
+        let assumptions = state.constraints
             .iter()
             .cloned()
             .reduce(|x, y| Expression::BinOp {
@@ -660,7 +599,7 @@ fn exec_assert(
     //     },
     // );
     // //dbg!(&expression);
-    let z = evaluate(heap, stack, alias_map, Rc::new(expression), ref_counter, st);
+    let z = evaluate(state, Rc::new(expression), st);
     // //dbg!(&z);
     z
 }
@@ -766,16 +705,14 @@ fn null() -> Expression {
 }
 
 pub fn init_symbolic_reference(
-    heap: &mut Heap,
-    alias_map: &mut AliasMap,
+    state: &mut State,
     sym_ref: &Identifier,
     type_ref: &RuntimeType,
-    ref_counter: &mut i64,
     st: &SymbolicTable,
 ) {
-    if !alias_map.contains_key(sym_ref) {
-        let ref_fresh = *ref_counter;
-        *ref_counter += 1;
+    if !state.alias_map.contains_key(sym_ref) {
+        let ref_fresh = state.ref_counter;
+        state.ref_counter = ref_fresh + 1;
 
         let class_name = if let RuntimeType::ReferenceRuntimeType { type_ } = type_ref {
             type_
@@ -792,13 +729,13 @@ pub fn init_symbolic_reference(
                     Rc::new(initialize_symbolic_var(
                         &field_name,
                         &type_.type_of(),
-                        ref_counter,
+                        &mut state.ref_counter,
                     )),
                 )
             })
             .collect();
 
-        heap.insert(
+        state.heap.insert(
             ref_fresh,
             HeapValue::ObjectValue {
                 fields,
@@ -808,7 +745,7 @@ pub fn init_symbolic_reference(
 
         // Find all other possible concrete references of the same type as sym_ref
 
-        let existing_aliases = alias_map
+        let existing_aliases = state.alias_map
             .values()
             .filter(|x| x.iter().any(|x| x.type_of() == *type_ref))
             .flat_map(|x| x.iter())
@@ -828,7 +765,7 @@ pub fn init_symbolic_reference(
             )
             .collect();
 
-        alias_map.insert(sym_ref.clone(), aliases);
+        state.alias_map.insert(sym_ref.clone(), aliases);
     }
 }
 
@@ -844,17 +781,14 @@ fn write_index(heap: &mut Heap, ref_: i64, index: &Expression, value: &Expressio
 }
 
 fn execute_assign(
-    heap: &mut Heap,
-    stack: &mut Vec<StackFrame>,
-    alias_map: &mut AliasMap,
-    ref_counter: &mut i64,
+    state: &mut State,
     lhs: &Lhs,
     e: Rc<Expression>,
     st: &SymbolicTable,
 ) {
     match lhs {
         Lhs::LhsVar { var, type_ } => {
-            let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
+            let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             params.insert(var.clone(), e);
         }
         Lhs::LhsField {
@@ -863,21 +797,21 @@ fn execute_assign(
             field,
             type_,
         } => {
-            let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
+            let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             let o = params
                 .get(var)
-                .unwrap_or_else(|| panic!("infeasible, object does not exit"));
+                .unwrap_or_else(|| panic!("infeasible, object does not exit")).clone();
 
             match o.as_ref() {
                 Expression::Ref { ref_, type_ } => {
-                    write_field_concrete_ref(heap, *ref_, field, e);
+                    write_field_concrete_ref(&mut state.heap, *ref_, field, e);
                 }
                 sym_ref @ Expression::SymbolicRef { var, type_ } => {
-                    init_symbolic_reference(heap, alias_map, &var, &type_, ref_counter, st);
+                    init_symbolic_reference( state, &var, &type_,  st);
                     // should also remove null here? --Assignemnt::45
-                    let concrete_refs = &alias_map[var];
+                    let concrete_refs = &state.alias_map[var];
                     write_field_symbolic_ref(
-                        heap,
+                        &mut state.heap,
                         concrete_refs,
                         field,
                         Rc::new(sym_ref.clone()),
@@ -890,7 +824,7 @@ fn execute_assign(
             todo!()
         }
         Lhs::LhsElem { var, index, type_ } => {
-            let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
+            let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             let ref_ = params
                 .get(var)
                 .unwrap_or_else(|| panic!("infeasible, array does not exit"));
@@ -912,25 +846,22 @@ fn execute_assign(
 
 // fn evaluateRhs(state: &mut State, rhs: &Rhs) -> Expression {
 fn evaluateRhs(
-    heap: &mut Heap,
-    stack: &mut Vec<StackFrame>,
-    alias_map: &mut AliasMap,
-    ref_counter: &mut i64,
+    state: &mut State,
     rhs: &Rhs,
     st: &SymbolicTable,
 ) -> Rc<Expression> {
     match rhs {
         Rhs::RhsExpression { value, type_ } => {
             match value {
-                Expression::Var { var, type_ } => lookup_in_stack(var, stack).unwrap(),
+                Expression::Var { var, type_ } => lookup_in_stack(var, &state.stack).unwrap(),
                 _ => Rc::new(value.clone()), // might have to expand on this when dealing with complex quantifying expressions and array
             }
         }
         Rhs::RhsField { var, field, type_ } => {
             if let Expression::Var { var, .. } = var {
-                let StackFrame { pc, t, params, .. } = stack.last_mut().unwrap();
-                let object = params.get(var).unwrap();
-                exec_rhs_field(heap, alias_map, ref_counter, object, field, type_, st)
+                let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
+                let object = params.get(var).unwrap().clone();
+                exec_rhs_field(state, &object, field, type_, st)
             } else {
                 panic!(
                     "Currently only right hand sides of the form <variable>.<field> are allowed."
@@ -951,9 +882,7 @@ fn evaluateRhs(
 }
 
 fn exec_rhs_field(
-    heap: &mut Heap,
-    alias_map: &mut AliasMap,
-    ref_counter: &mut i64,
+    state: &mut State,
     object: &Expression,
     field: &Identifier,
     type_: &RuntimeType,
@@ -968,8 +897,8 @@ fn exec_rhs_field(
         } => {
             // bedoelt hij hier niet exec true_ ipv execField true_ ?
             // nope want hij wil nog steeds het field weten ervan
-            let true_ = exec_rhs_field(heap, alias_map, ref_counter, true_, field, type_, st);
-            let false_ = exec_rhs_field(heap, alias_map, ref_counter, false_, field, type_, st);
+            let true_ = exec_rhs_field(state, true_, field, type_, st);
+            let false_ = exec_rhs_field(state, false_, field, type_, st);
 
             Rc::new(Expression::Conditional {
                 guard: guard.clone(),
@@ -981,14 +910,14 @@ fn exec_rhs_field(
         Expression::Lit {
             lit: Lit::NullLit, ..
         } => panic!("infeasible"),
-        Expression::Ref { ref_, type_ } => read_field_concrete_ref(heap, *ref_, field),
+        Expression::Ref { ref_, type_ } => read_field_concrete_ref(&mut state.heap, *ref_, field),
         sym_ref @ Expression::SymbolicRef { var, type_ } => {
-            init_symbolic_reference(heap, alias_map, var, type_, ref_counter, st);
-            remove_symbolic_null(alias_map, var);
-            let concrete_refs = &alias_map[var];
+            init_symbolic_reference(state, var, type_, st);
+            remove_symbolic_null(&mut state.alias_map, var);
+            let concrete_refs = &state.alias_map[var];
             // dbg!(&alias_map);
             // dbg!(&heap);
-            read_field_symbolic_ref(heap, concrete_refs, Rc::new(sym_ref.clone()), field)
+            read_field_symbolic_ref(&mut state.heap, concrete_refs, Rc::new(sym_ref.clone()), field)
         }
         _ => todo!("Expected reference here, found: {:?}", object),
     }
@@ -1080,7 +1009,6 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
 
         let mut state = State {
             pc,
-            program,
             stack: vec![StackFrame {
                 pc,
                 t: None,
@@ -1094,7 +1022,7 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
             ref_counter: 1,
         };
 
-        return sym_exec(&mut state, &flows, k, &symbolic_table);
+        return sym_exec(&mut state, &program, &flows, k, &symbolic_table);
     } else {
         panic!()
     }

@@ -2,6 +2,7 @@ use nom::Slice;
 use ordered_float::NotNan;
 use pom::parser::*;
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::str::{self, FromStr};
 
@@ -273,8 +274,8 @@ fn specification<'a>() -> Parser<'a, Token<'a>, Specification> {
 
     (requires.opt() + ensures.opt() + exceptional.opt()).map(
         |((requires, ensures), exceptional)| Specification {
-            requires,
-            ensures,
+            requires: requires.map(Rc::new),
+            ensures: ensures.map(Rc::new),
             exceptional,
         },
     )

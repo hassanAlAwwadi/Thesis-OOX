@@ -4,7 +4,7 @@ pub type Identifier = String;
 pub type Reference = i64;
 
 pub type Float = NotNan<f64>;
-use std::{fmt::Debug, rc::Rc};
+use std::{fmt::Debug, rc::Rc, cell::{RefCell, Ref}};
 
 #[derive(Debug)]
 pub struct CompilationUnit {
@@ -70,12 +70,12 @@ impl DeclarationMember {
         }
     }
 
-    pub fn requires(&self) -> Option<&Expression> {
-        self.specification().and_then(|s| s.requires.as_ref())
+    pub fn requires(&self) -> Option<Rc<Expression>> {
+        self.specification().and_then(|s| s.requires.clone())
     }
 
-    pub fn post_condition(&self) -> Option<&Expression> {
-        self.specification().and_then(|s| s.ensures.as_ref())
+    pub fn post_condition(&self) -> Option<Rc<Expression>> {
+        self.specification().and_then(|s| s.ensures.clone())
     }
 }
 
@@ -87,8 +87,8 @@ pub struct Parameter {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Specification {
-    pub requires: Option<Expression>,
-    pub ensures: Option<Expression>,
+    pub requires: Option<Rc<Expression>>,
+    pub ensures: Option<Rc<Expression>>,
     pub exceptional: Option<Expression>,
 }
 
