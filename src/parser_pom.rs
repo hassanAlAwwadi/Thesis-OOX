@@ -130,9 +130,15 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     let break_ = (keyword("break") * punct(";")).map(|_| Statement::Break);
     let return_ = (keyword("return") * expression().opt() - punct(";"))
         .map(|expression| Statement::Return { expression });
-    let throw = (keyword("throw") * punct(";")).map(|_| Statement::Throw {
-        message: String::new(),
-    });
+    let throw = (keyword("throw") * literal() - punct(";")).map(|x| {
+        if let Expression::Lit { lit: Lit::StringLit { string_value }, type_ } = x {
+            Statement::Throw {
+                message: string_value,
+            }
+        } else {
+            panic!("Currently only string literals can be thrown as exceptions")
+        }
+        });
     let try_ = (keyword("try") * punct("{") * call(statement)
         + punct("}") * keyword("catch") * punct("{") * call(statement)
         - punct("}"))
@@ -279,7 +285,7 @@ fn specification<'a>() -> Parser<'a, Token<'a>, Specification> {
         |((requires, ensures), exceptional)| Specification {
             requires: requires.map(Rc::new),
             ensures: ensures.map(Rc::new),
-            exceptional,
+            exceptional: exceptional.map(Rc::new),
         },
     )
 }
@@ -762,7 +768,7 @@ fn create_exceptional_ites(conditions: HashSet<Expression>, body: Statement) -> 
     }
 }
 
-fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> CompilationUnit {
+pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> CompilationUnit {
     let members = compilation_unit.members.iter_mut().filter_map(|m| match m {
         Declaration::Class { members, name } => Some((name, members)),
     });

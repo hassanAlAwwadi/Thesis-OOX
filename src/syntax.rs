@@ -77,6 +77,10 @@ impl DeclarationMember {
     pub fn post_condition(&self) -> Option<Rc<Expression>> {
         self.specification().and_then(|s| s.ensures.clone())
     }
+    
+    pub fn exceptional(&self) -> Option<Rc<Expression>> {
+        self.specification().and_then(|s| s.exceptional.clone())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,7 +93,7 @@ pub struct Parameter {
 pub struct Specification {
     pub requires: Option<Rc<Expression>>,
     pub ensures: Option<Rc<Expression>>,
-    pub exceptional: Option<Expression>,
+    pub exceptional: Option<Rc<Expression>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,0 +1,138 @@
+//
+// For testing OOX handling of exceptions
+//
+class Main
+{
+
+    int test1(Main m)
+        exceptional(true) 
+    {
+        // since m could be null, expect an exception.
+        m.test1(m);
+    }
+
+    int test1_invalid(Main m)
+        exceptional(false) 
+    {
+        // since m could be null, expect an exception.
+        m.test1_invalid(m);
+    }
+
+
+    static int div(int x, int y)
+        exceptional(true)
+    {
+        int value := Main.divv(x, y);
+        return value;
+    }
+
+    static int divv(int x, int y)
+        exceptional(true)
+    {
+        //return x / y;
+        throw "exception";
+    }
+
+//    static void m1(int x)
+//        requires(x == 0)
+//        ensures(x == 0)
+//        exceptional(false)
+//    {
+//        try { int a := Main.div(1, 0); x := 9 ;}
+//        catch { ; }
+//    }
+//
+//    static void m1_invalid(int x)
+//        ensures(x == 9)
+//    {
+//        try { int a := Main.div(1, 0); x := 9 ;}
+//        catch { ; }
+//    }
+//
+//    static void m2(int x) // valid spec:
+//        ensures(false)
+//        exceptional(x == 9)
+//    {
+//        x := 9 ;
+//        int a := Main.div(1, 0);
+//    }
+//
+//    static void m3(int x) // valid spec:
+//        ensures(x < 9)
+//        exceptional(x >= 9)
+//    {
+//        if(x>=9) { int a := Main.div(1, 0); }
+//        else { ; }
+//    }
+//
+//    static void m3_invalid1(int x)
+//        ensures(x < 8)
+//    {
+//        if(x>=9) { int a := Main.div(1, 0); }
+//        else { ; }
+//    }
+//
+//    static void m3_invalid2(int x)
+//        exceptional(x >= 10)
+//    {
+//        if(x>=9) { int a := Main.div(1, 0); }
+//        else { ; }
+//    }
+//
+//    static void nullExc1(int x, Item a)
+//    {
+//        if(x>=9) { int a := Main.div(1, 0); }
+//        else { ; }
+//    }
+//
+//    static void nullExc2(int x, Item a)
+//        requires(x==0)
+//        ensures((a == null && x==2) || (a != null && x==1))
+//        exceptional(false)
+//    {
+//        try { int v := a.x ; x := 1 ; }
+//        catch { x := 2 ; }
+//    }
+
+//    static void arrayExc1(int x, Item[] a)
+//        requires(x==0)
+//        ensures(a != null && #a>0 && x==1)
+//        exceptional((a == null || #a==0) && x==0)
+//    {
+//        Item v := a[0] ;
+//        x := 1 ;
+//    }
+//
+//    static void arrayExc2(int x, Item[] a)
+//        requires(x==0 && a != null)
+//        ensures(a != null && #a>0 && x==1)
+//        exceptional(#a==0 && x==0)
+//    {
+//        Item v := a[0] ;
+//        x := 1 ;
+//    }
+//
+//    static void arrayExc3(int x, Item[] a)
+//        requires(x>=0 && a != null && #a==1)
+//        ensures(#a==1 && x==1)
+//        exceptional(x>0)
+//    {
+//        Item v := a[x] ;
+//        x := x+1 ;
+//    }
+//
+//    static void arrayExc4(int x, Item[] a)
+//        requires(x<=0 && a != null && #a==1)
+//        ensures(#a==1 && x==1)
+//        exceptional(x<0)
+//    {
+//        Item v := a[x] ;
+//        x := x+1 ;
+//    }
+//
+}
+
+class Item {
+    int x ;
+    //Item() { this.x := 9 ; }
+}

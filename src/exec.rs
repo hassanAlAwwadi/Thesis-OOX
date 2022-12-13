@@ -15,7 +15,7 @@ use crate::{
     dsl::{equal, ite, negate},
     eval::{self, evaluate},
     lexer::tokens,
-    parser_pom::parse,
+    parser_pom::{parse, insert_exceptional_clauses},
     stack::{lookup_in_stack, StackFrame},
     symbolic_table::SymbolicTable,
     syntax::{
@@ -77,6 +77,7 @@ pub struct State {
     constraints: PathConstraints,
     pub alias_map: AliasMap,
     pub ref_counter: i64,
+    exception_handler: Vec<(u64, u64)>,
 }
 
 fn default(t: impl Typeable) -> Expression {
@@ -176,6 +177,9 @@ fn sym_exec(
         ActionResult::InfeasiblePath => {
             // Finish this branch
             return SymResult::Valid;
+        },
+        ActionResult::Finish => {
+            return SymResult::Valid;
         }
     };
     SymResult::Valid
@@ -187,6 +191,7 @@ enum ActionResult {
     FunctionCall(u64),
     InvalidAssertion,
     InfeasiblePath,
+    Finish
 }
 
 fn action(
@@ -209,14 +214,7 @@ fn action(
         }
         CFGStatement::Statement(Statement::Assign { lhs, rhs }) => {
             if let Rhs::RhsCall { invocation, type_ } = rhs {
-                return exec_invocation(
-                    state,
-                    invocation,
-                    &program,
-                    pc,
-                    Some(lhs.clone()),
-                    st,
-                );
+                return exec_invocation(state, invocation, &program, pc, Some(lhs.clone()), st);
             }
             let value = evaluateRhs(state, rhs, st);
             let e = evaluate(state, value, st);
@@ -225,59 +223,16 @@ fn action(
             ActionResult::Continue
         }
         CFGStatement::Statement(Statement::Assert { assertion }) => {
-            let expression = exec_assert(
-                state,
-                assertion.clone(),
-                st,
-            );
-            if *expression == true_lit() {
-                ActionResult::InvalidAssertion
-            } else if *expression == false_lit() {
-                ActionResult::Continue
-            } else {
-                // dbg!("invoke Z3 with:", &expression);
-                // dbg!(&alias_map);
-                let symbolic_refs = find_symbolic_refs(&expression);
-                if symbolic_refs.len() == 0 {
-                    let result = z3_checker::verify(&expression);
-                    if let SatResult::Unsat = result {
-                    } else {
-                        return ActionResult::InvalidAssertion;
-                    }
-                } else {
-                    // dbg!(&symbolic_refs);
-                    let expressions =
-                        concretizations(expression.clone(), &symbolic_refs, &state.alias_map);
-                    // dbg!(&expressions);
+            let expression = prepare_assert_expression(state, Rc::new(assertion.clone()), st);
 
-                    for expression in expressions {
-                        let expression =
-                            evaluate(state, expression, st);
-                        if *expression == true_lit() {
-                            return ActionResult::InvalidAssertion;
-                        } else if *expression == false_lit() {
-                            // valid, keep going
-                            // dbg!("locally solved!");
-                        } else {
-                            // panic!("should not do that right now");
-                            let result = z3_checker::verify(&expression);
-                            if let SatResult::Unsat = result {
-                            } else {
-                                // panic!("invalid");
-                                return ActionResult::InvalidAssertion;
-                            }
-                        }
-                    }
-                }
-                ActionResult::Continue
+            let is_valid = eval_assertion(state, expression, st);
+            if !is_valid {
+                return ActionResult::InvalidAssertion;
             }
+            ActionResult::Continue
         }
         CFGStatement::Statement(Statement::Assume { assumption }) => {
-            let expression = evaluate(
-                state,
-                Rc::new(assumption.clone()),
-                st,
-            );
+            let expression = evaluate(state, Rc::new(assumption.clone()), st);
             // dbg!(assumption, &expression);
             //dbg!(&assumption, &expression, stack.last().map(|s| &s.params));
             if *expression == false_lit() {
@@ -299,12 +254,7 @@ fn action(
             // we assume that the previous stackframe is of this method
             let StackFrame { current_member, .. } = state.stack.last().unwrap();
             if let Some(requires) = current_member.requires() {
-                let assertion = requires.as_ref().to_owned();
-                exec_assert(
-                    state,
-                    assertion,
-                    st,
-                );
+                prepare_assert_expression(state, requires, st);
                 // more?
             }
             ActionResult::Continue
@@ -316,13 +266,12 @@ fn action(
                 ..
             } = state.stack.last().unwrap();
             if let Some(post_condition) = current_member.post_condition().clone() {
-                let assertion = post_condition.as_ref().to_owned();
-                exec_assert(
-                    state,
-                    assertion,
-                    st,
-                );
-                // some if true then unfeasible/invalid or something?
+                let expression = prepare_assert_expression(state, post_condition, st);
+                let is_valid = eval_assertion(state, expression, st);
+                if !is_valid {
+                    // postcondition invalid
+                    return ActionResult::InvalidAssertion;
+                }
             }
             if state.stack.len() == 1 {
                 ActionResult::Continue
@@ -341,16 +290,75 @@ fn action(
                 ActionResult::Return(pc)
             }
         }
-        CFGStatement::Statement(Statement::Call { invocation }) => exec_invocation(
-            state,
-            invocation,
-            &program,
-            pc,
-            None,
-            st,
-        ),
-
+        CFGStatement::Statement(Statement::Call { invocation }) => {
+            exec_invocation(state, invocation, &program, pc, None, st)
+        }
+        CFGStatement::Statement(Statement::Throw { message }) => {
+            exec_throw(state, st)
+        }
         _ => ActionResult::Continue,
+    }
+}
+
+fn exec_throw(state: &mut State, st: &SymbolicTable) -> ActionResult {
+    if state.exception_handler.len() == 0 {
+        while let Some(stack_frame) = state.stack.pop() {
+            if let Some(exceptional) = stack_frame.current_member.exceptional() {
+                let assertion = prepare_assert_expression(state, exceptional, st);
+                let is_valid = eval_assertion(state, assertion, st);
+                if !is_valid {
+                    return ActionResult::InvalidAssertion;
+                }
+            } else { panic!("unexpected DeclarationMember::Field in stackframe")}
+        }
+    } else {
+        // only check methods for exceptional until catch
+    }
+
+    ActionResult::Finish
+}
+
+
+fn eval_assertion(state: &mut State, expression: Rc<Expression>, st: &SymbolicTable) -> bool {
+    // dbg!("invoke Z3 with:", &expression);
+    // dbg!(&alias_map);
+
+    if *expression == true_lit() {
+        false
+    } else if *expression == false_lit() {
+        true
+    } else {
+        let symbolic_refs = find_symbolic_refs(&expression);
+        if symbolic_refs.len() == 0 {
+            let result = z3_checker::verify(&expression);
+            if let SatResult::Unsat = result {
+            } else {
+                return false;
+            }
+        } else {
+            // dbg!(&symbolic_refs);
+            let expressions = concretizations(expression.clone(), &symbolic_refs, &state.alias_map);
+            // dbg!(&expressions);
+
+            for expression in expressions {
+                let expression = evaluate(state, expression, st);
+                if *expression == true_lit() {
+                    return false;
+                } else if *expression == false_lit() {
+                    // valid, keep going
+                    // dbg!("locally solved!");
+                } else {
+                    // panic!("should not do that right now");
+                    let result = z3_checker::verify(&expression);
+                    if let SatResult::Unsat = result {
+                    } else {
+                        // panic!("invalid");
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
     }
 }
 
@@ -384,13 +392,7 @@ fn exec_invocation(
             let arguments = invocation
                 .arguments()
                 .into_iter()
-                .map(|arg| {
-                    evaluate(
-                        state,
-                        Rc::new(arg.clone()),
-                        st,
-                    )
-                })
+                .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
                 .collect::<Vec<_>>();
 
             exec_static_method(
@@ -418,13 +420,7 @@ fn exec_invocation(
             let arguments = invocation
                 .arguments()
                 .into_iter()
-                .map(|arg| {
-                    evaluate(
-                        state,
-                        Rc::new(arg.clone()),
-                        st,
-                    )
-                })
+                .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
                 .collect::<Vec<_>>();
 
             let invocation_lhs = if let Invocation::InvokeMethod { lhs, .. } = invocation {
@@ -543,12 +539,7 @@ fn push_stack_frame<'a, P>(
     P: Iterator<Item = (&'a Parameter, Rc<Expression>)>,
 {
     let params = params
-        .map(|(p, e)| {
-            (
-                p.name.clone(),
-                evaluate(state, e, st),
-            )
-        })
+        .map(|(p, e)| (p.name.clone(), evaluate(state, e, st)))
         .collect();
     let stack_frame = StackFrame {
         pc: return_point,
@@ -559,13 +550,14 @@ fn push_stack_frame<'a, P>(
     state.stack.push(stack_frame);
 }
 
-fn exec_assert(
+fn prepare_assert_expression(
     state: &mut State,
-    assertion: Expression,
+    assertion: Rc<Expression>,
     st: &SymbolicTable,
 ) -> Rc<Expression> {
     let expression = if state.constraints.len() >= 1 {
-        let assumptions = state.constraints
+        let assumptions = state
+            .constraints
             .iter()
             .cloned()
             .reduce(|x, y| Expression::BinOp {
@@ -579,11 +571,11 @@ fn exec_assert(
         negate(Rc::new(Expression::BinOp {
             bin_op: BinOp::Implies,
             lhs: Rc::new(assumptions),
-            rhs: Rc::new(assertion.clone()),
+            rhs: assertion,
             type_: RuntimeType::BoolRuntimeType,
         }))
     } else {
-        negate(Rc::new(assertion.clone()))
+        negate(assertion)
     };
     // let expression = constraints.iter().fold(
     //     Expression::UnOp {
@@ -745,7 +737,8 @@ pub fn init_symbolic_reference(
 
         // Find all other possible concrete references of the same type as sym_ref
 
-        let existing_aliases = state.alias_map
+        let existing_aliases = state
+            .alias_map
             .values()
             .filter(|x| x.iter().any(|x| x.type_of() == *type_ref))
             .flat_map(|x| x.iter())
@@ -780,12 +773,7 @@ fn write_index(heap: &mut Heap, ref_: i64, index: &Expression, value: &Expressio
     // }
 }
 
-fn execute_assign(
-    state: &mut State,
-    lhs: &Lhs,
-    e: Rc<Expression>,
-    st: &SymbolicTable,
-) {
+fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, st: &SymbolicTable) {
     match lhs {
         Lhs::LhsVar { var, type_ } => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
@@ -800,14 +788,15 @@ fn execute_assign(
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             let o = params
                 .get(var)
-                .unwrap_or_else(|| panic!("infeasible, object does not exit")).clone();
+                .unwrap_or_else(|| panic!("infeasible, object does not exit"))
+                .clone();
 
             match o.as_ref() {
                 Expression::Ref { ref_, type_ } => {
                     write_field_concrete_ref(&mut state.heap, *ref_, field, e);
                 }
                 sym_ref @ Expression::SymbolicRef { var, type_ } => {
-                    init_symbolic_reference( state, &var, &type_,  st);
+                    init_symbolic_reference(state, &var, &type_, st);
                     // should also remove null here? --Assignemnt::45
                     let concrete_refs = &state.alias_map[var];
                     write_field_symbolic_ref(
@@ -845,11 +834,7 @@ fn execute_assign(
 }
 
 // fn evaluateRhs(state: &mut State, rhs: &Rhs) -> Expression {
-fn evaluateRhs(
-    state: &mut State,
-    rhs: &Rhs,
-    st: &SymbolicTable,
-) -> Rc<Expression> {
+fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolicTable) -> Rc<Expression> {
     match rhs {
         Rhs::RhsExpression { value, type_ } => {
             match value {
@@ -917,7 +902,12 @@ fn exec_rhs_field(
             let concrete_refs = &state.alias_map[var];
             // dbg!(&alias_map);
             // dbg!(&heap);
-            read_field_symbolic_ref(&mut state.heap, concrete_refs, Rc::new(sym_ref.clone()), field)
+            read_field_symbolic_ref(
+                &mut state.heap,
+                concrete_refs,
+                Rc::new(sym_ref.clone()),
+                field,
+            )
         }
         _ => todo!("Expected reference here, found: {:?}", object),
     }
@@ -971,9 +961,10 @@ fn initialize_symbolic_var(name: &str, type_: &RuntimeType, ref_counter: &mut i6
 fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-
+    dbg!(as_ref);
     let c = parse(&tokens);
     let c = c.unwrap();
+    let c = insert_exceptional_clauses(c);
 
     // dbg!(&c);
 
@@ -1020,6 +1011,7 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
             constraints: HashSet::new(),
             alias_map: HashMap::new(),
             ref_counter: 1,
+            exception_handler: Default::default(),
         };
 
         return sym_exec(&mut state, &program, &flows, k, &symbolic_table);
@@ -1098,4 +1090,13 @@ fn sym_exec_linked_list3_invalid() {
         verify_file(&file_content, "test3_invalid1", 80),
         SymResult::Invalid
     );
+}
+
+#[test]
+fn sym_exec_exceptions1() {
+    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    // at k=80 it fails, after ~170 sec in hs oox, rs oox does this in ~90 sec
+    assert_eq!(verify_file(&file_content, "test1", 20), SymResult::Valid);
+    assert_eq!(verify_file(&file_content, "test1_invalid", 20), SymResult::Invalid);
+    assert_eq!(verify_file(&file_content, "div", 30), SymResult::Valid);
 }

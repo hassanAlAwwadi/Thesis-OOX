@@ -87,7 +87,7 @@ fn helper<'a>(
         Statement::While { guard, body } => {
             helper(body, declarations, class_name, local_variables);
         }
-        Statement::Throw { message } => todo!(),
+        Statement::Throw { .. } => (),
         Statement::Try {
             try_body,
             catch_body,
