@@ -29,11 +29,23 @@ pub(crate) fn ite(guard: Rc<Expression>, e1: Rc<Expression>, e2: Rc<Expression>)
     }
 }
 
-pub(crate) fn equal(e1: Rc<Expression>, e2: Rc<Expression>) -> Expression {
+pub(crate) fn equal<E1, E2>(e1: E1, e2: E2) -> Expression
+where
+    E1: Into<Rc<Expression>>,
+    E2: Into<Rc<Expression>>
+{
     Expression::BinOp {
         bin_op: BinOp::Equal,
-        lhs: e1,
-        rhs: e2,
+        lhs: e1.into(),
+        rhs: e2.into(),
         type_: RuntimeType::ANYRuntimeType,
     }
+}
+
+
+pub(crate) fn ors<I>(iter: I) -> Expression
+where I: IntoIterator<Item=Expression>,{
+    iter.into_iter().fold(Expression::FALSE, |acc, expr | {
+        Expression::BinOp { bin_op: BinOp::Or, lhs: Rc::new(acc), rhs: expr.into(), type_: RuntimeType::BoolRuntimeType }
+    })
 }

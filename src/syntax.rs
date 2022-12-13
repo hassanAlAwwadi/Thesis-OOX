@@ -193,6 +193,7 @@ impl Debug for Invocation {
                 .field("lhs", lhs)
                 .field("rhs", rhs)
                 .field("arguments", arguments)
+                .field("resolved", &resolved.is_some())
                 .finish(),
             Self::InvokeConstructor {
                 class_name,
@@ -201,7 +202,7 @@ impl Debug for Invocation {
             } => f
                 .debug_struct("InvokeConstructor")
                 .field("class_name", class_name)
-                .field("arguments", arguments)
+                .field("arguments", arguments).field("resolved", &resolved.is_some())
                 .finish(),
         }
     }

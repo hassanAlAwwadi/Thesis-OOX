@@ -3,10 +3,13 @@ use ordered_float::NotNan;
 use pom::parser::*;
 
 use std::cell::RefCell;
+use std::collections::btree_set::Union;
+use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
 use std::rc::Rc;
 use std::str::{self, FromStr};
 
-use crate::dsl::negate;
+use crate::dsl::{equal, negate, ors};
 use crate::resolver;
 use crate::syntax::*;
 
@@ -672,13 +675,149 @@ fn keyword<'a>(kw: &'a str) -> Parser<'a, Token<'a>, Token> {
     sym(Token::Keyword(kw))
 }
 
-// fn expression_or_this<'a>() -> Parser<'a, Token<'a>, Expression> {
-//     expression()
-//         | keyword("this").map(|_| Expression::Var {
-//             var: "this".to_string(),
-//             type_: RuntimeType::StringRuntimeType,
-//         })
-// }
+fn exceptional_assignment(lhs: &Lhs, rhs: &Rhs) -> HashSet<Expression> {
+    let mut lhs = exceptional_lhs(lhs);
+    lhs.extend(exceptional_rhs(rhs).into_iter());
+    lhs
+}
+
+fn exceptional_lhs(lhs: &Lhs) -> HashSet<Expression> {
+    match lhs {
+        Lhs::LhsVar { .. } => HashSet::new(),
+        Lhs::LhsField { var, var_type, .. } => HashSet::from([equal(
+            Expression::Var {
+                var: var.clone(),
+                type_: var_type.clone(),
+            },
+            Expression::NULL,
+        )]),
+        Lhs::LhsElem { .. } => todo!(),
+    }
+}
+
+fn exceptional_rhs(rhs: &Rhs) -> HashSet<Expression> {
+    match rhs {
+        Rhs::RhsExpression { value, .. } => exceptional_expression(value),
+        Rhs::RhsField { var, .. } => HashSet::from([equal(var.clone(), Expression::NULL)]),
+        Rhs::RhsElem { .. } => todo!(),
+        Rhs::RhsCall { invocation, type_ } => exceptional_invocation(invocation),
+        Rhs::RhsArray { .. } => todo!(),
+    }
+}
+
+fn exceptional_expression(expression: &Expression) -> HashSet<Expression> {
+    // TODO: div or mod by 0
+    HashSet::new()
+}
+
+fn exceptional_invocation(invocation: &Invocation) -> HashSet<Expression> {
+    match invocation {
+        Invocation::InvokeMethod {
+            lhs,
+            arguments,
+            resolved,
+            ..
+        } => {
+            let exceptional_args: HashSet<_> = arguments
+                .into_iter()
+                .flat_map(|arg| exceptional_expression(arg).into_iter())
+                .collect();
+            if let DeclarationMember::Method {
+                is_static: false, ..
+            } = resolved.as_ref().unwrap().1
+            {
+                let exp = ors(std::iter::once(equal(
+                    Expression::Var {
+                        var: lhs.clone(),
+                        type_: RuntimeType::REFRuntimeType,
+                    },
+                    Expression::NULL,
+                ))
+                .chain(exceptional_args.into_iter()));
+                HashSet::from([exp])
+            } else {
+                exceptional_args
+            }
+        }
+        Invocation::InvokeConstructor {
+            class_name,
+            arguments,
+            resolved,
+        } => todo!(),
+    }
+}
+
+fn create_exceptional_ites(conditions: HashSet<Expression>, body: Statement) -> Statement {
+    if conditions.len() == 0 {
+        return body;
+    }
+    let cond = ors(conditions);
+    // In the original OOX, a nested ITE is made if there are multiple exception conditions, not sure why so I will do it like this for now.
+    Statement::Ite {
+        guard: cond,
+        true_body: Box::new(Statement::Throw {
+            message: "exception".into(),
+        }),
+        false_body: Box::new(body),
+    }
+}
+
+fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> CompilationUnit {
+    let members = compilation_unit.members.iter_mut().filter_map(|m| match m {
+        Declaration::Class { members, name } => Some((name, members)),
+    });
+
+    for (_, class) in members {
+        let method_bodies = class.iter_mut().filter_map(|dcl| match dcl {
+            DeclarationMember::Method { body, .. } => Some(body),
+            _ => None,
+        });
+        for body in method_bodies {
+            *body = helper(body.clone());
+        }
+    }
+
+    fn helper(statement: Statement) -> Statement {
+        match statement {
+            Statement::Assign { lhs, rhs } => {
+                let conditions = exceptional_assignment(&lhs, &rhs);
+
+                create_exceptional_ites(conditions, Statement::Assign { lhs, rhs })
+            }
+            Statement::Call { invocation } => {
+                let conditions = exceptional_invocation(&invocation);
+
+                create_exceptional_ites(conditions, Statement::Call { invocation })
+            }
+            Statement::Ite {
+                guard,
+                true_body,
+                false_body,
+            } => Statement::Ite {
+                guard,
+                true_body: Box::new(helper(*true_body)),
+                false_body: Box::new(helper(*false_body)),
+            },
+
+            Statement::Seq { stat1, stat2 } => {
+                Statement::Seq { stat1: Box::new(helper(*stat1)), stat2: Box::new(helper(*stat2)) }
+            },
+            Statement::While { guard, body } => {
+                Statement::While { guard, body: Box::new(helper(*body)) }
+            },
+            Statement::Try { try_body, catch_body } => {
+                Statement::Try { try_body: Box::new(helper(*try_body)), catch_body: Box::new(helper(*catch_body))}
+            },
+
+            Statement::Block { body } => {
+                Statement::Block { body: Box::new(helper(*body)) }
+            }
+
+            statement => statement,
+        }
+    }
+    compilation_unit
+}
 
 #[test]
 fn class_with_constructor() {
@@ -902,9 +1041,16 @@ fn parsing_linked_list() {
     c.unwrap(); // should not panic;
 }
 
-// fn is_literal<'a>() -> Parser<'a, Token<'a>, Token<'a>> {
-// 	is_a(|t: Token<'a>| match t {
-//         Token::Literal(_s) => true,
-//         _ => false,
-//     })
-// }
+#[test]
+fn parsing_exceptions() {
+    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+
+    let tokens = tokens(&file_content);
+    let as_ref = tokens.as_slice();
+    dbg!(as_ref);
+    let c = parse(&as_ref).unwrap();
+    dbg!(&c);
+
+    let c = insert_exceptional_clauses(c);
+    dbg!(&c);
+}

@@ -4,7 +4,7 @@ section = { " " | "\t" | comment | token }
 
 comment = { "//" ~ (LETTER | NUMBER | MARK | PUNCTUATION | SYMBOL | SEPARATOR )* }
 
-token = { (keyword ~ !ALPHABETIC) | literal | identifier | punctuator }
+token = { (keyword ~ !(LETTER | NUMBER | "_")) | (literal ~ !(LETTER | NUMBER | "_")) | identifier | punctuator }
 
 identifier = { (LETTER | NUMBER | "_")+ }  // uhm identifiers starting with numbers are possible?
 

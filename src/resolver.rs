@@ -91,7 +91,10 @@ fn helper<'a>(
         Statement::Try {
             try_body,
             catch_body,
-        } => todo!(),
+        } => {
+            helper(try_body, declarations, class_name, local_variables);
+            helper(catch_body, declarations, class_name, local_variables);
+        },
         Statement::Block { body } => todo!(),
         Statement::Declare { type_, var } => {
             local_variables.insert(var, type_.clone());
