@@ -15,6 +15,10 @@ pub enum CFGStatement {
     Ite(Expression, u64, u64),
     While(Expression, u64),
     TryCatch(u64, u64, u64, u64), // l1: entry try body, l2: exit try body, l3: entry catch body, l4: exit catch body
+    TryEntry(u64),
+    TryExit,
+    CatchEntry(u64),
+    CatchExit,
     Seq(u64, u64),
     FunctionEntry(String),
     FunctionExit(String),
@@ -147,18 +151,26 @@ fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> 
             let try_catch_l = *i;
             *i += 1;
             let l1 = *i;
+            *i += 1;
+            let s1_l = *i;
             let mut s_1 = statementCFG(&try_body, i);
             *i += 1;
             let l2 = *i;
             *i += 1;
 
             let l3 = *i;
+            *i += 1;
+            let s2_l = *i;
             let mut s_2 = statementCFG(&catch_body, i);
             *i += 1;
             let l4 = *i;
             *i += 1;
 
             labelled_statements.push((try_catch_l, CFGStatement::TryCatch(l1, l2, l3, l4))); // make sure this is first
+            labelled_statements.push((l1, CFGStatement::TryEntry(s1_l))); // make sure this is first
+            labelled_statements.push((l2, CFGStatement::TryExit)); // make sure this is first
+            labelled_statements.push((l3, CFGStatement::CatchEntry(s2_l))); // make sure this is first
+            labelled_statements.push((l4, CFGStatement::CatchExit)); // make sure this is first
             labelled_statements.append(&mut s_1);
             labelled_statements.append(&mut s_2);
         }
@@ -196,6 +208,10 @@ fn init((l, stmt): &(u64, CFGStatement)) -> u64 {
         CFGStatement::Seq(l1, _) => l1, // could technically be a seq too but nah
         CFGStatement::While(_, _) => l,
         CFGStatement::TryCatch(_, _, _, _) => l,
+        CFGStatement::TryEntry(_) => l,
+        CFGStatement::TryExit => l,
+        CFGStatement::CatchEntry(_) => l,
+        CFGStatement::CatchExit => l,
         CFGStatement::FunctionEntry(_) => unreachable!(),
         CFGStatement::FunctionExit(_) => unreachable!(),
     }
@@ -245,6 +261,10 @@ fn fallthrough(
                 .collect()
         }
         CFGStatement::TryCatch(_, _, _, _) => Vec::new(),
+        CFGStatement::TryEntry(_) => Vec::new(),
+        CFGStatement::TryExit => Vec::new(),
+        CFGStatement::CatchEntry(_) => Vec::new(),
+        CFGStatement::CatchExit => Vec::new(),
         CFGStatement::FunctionEntry(_) => todo!(),
         CFGStatement::FunctionExit(_) => todo!(),
     }
@@ -303,6 +323,10 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
                 CFGStatement::While(_, _) => final_s2,
                 CFGStatement::TryCatch(_, _, _, _) => final_s2,
                 CFGStatement::Seq(_, _) => unreachable!("No seq in l1"),
+                CFGStatement::TryEntry(_) => final_s2,
+                CFGStatement::TryExit => final_s2,
+                CFGStatement::CatchEntry(_) => final_s2,
+                CFGStatement::CatchExit => final_s2,
             }
         }
         CFGStatement::While(_, l_body) => {
@@ -317,15 +341,19 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
             //dbg!(&v);
             v
         }
-        CFGStatement::TryCatch(l1, l2, l3, l4) => {
-            let s1_l = &(*l1, lookup(*l1, all_smts));
-            let s2_l = &(*l3, lookup(*l3, all_smts));
-            let mut final_s1_l = r#final(s1_l, all_smts);
-            let mut final_s2_l = r#final(s2_l, all_smts);
-
-            final_s1_l.append(&mut final_s2_l);
-            final_s1_l
-        } // could lookup finals of l1 and l3 instead of having l3 & l4?
+        CFGStatement::TryCatch(_l1, l2, _l3, l4) => vec![*l2, *l4],
+        CFGStatement::TryEntry(sl) => {
+            let s_l = &(*sl, lookup(*sl, all_smts));
+            let final_s_l = r#final(s_l, all_smts);
+            final_s_l
+        },
+        CFGStatement::TryExit => vec![*l],
+        CFGStatement::CatchEntry(sl) => {
+            let s_l = &(*sl, lookup(*sl, all_smts));
+            let final_s_l = r#final(s_l, all_smts);
+            final_s_l
+        },
+        CFGStatement::CatchExit => vec![*l],
         CFGStatement::FunctionEntry(_) => unreachable!(),
         CFGStatement::FunctionExit(_) => unreachable!(),
     }
@@ -401,19 +429,27 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
             let s2_l = (*l3, lookup(*l3, all_smts));
             v.append(&mut flow(&s2_l, all_smts));
 
-            // v.push((*l3, init(&s2_l))); // from catch statement to catch body
+            v.push((*l3, init(&s2_l))); // from catch statement to catch body
 
-            // for l_f in r#final(&s1_l, all_smts) { // why can't i just make the
-            //     v.push((l_f, *l2));
-            // }
+            for l_f in r#final(&s1_l, all_smts) {
+                v.push((l_f, *l2));
+            }
 
-            // for l_f in r#final(&s2_l, all_smts) {
-            //     v.push((l_f, *l4));
-            // }
+            for l_f in r#final(&s2_l, all_smts) {
+                v.push((l_f, *l4));
+            }
             v
         }
+        CFGStatement::TryEntry(sl) => {
+            vec![(*l, init(&(*sl, lookup(*sl, all_smts))))]
+        },
+        CFGStatement::TryExit => Vec::new(),
+        CFGStatement::CatchEntry(sl) => {
+            vec![(*l, init(&(*sl, lookup(*sl, all_smts))))]
+        },
+        CFGStatement::CatchExit => Vec::new(),
         CFGStatement::FunctionEntry(_) => todo!(),
-        CFGStatement::FunctionExit(_) => todo!(), // to be fixed?
+        CFGStatement::FunctionExit(_) => todo!(),
     }
 }
 

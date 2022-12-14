@@ -1114,8 +1114,17 @@ fn sym_exec_linked_list4_if_problem() {
 #[test]
 fn sym_exec_exceptions1() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
-    // at k=80 it fails, after ~170 sec in hs oox, rs oox does this in ~90 sec
+    
     assert_eq!(verify_file(&file_content, "test1", 20), SymResult::Valid);
     assert_eq!(verify_file(&file_content, "test1_invalid", 20), SymResult::Invalid);
     assert_eq!(verify_file(&file_content, "div", 30), SymResult::Valid);
+}
+
+
+#[test]
+fn sym_exec_exceptions_m1() {
+    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    
+    assert_eq!(verify_file(&file_content, "m1", 20), SymResult::Valid);
+    
 }
