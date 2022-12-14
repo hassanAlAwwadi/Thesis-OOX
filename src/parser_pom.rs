@@ -196,16 +196,14 @@ fn create_ite(guard: Expression, true_body: Statement, false_body: Option<Statem
             }),
             stat2: Box::new(true_body),
         }),
-        false_body: if let Some(false_body) = false_body {
+        false_body:
             Box::new(Statement::Seq {
                 stat1: Box::new(Statement::Assume {
                     assumption: negate(Rc::new(guard.clone())),
                 }),
-                stat2: Box::new(false_body),
+                stat2: Box::new(false_body.unwrap_or(Statement::Skip)),
             })
-        } else {
-            Box::new(Statement::Skip)
-        },
+        
     }
 }
 
@@ -759,13 +757,9 @@ fn create_exceptional_ites(conditions: HashSet<Expression>, body: Statement) -> 
     }
     let cond = ors(conditions);
     // In the original OOX, a nested ITE is made if there are multiple exception conditions, not sure why so I will do it like this for now.
-    Statement::Ite {
-        guard: cond,
-        true_body: Box::new(Statement::Throw {
-            message: "exception".into(),
-        }),
-        false_body: Box::new(body),
-    }
+    create_ite(cond, Statement::Throw {
+        message: "exception".into(),
+    }, Some(body))
 }
 
 pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> CompilationUnit {

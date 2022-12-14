@@ -5,11 +5,50 @@ class Node {
     int value ;
     Node next ;
 
-    bool member(int x) {
+
+    // Throws an exception because n can be null here.
+    bool member_wrong(int x)
+        exceptional(false) 
+    {
+        assume (this != null);
         int v := this.value ;
         if(x==v) return true ;
         else {
             Node n := this.next ;
+            bool b := n.member(x) ;
+            return b ;
+        }
+    }
+
+    bool member(int x)
+        exceptional(false) 
+    {
+        assume (this != null);
+        int v := this.value ;
+        if(x==v) return true ;
+        else {
+            Node n := this.next ;
+            if (n == null) { 
+                return false; 
+            } else {
+                bool b := n.member(x) ;
+                return b ;
+            }
+        }
+    }
+
+
+    bool member_display_if_problem(int x)
+        exceptional(false) 
+    {
+        assume (this != null);
+        int v := this.value ;
+        if(x==v) return true ;
+        else {
+            Node n := this.next ;
+            if (n == null) { 
+                return false;
+            }
             bool b := n.member(x) ;
             return b ;
         }
@@ -25,11 +64,12 @@ class Node {
     }
 
     Node min()
+       // ensures(min != null)
     {
+       assume (this != null);
        Node p := this ;
        Node min := p ;
        int minval := min.value ;
-
        while ( p != null) {
           int value := p.value ;
           if ( value < minval) {
@@ -51,8 +91,9 @@ class Node {
 
     static void test2(Node node)
         requires(node != null)
-        exceptional(true)
+        exceptional(false)
     {
+        assume node != null;
         Node min := node.min() ;
         int x := min.value ;
         bool ok := node.member(x) ;
@@ -63,6 +104,7 @@ class Node {
         requires(node != null)
         exceptional(false)
     {
+        assume node != null;
         Node min := node.min() ;
         int x := min.value ;
         bool ok := node.member(x) ;
@@ -71,7 +113,7 @@ class Node {
 
     static void test3(Node node)
         requires(node != null)
-        exceptional(false)
+        //exceptional(false)
     {
         Node min := node.min() ;
         int minval := min.value ;
@@ -89,7 +131,7 @@ class Node {
 
     static void test3_invalid1(Node node)
         requires(node != null)
-        exceptional(false)
+        //exceptional(false)
     {
         Node min := node.min() ;
         int minval := min.value ;
@@ -121,5 +163,34 @@ class Node {
           k := k+1 ;
         }
         assert n > k ; // should be equal
+    }
+
+    // since it's exceptional, the assertion does not matter?
+    static void test4(Node node, int z) 
+        requires(node != null)
+        exceptional(false)
+    {
+        assume node != null;
+        bool ok := node.member(z);
+    }
+
+
+    // since it's exceptional, the assertion does not matter?
+    static void test4_if_problem(Node node, int z) 
+        requires(node != null)
+        exceptional(false)
+    {
+        assume node != null;
+        bool ok := node.member_display_if_problem(z);
+    }
+
+
+    // since it's exceptional, the assertion does not matter?
+    static void test4_invalid(Node node, int z) 
+        requires(node != null)
+        exceptional(false)
+    {
+        assume node != null;
+        bool ok := node.member_wrong(z);
     }
 }

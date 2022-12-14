@@ -305,6 +305,7 @@ fn exec_throw(state: &mut State, st: &SymbolicTable) -> ActionResult {
         while let Some(stack_frame) = state.stack.pop() {
             if let Some(exceptional) = stack_frame.current_member.exceptional() {
                 let assertion = prepare_assert_expression(state, exceptional, st);
+                //dbg!(&assertion);
                 let is_valid = eval_assertion(state, assertion, st);
                 if !is_valid {
                     return ActionResult::InvalidAssertion;
@@ -590,7 +591,7 @@ fn prepare_assert_expression(
     //         type_: RuntimeType::BoolRuntimeType,
     //     },
     // );
-    // //dbg!(&expression);
+    dbg!(&expression);
     let z = evaluate(state, Rc::new(expression), st);
     // //dbg!(&z);
     z
@@ -961,7 +962,7 @@ fn initialize_symbolic_var(name: &str, type_: &RuntimeType, ref_counter: &mut i6
 fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
-    dbg!(as_ref);
+    // dbg!(as_ref);
     let c = parse(&tokens);
     let c = c.unwrap();
     let c = insert_exceptional_clauses(c);
@@ -1070,14 +1071,14 @@ fn sym_exec_nonstatic_function() {
 #[test]
 fn sym_exec_linked_list1() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
-    assert_eq!(verify_file(&file_content, "test2", 50), SymResult::Valid);
+    assert_eq!(verify_file(&file_content, "test2", 90), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_linked_list1_invalid() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
     assert_eq!(
-        verify_file(&file_content, "test2_invalid", 50),
+        verify_file(&file_content, "test2_invalid", 90),
         SymResult::Invalid
     );
 }
@@ -1087,9 +1088,27 @@ fn sym_exec_linked_list3_invalid() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
     // at k=80 it fails, after ~170 sec in hs oox, rs oox does this in ~90 sec
     assert_eq!(
-        verify_file(&file_content, "test3_invalid1", 80),
+        verify_file(&file_content, "test3_invalid1", 110),
         SymResult::Invalid
     );
+}
+
+#[test]
+fn sym_exec_linked_list4() {
+    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    assert_eq!(verify_file(&file_content, "test4", 90), SymResult::Valid);
+}
+
+#[test]
+fn sym_exec_linked_list4_invalid() {
+    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    assert_eq!(verify_file(&file_content, "test4_invalid", 90), SymResult::Invalid);
+}
+
+#[test]
+fn sym_exec_linked_list4_if_problem() {
+    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    assert_eq!(verify_file(&file_content, "test4_if_problem", 90), SymResult::Valid);
 }
 
 #[test]

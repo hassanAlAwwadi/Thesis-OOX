@@ -139,8 +139,11 @@ fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> 
         }
         Statement::Block { body } => {
             labelled_statements.append(&mut statementCFG(body.as_ref(), i));
-        },
-        Statement::Try { try_body, catch_body } => {
+        }
+        Statement::Try {
+            try_body,
+            catch_body,
+        } => {
             let try_catch_l = *i;
             *i += 1;
             let l1 = *i;
@@ -158,7 +161,6 @@ fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> 
             labelled_statements.push((try_catch_l, CFGStatement::TryCatch(l1, l2, l3, l4))); // make sure this is first
             labelled_statements.append(&mut s_1);
             labelled_statements.append(&mut s_2);
-
         }
         // Statement::Call { invocation: Invocation::InvokeMethod { lhs, rhs, arguments, resolved } }
         _ => {
@@ -241,7 +243,7 @@ fn fallthrough(
                     _ => true,
                 })
                 .collect()
-        },
+        }
         CFGStatement::TryCatch(_, _, _, _) => Vec::new(),
         CFGStatement::FunctionEntry(_) => todo!(),
         CFGStatement::FunctionExit(_) => todo!(),
@@ -314,10 +316,16 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
             v.push(*l);
             //dbg!(&v);
             v
-        },
-        CFGStatement::TryCatch(_, l2, _, l4) => {
-            vec![*l2, *l4]
-        }, // could lookup finals of l1 and l3 instead of having l3 & l4?
+        }
+        CFGStatement::TryCatch(l1, l2, l3, l4) => {
+            let s1_l = &(*l1, lookup(*l1, all_smts));
+            let s2_l = &(*l3, lookup(*l3, all_smts));
+            let mut final_s1_l = r#final(s1_l, all_smts);
+            let mut final_s2_l = r#final(s2_l, all_smts);
+
+            final_s1_l.append(&mut final_s2_l);
+            final_s1_l
+        } // could lookup finals of l1 and l3 instead of having l3 & l4?
         CFGStatement::FunctionEntry(_) => unreachable!(),
         CFGStatement::FunctionExit(_) => unreachable!(),
     }
@@ -384,202 +392,29 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
             }
 
             v
-        },
+        }
         CFGStatement::TryCatch(l1, l2, l3, l4) => {
             let s1_l = (*l1, lookup(*l1, all_smts)); // starting labelled statement in try { .. }
-            let mut v = vec![(*l, init(&s1_l))];  // from try statement to try body
+            let mut v = vec![(*l, init(&s1_l))]; // from try statement to try body
             v.append(&mut flow(&s1_l, all_smts));
 
             let s2_l = (*l3, lookup(*l3, all_smts));
             v.append(&mut flow(&s2_l, all_smts));
 
-            v.push((*l3, init(&s2_l))); // from catch statement to catch body
+            // v.push((*l3, init(&s2_l))); // from catch statement to catch body
 
-            for l_f in r#final(&s1_l, all_smts) { // why can't i just make the 
-                v.push((l_f, *l2));
-            }
+            // for l_f in r#final(&s1_l, all_smts) { // why can't i just make the
+            //     v.push((l_f, *l2));
+            // }
 
-            for l_f in r#final(&s2_l, all_smts) {
-                v.push((l_f, *l4));
-            }
+            // for l_f in r#final(&s2_l, all_smts) {
+            //     v.push((l_f, *l4));
+            // }
             v
         }
         CFGStatement::FunctionEntry(_) => todo!(),
         CFGStatement::FunctionExit(_) => todo!(), // to be fixed?
     }
-}
-
-#[test]
-fn cfg_for_simpleclass() {
-    let file_content = include_str!("../examples/simpleclass.oox");
-
-    let tokens = tokens(file_content);
-    let as_ref = tokens.as_slice();
-    // //dbg!(as_ref);
-    let c = parse(&tokens);
-    let c = c.unwrap();
-    // //dbg!(&c);
-
-    let mut i = 0;
-    let (result, flw) = labelled_statements(c, &mut i);
-    // //dbg!(&result);
-
-    // //dbg!(&flw);
-
-    let expected = vec![
-        (9, 11),
-        (25, 27),
-        (22, 25),
-        (19, 22),
-        (16, 19),
-        (13, 16),
-        (7, 9),
-        (7, 13),
-        (5, 7),
-        (2, 5),
-        (0, 2),
-        (11, 28),
-        (27, 28),
-    ];
-
-    assert_eq!(expected, flw);
-}
-
-#[test]
-fn cfg_for_simpleclass2() {
-    let file_content = include_str!("../examples/simpleclass2.oox");
-
-    let tokens = tokens(file_content);
-    let as_ref = tokens.as_slice();
-
-    let c = parse(&tokens);
-    let c = c.unwrap();
-
-    // //dbg!(&c);
-
-    let mut i = 0;
-    let (result, flw) = labelled_statements(c, &mut i);
-
-    //dbg!(&result);
-
-    //dbg!(&flw);
-    let expected = vec![
-        (36, 38),
-        (33, 36),
-        (31, 33),
-        (31, 39),
-        (38, 41),
-        (39, 41),
-        (28, 31),
-        (25, 28),
-        (22, 25),
-        (20, 22),
-        (41, 20),
-        (44, 46),
-        (20, 44),
-        (17, 20),
-        (14, 17),
-        (11, 14),
-        (8, 11),
-        (5, 8),
-        (2, 5),
-        (0, 2),
-        (46, 47),
-    ];
-
-    assert_eq!(expected, flw);
-}
-
-#[test]
-fn cfg_for_simpleclass3() {
-    let file_content = include_str!("../examples/simpleclass3.oox");
-
-    let tokens = tokens(file_content);
-    let as_ref = tokens.as_slice();
-
-    let c = parse(&tokens);
-    let c = c.unwrap();
-
-    // //dbg!(&c);
-
-    let mut i = 0;
-    let (result, flw) = labelled_statements(c, &mut i);
-
-    //dbg!(&result);
-
-    //dbg!(&flw);
-    let expected = vec![
-        (39, 41),
-        (36, 39),
-        (33, 36),
-        (31, 33),
-        (31, 42),
-        (42, 44),
-        (28, 31),
-        (25, 28),
-        (22, 25),
-        (20, 22),
-        (44, 20),
-        (47, 49),
-        (41, 47),
-        (20, 47),
-        (17, 20),
-        (14, 17),
-        (11, 14),
-        (8, 11),
-        (5, 8),
-        (2, 5),
-        (0, 2),
-        (49, 50),
-    ];
-
-    assert_eq!(expected, flw);
-}
-
-#[test]
-fn cfg_for_simpleclass4() {
-    let file_content = include_str!("../examples/simpleclass4.oox");
-
-    let tokens = tokens(file_content);
-    let as_ref = tokens.as_slice();
-
-    let c = parse(&tokens);
-    let c = c.unwrap();
-
-    // //dbg!(&c);
-
-    let mut i = 0;
-    let (result, flw) = labelled_statements(c, &mut i);
-
-    //dbg!(&result);
-
-    //dbg!(&flw);
-    let expected = vec![
-        (39, 41),
-        (36, 39),
-        (33, 36),
-        (31, 33),
-        (31, 42),
-        (42, 44),
-        (28, 31),
-        (25, 28),
-        (22, 25),
-        (20, 22),
-        (44, 20),
-        (41, 20),
-        (47, 49),
-        (20, 47),
-        (17, 20),
-        (14, 17),
-        (11, 14),
-        (8, 11),
-        (5, 8),
-        (2, 5),
-        (0, 2),
-        (49, 50),
-    ];
-
-    assert_eq!(expected, flw);
 }
 
 #[test]
@@ -617,45 +452,6 @@ fn cfg_for_min() {
 }
 
 #[test]
-fn cfg_for_test() {
-    let file_content = include_str!("../examples/psv/test.oox");
-
-    let tokens = tokens(file_content);
-    let as_ref = tokens.as_slice();
-
-    let c = parse(&tokens);
-    let c = c.unwrap();
-
-    // //dbg!(&c);
-
-    let mut i = 0;
-    let (result, flw) = labelled_statements(c, &mut i);
-
-    // //dbg!(&result);
-
-    // //dbg!(&flw);
-    let expected = vec![
-        (17, 19),
-        (15, 17),
-        (15, 20),
-        (13, 15),
-        (10, 13),
-        (8, 10),
-        (19, 8),
-        (20, 8),
-        (23, 25),
-        (8, 23),
-        (5, 8),
-        (2, 5),
-        (0, 2),
-        (25, 26),
-    ];
-
-    assert_eq!(expected, flw);
-}
-
-
-#[test]
 fn cfg_for_try_catch() {
     let file_content = include_str!("../examples/simple_try_catch.oox");
 
@@ -674,20 +470,22 @@ fn cfg_for_try_catch() {
 
     // //dbg!(&flw);
     let expected = vec![
-        (17, 19),
-        (15, 17),
-        (15, 20),
-        (13, 15),
-        (10, 13),
+        (1, 3),
+        (10, 12),
+        (14, 16),
         (8, 10),
-        (19, 8),
-        (20, 8),
-        (23, 25),
-        (8, 23),
-        (5, 8),
-        (2, 5),
-        (0, 2),
-        (25, 26),
+        (8, 14),
+        (6, 8),
+        (3, 6),
+        (21, 23),
+        (25, 27),
+        (19, 21),
+        (19, 25),
+        (0, 1),
+        (12, 30),
+        (16, 30),
+        (23, 30),
+        (27, 30),
     ];
 
     assert_eq!(expected, flw);
