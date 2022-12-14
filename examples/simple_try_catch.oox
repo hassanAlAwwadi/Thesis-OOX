@@ -1,0 +1,21 @@
+class Main {
+
+    static void m1(int x)
+    {
+        try { 
+            int a := Main.m1(1); 
+            if (a == 0) {
+                x := 2;
+            } else {
+                x := 3;
+            }
+        }
+        catch { 
+            if (x == 0) {
+                x := 4;
+            } else {
+                x := 5;
+            }
+         }
+    }
+}

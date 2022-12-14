@@ -51,7 +51,7 @@ class Node {
 
     static void test2(Node node)
         requires(node != null)
-        exceptional(false)
+        exceptional(true)
     {
         Node min := node.min() ;
         int x := min.value ;

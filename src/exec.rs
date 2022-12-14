@@ -309,7 +309,7 @@ fn exec_throw(state: &mut State, st: &SymbolicTable) -> ActionResult {
                 if !is_valid {
                     return ActionResult::InvalidAssertion;
                 }
-            } else { panic!("unexpected DeclarationMember::Field in stackframe")}
+            }
         }
     } else {
         // only check methods for exceptional until catch

@@ -7,11 +7,14 @@ use std::hash::Hash;
 
 use crate::{lexer::tokens, parser_pom::parse, syntax::*};
 
+const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CFGStatement {
     Statement(Statement), // without Seq
     Ite(Expression, u64, u64),
     While(Expression, u64),
+    TryCatch(u64, u64, u64, u64), // l1: entry try body, l2: exit try body, l3: entry catch body, l4: exit catch body
     Seq(u64, u64),
     FunctionEntry(String),
     FunctionExit(String),
@@ -136,6 +139,26 @@ fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> 
         }
         Statement::Block { body } => {
             labelled_statements.append(&mut statementCFG(body.as_ref(), i));
+        },
+        Statement::Try { try_body, catch_body } => {
+            let try_catch_l = *i;
+            *i += 1;
+            let l1 = *i;
+            let mut s_1 = statementCFG(&try_body, i);
+            *i += 1;
+            let l2 = *i;
+            *i += 1;
+
+            let l3 = *i;
+            let mut s_2 = statementCFG(&catch_body, i);
+            *i += 1;
+            let l4 = *i;
+            *i += 1;
+
+            labelled_statements.push((try_catch_l, CFGStatement::TryCatch(l1, l2, l3, l4))); // make sure this is first
+            labelled_statements.append(&mut s_1);
+            labelled_statements.append(&mut s_2);
+
         }
         // Statement::Call { invocation: Invocation::InvokeMethod { lhs, rhs, arguments, resolved } }
         _ => {
@@ -170,6 +193,7 @@ fn init((l, stmt): &(u64, CFGStatement)) -> u64 {
         CFGStatement::Ite(_, _, _) => l,
         CFGStatement::Seq(l1, _) => l1, // could technically be a seq too but nah
         CFGStatement::While(_, _) => l,
+        CFGStatement::TryCatch(_, _, _, _) => l,
         CFGStatement::FunctionEntry(_) => unreachable!(),
         CFGStatement::FunctionExit(_) => unreachable!(),
     }
@@ -217,7 +241,8 @@ fn fallthrough(
                     _ => true,
                 })
                 .collect()
-        }
+        },
+        CFGStatement::TryCatch(_, _, _, _) => Vec::new(),
         CFGStatement::FunctionEntry(_) => todo!(),
         CFGStatement::FunctionExit(_) => todo!(),
     }
@@ -263,7 +288,7 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
         }
         CFGStatement::Seq(l1, l2) => {
             let s1 = lookup(*l1, all_smts);
-            let mut final_s2 = r#final(&(*l2, lookup(*l2, all_smts)), all_smts);
+            let final_s2 = r#final(&(*l2, lookup(*l2, all_smts)), all_smts);
             match s1 {
                 CFGStatement::Statement(Statement::Continue) => Vec::new(),
                 CFGStatement::Statement(Statement::Break) => Vec::new(),
@@ -274,6 +299,7 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
                 CFGStatement::FunctionExit(_) => unreachable!(),
                 CFGStatement::Ite(_, _, _) => final_s2,
                 CFGStatement::While(_, _) => final_s2,
+                CFGStatement::TryCatch(_, _, _, _) => final_s2,
                 CFGStatement::Seq(_, _) => unreachable!("No seq in l1"),
             }
         }
@@ -288,7 +314,10 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
             v.push(*l);
             //dbg!(&v);
             v
-        } // to be fixed
+        },
+        CFGStatement::TryCatch(_, l2, _, l4) => {
+            vec![*l2, *l4]
+        }, // could lookup finals of l1 and l3 instead of having l3 & l4?
         CFGStatement::FunctionEntry(_) => unreachable!(),
         CFGStatement::FunctionExit(_) => unreachable!(),
     }
@@ -354,6 +383,25 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
                 v.push((l_continue, *l));
             }
 
+            v
+        },
+        CFGStatement::TryCatch(l1, l2, l3, l4) => {
+            let s1_l = (*l1, lookup(*l1, all_smts)); // starting labelled statement in try { .. }
+            let mut v = vec![(*l, init(&s1_l))];  // from try statement to try body
+            v.append(&mut flow(&s1_l, all_smts));
+
+            let s2_l = (*l3, lookup(*l3, all_smts));
+            v.append(&mut flow(&s2_l, all_smts));
+
+            v.push((*l3, init(&s2_l))); // from catch statement to catch body
+
+            for l_f in r#final(&s1_l, all_smts) { // why can't i just make the 
+                v.push((l_f, *l2));
+            }
+
+            for l_f in r#final(&s2_l, all_smts) {
+                v.push((l_f, *l4));
+            }
             v
         }
         CFGStatement::FunctionEntry(_) => todo!(),
@@ -584,6 +632,45 @@ fn cfg_for_test() {
     let (result, flw) = labelled_statements(c, &mut i);
 
     // //dbg!(&result);
+
+    // //dbg!(&flw);
+    let expected = vec![
+        (17, 19),
+        (15, 17),
+        (15, 20),
+        (13, 15),
+        (10, 13),
+        (8, 10),
+        (19, 8),
+        (20, 8),
+        (23, 25),
+        (8, 23),
+        (5, 8),
+        (2, 5),
+        (0, 2),
+        (25, 26),
+    ];
+
+    assert_eq!(expected, flw);
+}
+
+
+#[test]
+fn cfg_for_try_catch() {
+    let file_content = include_str!("../examples/simple_try_catch.oox");
+
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+
+    let c = parse(&tokens);
+    let c = c.unwrap();
+
+    // dbg!(&c);
+
+    let mut i = 0;
+    let (result, flw) = labelled_statements(c, &mut i);
+
+    dbg!(&result);
 
     // //dbg!(&flw);
     let expected = vec![
