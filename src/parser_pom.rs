@@ -762,6 +762,19 @@ fn create_exceptional_ites(conditions: HashSet<Expression>, body: Statement) -> 
     }, Some(body))
 }
 
+
+// Inserts if-then-else statements for OOX statements that may throw nullpointer exceptions.
+// 
+// for example:
+// `int x := o.y;`
+//
+// becomes:
+// 
+// `if (o == null) {
+//  throw "exception";
+// } else {
+//  int x := o.y;
+// }`
 pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> CompilationUnit {
     let members = compilation_unit.members.iter_mut().filter_map(|m| match m {
         Declaration::Class { members, name } => Some((name, members)),

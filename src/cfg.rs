@@ -423,13 +423,11 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
         }
         CFGStatement::TryCatch(l1, l2, l3, l4) => {
             let s1_l = (*l1, lookup(*l1, all_smts)); // starting labelled statement in try { .. }
-            let mut v = vec![(*l, init(&s1_l))]; // from try statement to try body
+            let mut v = vec![(*l, init(&s1_l))]; // from try-catch statement to try entry
             v.append(&mut flow(&s1_l, all_smts));
 
             let s2_l = (*l3, lookup(*l3, all_smts));
             v.append(&mut flow(&s2_l, all_smts));
-
-            v.push((*l3, init(&s2_l))); // from catch statement to catch body
 
             for l_f in r#final(&s1_l, all_smts) {
                 v.push((l_f, *l2));
@@ -441,12 +439,18 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
             v
         }
         CFGStatement::TryEntry(sl) => {
-            vec![(*l, init(&(*sl, lookup(*sl, all_smts))))]
-        },
+            let sl_l = (*sl, lookup(*sl, all_smts));
+            let mut v = flow(&sl_l, all_smts);
+            v.push((*l, init(&sl_l)));
+            v
+        }
         CFGStatement::TryExit => Vec::new(),
         CFGStatement::CatchEntry(sl) => {
-            vec![(*l, init(&(*sl, lookup(*sl, all_smts))))]
-        },
+            let sl_l = (*sl, lookup(*sl, all_smts));
+            let mut v = flow(&sl_l, all_smts);
+            v.push((*l, init(&sl_l)));
+            v
+        }
         CFGStatement::CatchExit => Vec::new(),
         CFGStatement::FunctionEntry(_) => todo!(),
         CFGStatement::FunctionExit(_) => todo!(),
@@ -506,22 +510,26 @@ fn cfg_for_try_catch() {
 
     // //dbg!(&flw);
     let expected = vec![
-        (1, 3),
-        (10, 12),
-        (14, 16),
-        (8, 10),
-        (8, 14),
-        (6, 8),
-        (3, 6),
+        (1, 2),
+        (11, 13),
+        (15, 17),
+        (9, 11),
+        (9, 15),
+        (7, 9),
+        (4, 7),
+        (2, 4),
+        (23, 25),
+        (27, 29),
         (21, 23),
-        (25, 27),
-        (19, 21),
-        (19, 25),
+        (21, 27),
+        (20, 21),
+        (13, 19),
+        (17, 19),
+        (25, 31),
+        (29, 31),
         (0, 1),
-        (12, 30),
-        (16, 30),
-        (23, 30),
-        (27, 30),
+        (19, 32),
+        (31, 32),
     ];
 
     assert_eq!(expected, flw);
