@@ -2,12 +2,11 @@ use nom::Slice;
 use ordered_float::NotNan;
 use pom::parser::*;
 
-use std::cell::RefCell;
-use std::collections::btree_set::Union;
-use std::collections::{HashMap, HashSet};
-use std::ops::Deref;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::str::{self, FromStr};
+
+use std::iter::Extend;
 
 use crate::dsl::{equal, negate, ors};
 use crate::resolver;
@@ -131,14 +130,18 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     let return_ = (keyword("return") * expression().opt() - punct(";"))
         .map(|expression| Statement::Return { expression });
     let throw = (keyword("throw") * literal() - punct(";")).map(|x| {
-        if let Expression::Lit { lit: Lit::StringLit { string_value }, type_ } = x {
+        if let Expression::Lit {
+            lit: Lit::StringLit { string_value },
+            type_,
+        } = x
+        {
             Statement::Throw {
                 message: string_value,
             }
         } else {
             panic!("Currently only string literals can be thrown as exceptions")
         }
-        });
+    });
     let try_ = (keyword("try") * punct("{") * call(statement)
         + punct("}") * keyword("catch") * punct("{") * call(statement)
         - punct("}"))
@@ -196,14 +199,12 @@ fn create_ite(guard: Expression, true_body: Statement, false_body: Option<Statem
             }),
             stat2: Box::new(true_body),
         }),
-        false_body:
-            Box::new(Statement::Seq {
-                stat1: Box::new(Statement::Assume {
-                    assumption: negate(Rc::new(guard.clone())),
-                }),
-                stat2: Box::new(false_body.unwrap_or(Statement::Skip)),
-            })
-        
+        false_body: Box::new(Statement::Seq {
+            stat1: Box::new(Statement::Assume {
+                assumption: negate(Rc::new(guard.clone())),
+            }),
+            stat2: Box::new(false_body.unwrap_or(Statement::Skip)),
+        }),
     }
 }
 
@@ -710,8 +711,51 @@ fn exceptional_rhs(rhs: &Rhs) -> HashSet<Expression> {
 }
 
 fn exceptional_expression(expression: &Expression) -> HashSet<Expression> {
-    // TODO: div or mod by 0
-    HashSet::new()
+    match expression {
+        Expression::BinOp {
+            bin_op: BinOp::Divide | BinOp::Modulo,
+            rhs,
+            ..
+        } => {
+            // Check for divide or modulo by 0
+            HashSet::from([equal(
+                rhs.clone(),
+                Expression::Lit {
+                    lit: Lit::IntLit { int_value: 0 },
+                    type_: RuntimeType::IntRuntimeType,
+                },
+            )])
+        }
+        Expression::BinOp { lhs, rhs, .. } => {
+            union(exceptional_expression(lhs), exceptional_expression(rhs))
+        }
+        Expression::UnOp { value, .. } => exceptional_expression(value),
+        Expression::Conditional {
+            guard,
+            true_,
+            false_,
+            ..
+        } => union(
+            union(exceptional_expression(guard), exceptional_expression(true_)),
+            exceptional_expression(false_),
+        ),
+        Expression::Forall {
+            elem,
+            range,
+            domain,
+            formula,
+            type_,
+        } => todo!(),
+        Expression::Exists {
+            elem,
+            range,
+            domain,
+            formula,
+            type_,
+        } => todo!(),
+        Expression::SizeOf { var, type_ } => todo!(),
+        _ => HashSet::new(),
+    }
 }
 
 fn exceptional_invocation(invocation: &Invocation) -> HashSet<Expression> {
@@ -757,19 +801,22 @@ fn create_exceptional_ites(conditions: HashSet<Expression>, body: Statement) -> 
     }
     let cond = ors(conditions);
     // In the original OOX, a nested ITE is made if there are multiple exception conditions, not sure why so I will do it like this for now.
-    create_ite(cond, Statement::Throw {
-        message: "exception".into(),
-    }, Some(body))
+    create_ite(
+        cond,
+        Statement::Throw {
+            message: "exception".into(),
+        },
+        Some(body),
+    )
 }
 
-
 // Inserts if-then-else statements for OOX statements that may throw nullpointer exceptions.
-// 
+//
 // for example:
 // `int x := o.y;`
 //
 // becomes:
-// 
+//
 // `if (o == null) {
 //  throw "exception";
 // } else {
@@ -812,18 +859,34 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
                 false_body: Box::new(helper(*false_body)),
             },
 
-            Statement::Seq { stat1, stat2 } => {
-                Statement::Seq { stat1: Box::new(helper(*stat1)), stat2: Box::new(helper(*stat2)) }
+            Statement::Seq { stat1, stat2 } => Statement::Seq {
+                stat1: Box::new(helper(*stat1)),
+                stat2: Box::new(helper(*stat2)),
             },
-            Statement::While { guard, body } => {
-                Statement::While { guard, body: Box::new(helper(*body)) }
+            Statement::While { guard, body } => Statement::While {
+                guard,
+                body: Box::new(helper(*body)),
             },
-            Statement::Try { try_body, catch_body } => {
-                Statement::Try { try_body: Box::new(helper(*try_body)), catch_body: Box::new(helper(*catch_body))}
+            Statement::Try {
+                try_body,
+                catch_body,
+            } => Statement::Try {
+                try_body: Box::new(helper(*try_body)),
+                catch_body: Box::new(helper(*catch_body)),
             },
 
-            Statement::Block { body } => {
-                Statement::Block { body: Box::new(helper(*body)) }
+            Statement::Block { body } => Statement::Block {
+                body: Box::new(helper(*body)),
+            },
+            Statement::Return { expression } => {
+                if let Some(e) = expression {
+                    create_exceptional_ites(
+                        exceptional_expression(&e),
+                        Statement::Return { expression: Some(e) },
+                    )
+                } else {
+                    Statement::Return { expression: None }
+                }
             }
 
             statement => statement,
@@ -1066,4 +1129,12 @@ fn parsing_exceptions() {
 
     let c = insert_exceptional_clauses(c);
     dbg!(&c);
+}
+
+fn union<T>(mut set1: HashSet<T>, set2: HashSet<T>) -> HashSet<T>
+where
+    HashSet<T>: Extend<T>,
+{
+    set1.extend(set2);
+    set1
 }
