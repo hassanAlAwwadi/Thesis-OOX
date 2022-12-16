@@ -33,12 +33,21 @@ class Main
     }
 
     static void m0(int x)
+        ensures(x == 0)
         exceptional(false)
     {
         assume x == 0;
         try { Main.div(1, 0); x := 9; }
         catch { ; }
-        assert x == 0;
+    }
+
+    static void m0_invalid(int x)
+        ensures(x == 0)
+        exceptional(false)
+    {
+        assume x == 0;
+        try { int a := Main.div(1, 2); x := 9; }
+        catch { ; }
     }
 
 //    static void m1(int x)

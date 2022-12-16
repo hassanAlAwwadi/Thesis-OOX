@@ -1170,4 +1170,5 @@ fn sym_exec_exceptions_m0() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
     assert_eq!(verify_file(&file_content, "m0", 20), SymResult::Valid);
+    assert_eq!(verify_file(&file_content, "m0_invalid", 20), SymResult::Invalid);
 }
