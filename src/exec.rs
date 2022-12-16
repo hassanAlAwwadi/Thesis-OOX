@@ -14,8 +14,9 @@ use crate::{
     concretization::{concretizations, find_symbolic_refs},
     dsl::{equal, ite, negate},
     eval::{self, evaluate},
+    exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
     lexer::tokens,
-    parser_pom::{parse, insert_exceptional_clauses},
+    parser_pom::{insert_exceptional_clauses, parse},
     stack::{lookup_in_stack, StackFrame},
     symbolic_table::SymbolicTable,
     syntax::{
@@ -77,7 +78,7 @@ pub struct State {
     constraints: PathConstraints,
     pub alias_map: AliasMap,
     pub ref_counter: i64,
-    exception_handler: Vec<(u64, u64)>,
+    exception_handler: ExceptionHandlerStack,
 }
 
 fn default(t: impl Typeable) -> Expression {
@@ -177,7 +178,7 @@ fn sym_exec(
         ActionResult::InfeasiblePath => {
             // Finish this branch
             return SymResult::Valid;
-        },
+        }
         ActionResult::Finish => {
             return SymResult::Valid;
         }
@@ -191,7 +192,7 @@ enum ActionResult {
     FunctionCall(u64),
     InvalidAssertion,
     InfeasiblePath,
-    Finish
+    Finish,
 }
 
 fn action(
@@ -203,7 +204,7 @@ fn action(
     let pc = state.pc;
     let action = &program[&pc];
 
-    // dbg!(&action, stack.last().map(|s| &s.params));
+    dbg!(&action, state.stack.last().map(|s| &s.params));
 
     match action {
         CFGStatement::Statement(Statement::Declare { type_, var }) => {
@@ -260,6 +261,8 @@ fn action(
             ActionResult::Continue
         }
         CFGStatement::FunctionExit(_name) => {
+            state.exception_handler.decrement_handler();
+
             let StackFrame {
                 current_member,
                 params,
@@ -277,6 +280,7 @@ fn action(
                 ActionResult::Continue
                 // we are pbobably done now
             } else {
+                //dbg!(&state.stack);
                 let rv = state.stack.last().unwrap().params.get(&retval()).unwrap();
                 let return_value = evaluate(state, rv.clone(), st);
 
@@ -293,15 +297,48 @@ fn action(
         CFGStatement::Statement(Statement::Call { invocation }) => {
             exec_invocation(state, invocation, &program, pc, None, st)
         }
-        CFGStatement::Statement(Statement::Throw { message }) => {
-            exec_throw(state, st)
+        CFGStatement::Statement(Statement::Throw { message }) => exec_throw(state, st),
+        CFGStatement::TryCatch(_, _, catch_entry_pc, _) => {
+            state
+                .exception_handler
+                .insert_handler(ExceptionHandlerEntry::new(*catch_entry_pc));
+            ActionResult::Continue
         }
+        CFGStatement::TryEntry(_) => ActionResult::Continue,
+        CFGStatement::TryExit => {
+            // state.exception_handler.remove_last_handler();
+            ActionResult::Continue
+        }
+        CFGStatement::CatchEntry(_) => ActionResult::Continue,
         _ => ActionResult::Continue,
     }
 }
 
 fn exec_throw(state: &mut State, st: &SymbolicTable) -> ActionResult {
-    if state.exception_handler.len() == 0 {
+    if let Some(ExceptionHandlerEntry {
+        catch_pc,
+        mut current_depth,
+    }) = state.exception_handler.pop_last()
+    {
+        while current_depth > 0 {
+            let stack_frame = state
+                .stack
+                .pop()
+                .unwrap_or_else(|| panic!("Unexpected empty stack"));
+
+            if let Some(exceptional) = stack_frame.current_member.exceptional() {
+                let assertion = prepare_assert_expression(state, exceptional, st);
+                //dbg!(&assertion);
+                let is_valid = eval_assertion(state, assertion, st);
+                if !is_valid {
+                    return ActionResult::InvalidAssertion;
+                }
+            }
+            current_depth -= 1;
+        }
+
+        ActionResult::Return(catch_pc)
+    } else {
         while let Some(stack_frame) = state.stack.pop() {
             if let Some(exceptional) = stack_frame.current_member.exceptional() {
                 let assertion = prepare_assert_expression(state, exceptional, st);
@@ -312,13 +349,10 @@ fn exec_throw(state: &mut State, st: &SymbolicTable) -> ActionResult {
                 }
             }
         }
-    } else {
-        // only check methods for exceptional until catch
+
+        ActionResult::Finish
     }
-
-    ActionResult::Finish
 }
-
 
 fn eval_assertion(state: &mut State, expression: Rc<Expression>, st: &SymbolicTable) -> bool {
     // dbg!("invoke Z3 with:", &expression);
@@ -378,6 +412,8 @@ fn exec_invocation(
         },
         member,
     ) = invocation.resolved().unwrap(); // i don't get this
+
+    state.exception_handler.increment_handler();
 
     match member {
         // ??
@@ -593,7 +629,7 @@ fn prepare_assert_expression(
     // );
     dbg!(&expression);
     let z = evaluate(state, Rc::new(expression), st);
-    // //dbg!(&z);
+    dbg!(&z);
     z
 }
 
@@ -1102,29 +1138,36 @@ fn sym_exec_linked_list4() {
 #[test]
 fn sym_exec_linked_list4_invalid() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
-    assert_eq!(verify_file(&file_content, "test4_invalid", 90), SymResult::Invalid);
+    assert_eq!(
+        verify_file(&file_content, "test4_invalid", 90),
+        SymResult::Invalid
+    );
 }
 
 #[test]
 fn sym_exec_linked_list4_if_problem() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
-    assert_eq!(verify_file(&file_content, "test4_if_problem", 90), SymResult::Valid);
+    assert_eq!(
+        verify_file(&file_content, "test4_if_problem", 90),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_exceptions1() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
-    
+
     assert_eq!(verify_file(&file_content, "test1", 20), SymResult::Valid);
-    assert_eq!(verify_file(&file_content, "test1_invalid", 20), SymResult::Invalid);
+    assert_eq!(
+        verify_file(&file_content, "test1_invalid", 20),
+        SymResult::Invalid
+    );
     assert_eq!(verify_file(&file_content, "div", 30), SymResult::Valid);
 }
 
-
 #[test]
-fn sym_exec_exceptions_m1() {
+fn sym_exec_exceptions_m0() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
-    
-    assert_eq!(verify_file(&file_content, "m1", 20), SymResult::Valid);
-    
+
+    assert_eq!(verify_file(&file_content, "m0", 20), SymResult::Valid);
 }
