@@ -93,7 +93,6 @@ class Node {
         requires(node != null)
         exceptional(false)
     {
-        assume node != null;
         Node min := node.min() ;
         int x := min.value ;
         bool ok := node.member(x) ;
@@ -104,7 +103,6 @@ class Node {
         requires(node != null)
         exceptional(false)
     {
-        assume node != null;
         Node min := node.min() ;
         int x := min.value ;
         bool ok := node.member(x) ;
