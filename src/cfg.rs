@@ -1,9 +1,8 @@
 // use std::intrinsics::unreachable;
 
-use crate::syntax::*;
 
-use crate::lexer::tokens;
-use crate::parser_pom::parse;
+use crate::{lexer::tokens, parser_pom::parse, syntax::*};
+
 
 const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
 
@@ -344,13 +343,13 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
             let s_l = &(*sl, lookup(*sl, all_smts));
             let final_s_l = r#final(s_l, all_smts);
             final_s_l
-        }
+        },
         CFGStatement::TryExit => vec![*l],
         CFGStatement::CatchEntry(sl) => {
             let s_l = &(*sl, lookup(*sl, all_smts));
             let final_s_l = r#final(s_l, all_smts);
             final_s_l
-        }
+        },
         CFGStatement::CatchExit => vec![*l],
         CFGStatement::FunctionEntry(_) => unreachable!(),
         CFGStatement::FunctionExit(_) => unreachable!(),

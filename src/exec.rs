@@ -79,6 +79,7 @@ pub struct State {
     pub alias_map: AliasMap,
     pub ref_counter: i64,
     exception_handler: ExceptionHandlerStack,
+    path_length: u64,
 }
 
 fn default(t: impl Typeable) -> Expression {
@@ -255,9 +256,25 @@ fn action(
             // we assume that the previous stackframe is of this method
             let StackFrame { current_member, .. } = state.stack.last().unwrap();
             if let Some(requires) = current_member.requires() {
-                prepare_assert_expression(state, requires, st);
-                // more?
+
+                // if this is the program entry, assume that require is true, otherwise assert it.
+                if (state.path_length == 0) {
+                    let expression = evaluate(state, requires, st);
+
+                    if *expression == false_lit() {
+                        panic!("Requires does not hold for entry method");
+                    } else if *expression != true_lit() {
+                        state.constraints.insert(expression.deref().clone());
+                    }
+                } else {
+                    let requires = prepare_assert_expression(state, requires, st);
+                    let is_valid = eval_assertion(state, requires, st);
+                    if !is_valid {
+                        return ActionResult::InvalidAssertion;
+                    }
+                }
             }
+            
             ActionResult::Continue
         }
         CFGStatement::FunctionExit(_name) => {
@@ -339,7 +356,7 @@ fn exec_throw(state: &mut State, st: &SymbolicTable) -> ActionResult {
 
         ActionResult::Return(catch_pc)
     } else {
-        while let Some(stack_frame) = state.stack.pop() {
+        while let Some(stack_frame) = state.stack.last() {
             if let Some(exceptional) = stack_frame.current_member.exceptional() {
                 let assertion = prepare_assert_expression(state, exceptional, st);
                 //dbg!(&assertion);
@@ -348,6 +365,7 @@ fn exec_throw(state: &mut State, st: &SymbolicTable) -> ActionResult {
                     return ActionResult::InvalidAssertion;
                 }
             }
+            state.stack.pop();
         }
 
         ActionResult::Finish
@@ -1049,6 +1067,7 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
             alias_map: HashMap::new(),
             ref_counter: 1,
             exception_handler: Default::default(),
+            path_length: 0
         };
 
         return sym_exec(&mut state, &program, &flows, k, &symbolic_table);
@@ -1171,4 +1190,41 @@ fn sym_exec_exceptions_m0() {
 
     assert_eq!(verify_file(&file_content, "m0", 20), SymResult::Valid);
     assert_eq!(verify_file(&file_content, "m0_invalid", 20), SymResult::Invalid);
+}
+
+
+#[test]
+fn sym_exec_exceptions_m1() {
+    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+
+    assert_eq!(verify_file(&file_content, "m1", 20), SymResult::Valid);
+    assert_eq!(verify_file(&file_content, "m1_invalid", 20), SymResult::Invalid);
+}
+
+
+#[test]
+fn sym_exec_exceptions_m2() {
+    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+
+    assert_eq!(verify_file(&file_content, "m2", 20), SymResult::Valid);
+}
+
+
+#[test]
+fn sym_exec_exceptions_m3() {
+    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+
+    assert_eq!(verify_file(&file_content, "m3", 30), SymResult::Valid);
+    assert_eq!(verify_file(&file_content, "m3_invalid1", 30), SymResult::Invalid);
+    assert_eq!(verify_file(&file_content, "m3_invalid2", 30), SymResult::Invalid);
+}
+
+#[test]
+fn sym_exec_exceptions_null() {
+    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+
+    assert_eq!(verify_file(&file_content, "nullExc1", 30), SymResult::Valid);
+    assert_eq!(verify_file(&file_content, "nullExc2", 30), SymResult::Valid);
+    // assert_eq!(verify_file(&file_content, "m3_invalid1", 30), SymResult::Invalid);
+    // assert_eq!(verify_file(&file_content, "m3_invalid2", 30), SymResult::Invalid);
 }

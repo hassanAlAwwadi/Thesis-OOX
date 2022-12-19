@@ -33,6 +33,7 @@ class Main
     }
 
     static void m0(int x)
+        requires(x == 0)
         ensures(x == 0)
         exceptional(false)
     {
@@ -41,75 +42,86 @@ class Main
         catch { ; }
     }
 
+    // This is invalid because of the ensures x == 0,
+    // since no exception is thrown, x is set to 9.
     static void m0_invalid(int x)
+        requires(x == 0)
         ensures(x == 0)
         exceptional(false)
     {
-        assume x == 0;
         try { int a := Main.div(1, 2); x := 9; }
         catch { ; }
     }
 
-//    static void m1(int x)
-//        requires(x == 0)
-//        ensures(x == 0)
-//        exceptional(false)
-//    {
-//        try { int a := Main.div(1, 0); x := 9 ;}
-//        catch { ; }
-//    }
-//
-//    static void m1_invalid(int x)
-//        ensures(x == 9)
-//    {
-//        try { int a := Main.div(1, 0); x := 9 ;}
-//        catch { ; }
-//    }
-//
-//    static void m2(int x) // valid spec:
-//        ensures(false)
-//        exceptional(x == 9)
-//    {
-//        x := 9 ;
-//        int a := Main.div(1, 0);
-//    }
-//
-//    static void m3(int x) // valid spec:
-//        ensures(x < 9)
-//        exceptional(x >= 9)
-//    {
-//        if(x>=9) { int a := Main.div(1, 0); }
-//        else { ; }
-//    }
-//
-//    static void m3_invalid1(int x)
-//        ensures(x < 8)
-//    {
-//        if(x>=9) { int a := Main.div(1, 0); }
-//        else { ; }
-//    }
-//
-//    static void m3_invalid2(int x)
-//        exceptional(x >= 10)
-//    {
-//        if(x>=9) { int a := Main.div(1, 0); }
-//        else { ; }
-//    }
-//
-//    static void nullExc1(int x, Item a)
-//    {
-//        if(x>=9) { int a := Main.div(1, 0); }
-//        else { ; }
-//    }
-//
-//    static void nullExc2(int x, Item a)
-//        requires(x==0)
-//        ensures((a == null && x==2) || (a != null && x==1))
-//        exceptional(false)
-//    {
-//        try { int v := a.x ; x := 1 ; }
-//        catch { x := 2 ; }
-//    }
+    static void m1(int x)
+        requires(x == 0)
+        ensures(x == 0)
+        exceptional(false)
+    {
+        try { int a := Main.div(1, 0); x := 9 ;}
+        catch { ; }
+    }
+
+    // This is invalid because an exception is thrown and caught,
+    // x := 9 is not executed.
+    static void m1_invalid(int x)
+        ensures(x == 9)
+    {
+        try { int a := Main.div(1, 0); x := 9 ;}
+        catch { ; }
+    }
+
+    static void m2(int x) // valid spec:
+        ensures(false)
+        exceptional(x == 9)
+    {
+        x := 9 ;
+        int a := Main.div(1, 0);
+    }
+
+    static void m3(int x) // valid spec:
+        ensures(x < 9)
+        exceptional(x >= 9)
+    {
+        if(x>=9) { int a := Main.div(1, 0); }
+        else { ; }
+    }
+
+    // Invalid because the else branch is  
+    // reached if x <= 8, not x < 8
+    static void m3_invalid1(int x)
+        ensures(x < 8)
+    {
+        if(x>=9) { int a := Main.div(1, 0); }
+        else { ; }
+    }
+
+    // Invalid because it is also exceptional if x == 9
+    static void m3_invalid2(int x)
+        exceptional(x >= 10)
+    {
+        if(x>=9) { int a := Main.div(1, 0); }
+        else { ; }
+    }
+
+    static void nullExc1(int x, Item a)
+        requires(x==0)
+        ensures(a != null && x==1)
+        exceptional(a == null && x==0)
+    {
+        int v := a.x ;
+        x := 1 ;
+    }
+    
+
+    static void nullExc2(int x, Item a)
+        requires(x==0)
+        ensures((a == null ==> x==2) && (a != null ==> x==1))
+        exceptional(false)
+    {
+        try { int v := a.x ; x := 1 ; }
+        catch { x := 2 ; }
+    }
 
 //    static void arrayExc1(int x, Item[] a)
 //        requires(x==0)
