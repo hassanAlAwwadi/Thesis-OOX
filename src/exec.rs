@@ -167,6 +167,7 @@ fn sym_exec(
                 for neighbour_pc in neighbours {
                     let mut new_state = state.clone();
                     new_state.pc = *neighbour_pc;
+                    new_state.path_length += 1;
 
                     let result = sym_exec(&mut new_state, program, flows, k - 1, st);
                     if result != SymResult::Valid {
@@ -207,7 +208,7 @@ fn sym_exec(
             for array_size in 0..N {
                 let mut new_state = state.clone();
                 let r = new_state.next_reference_id();
-                let StackFrame { params, .. } = state.stack.last_mut().unwrap();
+                let StackFrame { params, .. } = new_state.stack.last_mut().unwrap();
                 params.insert(
                     array_name.clone(),
                     Rc::new(Expression::Ref {
@@ -226,9 +227,22 @@ fn sym_exec(
                     })
                     .collect();
 
-                state.heap.insert(r, HeapValue::ArrayValue(array_elements));
+                new_state.heap.insert(r, HeapValue::ArrayValue(array_elements));
 
-                sym_exec(&mut new_state, program, flows, k, st); // note k does not decrease, we stay at the same statement containing array access
+                // note k does not decrease, we stay at the same statement containing array access
+                let result = sym_exec(&mut new_state, program, flows, k, st);
+                if result != SymResult::Valid {
+                    return result;
+                }
+            }
+
+            // And a branch for the case where the array is NULL
+            let StackFrame { params, .. } = state.stack.last_mut().unwrap();
+            params.insert(array_name.clone(), Expression::NULL.into());
+
+            let result = sym_exec(state, program, flows, k, st);
+            if result != SymResult::Valid {
+                return result;
             }
         }
     };
@@ -336,10 +350,35 @@ fn action(
             if let Some(requires) = current_member.requires() {
                 // if this is the program entry, assume that require is true, otherwise assert it.
                 if (state.path_length == 0) {
+                    // if any parameters currently are symbolic arrays, initialise them
+
+                    let mut symbolic_array_parameters = state
+                        .stack
+                        .last()
+                        .unwrap()
+                        .params
+                        .iter()
+                        .filter(|(id, exp)| {
+                            if let Expression::SymbolicRef {
+                                var,
+                                type_: RuntimeType::ArrayRuntimeType { inner_type },
+                            } = exp.as_ref()
+                            {
+                                true
+                            } else {
+                                false
+                            }
+                        });
+
+                    if let Some((array_name, _)) = symbolic_array_parameters.next() {
+                        return ActionResult::ArrayInitialization(array_name.clone());
+                    }
+
                     let expression = evaluate(state, requires, st);
 
                     if *expression == false_lit() {
-                        panic!("Requires does not hold for entry method");
+                        println!("Constraint is infeasible");
+                        return ActionResult::InfeasiblePath;
                     } else if *expression != true_lit() {
                         state.constraints.insert(expression.deref().clone());
                     }
@@ -447,6 +486,26 @@ fn exec_throw(state: &mut State, st: &SymbolicTable) -> ActionResult {
 
         ActionResult::Finish
     }
+}
+
+fn lhs_contains_symbolic_array(state: &State, lhs: &Lhs) -> Option<String> {
+    if let Lhs::LhsElem { var, .. } = lhs {
+        // if var is an uninitialized array (symbolic reference)
+        if let Expression::SymbolicRef { .. } = state.stack.last().unwrap().params[var].as_ref() {
+            return Some(var.clone());
+        }
+    }
+    None
+}
+
+fn rhs_contains_symbolic_array(state: &State, lhs: &Lhs) -> Option<String> {
+    if let Lhs::LhsElem { var, .. } = lhs {
+        // if var is an uninitialized array (symbolic reference)
+        if let Expression::SymbolicRef { .. } = state.stack.last().unwrap().params[var].as_ref() {
+            return Some(var.clone());
+        }
+    }
+    None
 }
 
 fn eval_assertion(state: &mut State, expression: Rc<Expression>, st: &SymbolicTable) -> bool {
@@ -993,7 +1052,13 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolicTable) -> Rc<Expressio
                 )
             }
         }
-        Rhs::RhsElem { var, index, type_ } => todo!("Arrays are wip"),
+        Rhs::RhsElem { var, index, type_ } => {
+            match var {
+                
+            }
+            //read_elem_concrete_index(state, ref_, index)
+            //
+        },
         Rhs::RhsCall { invocation, type_ } => {
             unreachable!("unreachable, invocations are handled in function exec_invocation()")
         }
@@ -1098,6 +1163,54 @@ fn initialize_symbolic_var(name: &str, type_: &RuntimeType, ref_: i64) -> Expres
     create_symbolic_var(sym_name, type_.clone())
 }
 
+fn read_elem_concrete_index(
+    state: &mut State,
+    ref_: Reference,
+    index: i64,
+) -> Rc<Expression> {
+    if let HeapValue::ArrayValue(elements) = state.heap.get(&ref_).unwrap() {
+        elements[index as usize].clone()
+    } else {
+        panic!("Expected Array object");
+    }
+}
+
+/// Reads an expression from the array at reference ref_ in the heap,
+/// with a symbolic index.
+/// 
+/// Since it is symbolic it will return a nested if-then-else expression
+/// Like this:
+/// index == #1 ? e1 : (index == #2 ? e2 : e3)
+fn read_elem_symbolic_index(
+    state: &mut State,
+    ref_: Reference,
+    index: Rc<Expression>,
+) -> Rc<Expression> {
+    if let HeapValue::ArrayValue(elements) = state.heap.get(&ref_).unwrap() {
+
+
+        let indices = (0..elements.len()).map(|i| toIntExpr(i as i64));
+
+        let indexed_elements = elements.iter().zip(indices).rev();
+
+        if let Some((_, last_element)) = indexed_elements.next() {
+            let value = indexed_elements.fold(last_element, |acc, (element, concrete_index)| {
+                ite(equal(index.clone(), concrete_index), element.clone(), acc)
+            }).into();
+            value
+        } else {
+            // empty array
+
+            todo!("infeasible? or invalid?") // I assume that the added exceptional clauses should prevent this
+        }
+
+
+    } else {
+        panic!("Expected Array object");
+    }
+}
+
+
 fn write_elem_concrete_index(
     state: &mut State,
     ref_: Reference,
@@ -1111,7 +1224,7 @@ fn write_elem_concrete_index(
             panic!("infeasible due to added checked array bounds");
         }
     } else {
-        panic!("expected Array object")
+        panic!("Expected Array object")
     }
 }
 
@@ -1128,7 +1241,7 @@ fn write_elem_symbolic_index(
 
         for (value, concrete_index) in indexed_elements {
             *value = ite(
-                equal(index.clone(), concrete_index).into(),
+                equal(index.clone(), concrete_index),
                 expression.clone(),
                 value.clone(),
             )

@@ -6,7 +6,7 @@ use itertools::Either;
 
 use crate::{
     dsl::{negate, negative},
-    exec::{init_symbolic_reference, AliasMap, Heap, State},
+    exec::{init_symbolic_reference, AliasMap, Heap, State, HeapValue},
     stack::StackFrame,
     symbolic_table::SymbolicTable,
     syntax::{BinOp, Expression, Lit, RuntimeType, UnOp},
@@ -203,7 +203,14 @@ fn eval_locally(
         Expression::SymbolicVar { .. } => expression,
         Expression::Lit { .. } => expression,
         Expression::SizeOf { var, type_ } => {
-            todo!()
+            let StackFrame { pc, t, params, .. } = state.stack.last().unwrap();
+
+            if let Expression::Ref { ref_, .. } = params[var].as_ref() {
+                if let HeapValue::ArrayValue(elems) = &state.heap[ref_] {
+                    return Expression::int(elems.len() as i64);
+                }
+            }
+            panic!("invalid state, expected initialised array with arrayvalue in heap");
         }
         Expression::Ref { .. } => expression,
         Expression::SymbolicRef { var, type_ } => {

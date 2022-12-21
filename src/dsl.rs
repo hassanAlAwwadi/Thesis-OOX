@@ -24,11 +24,16 @@ pub(crate) fn negative(expression: Rc<Expression>) -> Expression {
 }
 
 /// Creates an if guard then e1 else e2 conditional expression.
-pub(crate) fn ite(guard: Rc<Expression>, e1: Rc<Expression>, e2: Rc<Expression>) -> Expression {
+pub(crate) fn ite<E1, E2, E3>(guard: E1, e1: E2, e2: E3) -> Expression 
+where
+    E1: Into<Rc<Expression>>,
+    E2: Into<Rc<Expression>>,
+    E3: Into<Rc<Expression>>,
+{
     Expression::Conditional {
-        guard: guard,
-        true_: e1,
-        false_: e2,
+        guard: guard.into(),
+        true_: e1.into(),
+        false_: e2.into(),
         type_: RuntimeType::ANYRuntimeType,
     }
 }
