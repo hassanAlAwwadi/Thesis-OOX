@@ -5,6 +5,8 @@ use std::{
     rc::Rc,
 };
 
+use std::convert::TryFrom;
+
 use z3::{
     ast::Bool,
     ast::{Ast, Int},

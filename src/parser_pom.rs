@@ -8,7 +8,7 @@ use std::str::{self, FromStr};
 
 use std::iter::Extend;
 
-use crate::dsl::{equal, negate, ors};
+use crate::dsl::{equal, greater_than_equal, less_than, negate, ors, size_of};
 use crate::resolver;
 use crate::syntax::*;
 
@@ -510,11 +510,11 @@ fn lhs<'a>() -> Parser<'a, Token<'a>, Lhs> {
     let lhs_elem =
         (identifier() - punct("[") + expression() - punct("]")).map(|(var, index)| Lhs::LhsElem {
             var,
-            index,
+            index: Rc::new(index),
             type_: RuntimeType::UnknownRuntimeType,
         });
 
-    lhs_var | lhs_field | lhs_elem
+    lhs_elem | lhs_field | lhs_var
 }
 
 fn rhs<'a>() -> Parser<'a, Token<'a>, Rhs> {
@@ -584,7 +584,14 @@ fn primitivetype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
 }
 
 fn referencetype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
-    let arraytype = (classtype() | primitivetype()) - (punct("[") + punct("]")).repeat(1..);
+    let arraytype = ((classtype() | primitivetype()) + (punct("[") + punct("]")).repeat(1..)).map(
+        |(inner_type, n)| {
+            assert!(n.len() == 1, "only allow 1D arrays for now");
+            NonVoidType::ArrayType {
+                inner_type: Box::new(inner_type),
+            }
+        },
+    );
     classtype() | arraytype
 }
 
@@ -696,7 +703,22 @@ fn exceptional_lhs(lhs: &Lhs) -> HashSet<Expression> {
             },
             Expression::NULL,
         )]),
-        Lhs::LhsElem { .. } => todo!(),
+        Lhs::LhsElem { var, index, type_ } => union(
+            HashSet::from([
+                equal(
+                    Expression::Var {
+                        var: var.clone(),
+                        type_: type_.clone(),
+                    },
+                    Expression::NULL,
+                ),
+                ors([
+                    greater_than_equal(index.clone(), size_of(var.clone())),
+                    less_than(index.clone(), Expression::int(0)),
+                ]),
+            ]),
+            exceptional_expression(index),
+        ),
     }
 }
 
@@ -704,7 +726,28 @@ fn exceptional_rhs(rhs: &Rhs) -> HashSet<Expression> {
     match rhs {
         Rhs::RhsExpression { value, .. } => exceptional_expression(value),
         Rhs::RhsField { var, .. } => HashSet::from([equal(var.clone(), Expression::NULL)]),
-        Rhs::RhsElem { .. } => todo!(),
+        Rhs::RhsElem { var, index, .. } => {
+            let var_name = if let Expression::Var {
+                var: var_name,
+                type_: _,
+            } = var
+            {
+                var_name
+            } else {
+                panic!("expected variable in rhs elem, found: {:?}", var)
+            };
+
+            union(
+                HashSet::from([
+                    equal(var.clone(), Expression::NULL),
+                    ors([
+                        greater_than_equal(index.clone(), size_of(var_name.clone())),
+                        less_than(index.clone(), Expression::int(0)),
+                    ]),
+                ]),
+                exceptional_expression(index),
+            )
+        }
         Rhs::RhsCall { invocation, type_ } => exceptional_invocation(invocation),
         Rhs::RhsArray { .. } => todo!(),
     }
@@ -882,7 +925,9 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
                 if let Some(e) = expression {
                     create_exceptional_ites(
                         exceptional_expression(&e),
-                        Statement::Return { expression: Some(e) },
+                        Statement::Return {
+                            expression: Some(e),
+                        },
                     )
                 } else {
                     Statement::Return { expression: None }
@@ -1128,6 +1173,30 @@ fn parsing_exceptions() {
     dbg!(&c);
 
     let c = insert_exceptional_clauses(c);
+    dbg!(&c);
+}
+
+#[test]
+fn parse_array_elem_assign() {
+    let file_content = "a[0] := 1;";
+
+    let tokens = tokens(&file_content);
+    dbg!(&tokens);
+    let as_ref = tokens.as_slice();
+    // //dbg!(as_ref);
+    let c = (statement() - end()).parse(&as_ref);
+    // //dbg!(&c);
+    c.unwrap(); // should not panic;
+}
+
+#[test]
+fn parsing_array1() {
+    let file_content = std::fs::read_to_string("./examples/array/array1.oox").unwrap();
+
+    let tokens = tokens(&file_content);
+    let as_ref = tokens.as_slice();
+    dbg!(as_ref);
+    let c = parse(&as_ref).unwrap();
     dbg!(&c);
 }
 

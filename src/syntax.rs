@@ -226,7 +226,7 @@ pub enum Lhs {
     },
     LhsElem {
         var: Identifier,
-        index: Expression,
+        index: Rc<Expression>,
         type_: RuntimeType,
     },
 }
@@ -289,7 +289,7 @@ pub enum Expression {
         var: Identifier,
         type_: RuntimeType,
     },
-    SymbolicVar {
+    SymbolicVar {   // symbolic variables of primitives such as integers, boolean, floats
         var: Identifier,
         type_: RuntimeType,
     },
@@ -305,7 +305,7 @@ pub enum Expression {
         ref_: Reference,
         type_: RuntimeType,
     },
-    SymbolicRef {
+    SymbolicRef {   // symbolic references to arrays, objects
         var: Identifier,
         type_: RuntimeType,
     },

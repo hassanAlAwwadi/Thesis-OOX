@@ -1,6 +1,8 @@
 // simplify the expression
 
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc, ops::Deref};
+
+use itertools::Either;
 
 use crate::{
     dsl::{negate, negative},
@@ -9,6 +11,17 @@ use crate::{
     symbolic_table::SymbolicTable,
     syntax::{BinOp, Expression, Lit, RuntimeType, UnOp},
 };
+
+pub type EvaluationResult<T> = Either<Rc<Expression>, T>;
+
+pub fn evaluateAsInt(state: &mut State, expression: Rc<Expression>, st: &SymbolicTable) -> EvaluationResult<i64> {
+    let expression = evaluate(state, expression, st);
+    if let Expression::Lit { lit: Lit::IntLit { int_value }, .. } = expression.deref() {
+        Either::Right(*int_value)
+    } else {
+        Either::Left(expression)
+    }
+}
 
 pub fn evaluate(
     state: &mut State,

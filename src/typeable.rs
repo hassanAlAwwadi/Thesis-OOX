@@ -75,3 +75,9 @@ impl Typeable for Expression {
         .clone()
     }
 }
+
+impl Typeable for RuntimeType {
+    fn type_of(&self) -> RuntimeType {
+        self.clone()
+    }
+}

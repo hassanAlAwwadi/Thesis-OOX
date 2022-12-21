@@ -5,15 +5,15 @@ use std::{
     rc::Rc,
 };
 
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use ordered_float::NotNan;
 use z3::SatResult;
 
 use crate::{
     cfg::{labelled_statements, CFGStatement},
     concretization::{concretizations, find_symbolic_refs},
-    dsl::{equal, ite, negate},
-    eval::{self, evaluate},
+    dsl::{equal, ite, negate, toIntExpr},
+    eval::{self, evaluate, evaluateAsInt},
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
     lexer::tokens,
     parser_pom::{insert_exceptional_clauses, parse},
@@ -44,7 +44,7 @@ pub enum HeapValue {
         fields: HashMap<Identifier, Rc<Expression>>,
         type_: RuntimeType,
     },
-    ArrayValue(Vec<Expression>),
+    ArrayValue(Vec<Rc<Expression>>),
 }
 
 impl HeapValue {
@@ -77,9 +77,17 @@ pub struct State {
 
     constraints: PathConstraints,
     pub alias_map: AliasMap,
-    pub ref_counter: i64,
+    pub ref_counter: Reference,
     exception_handler: ExceptionHandlerStack,
     path_length: u64,
+}
+
+impl State {
+    fn next_reference_id(&mut self) -> Reference {
+        let id = self.ref_counter;
+        self.ref_counter += 1;
+        id
+    }
 }
 
 fn default(t: impl Typeable) -> Expression {
@@ -112,6 +120,7 @@ enum SymResult {
     Invalid,
 }
 
+// The main function for the symbolic execution, any path splitting due to the control flow graph or array initialization happens here.
 fn sym_exec(
     state: &mut State,
     program: &HashMap<u64, CFGStatement>,
@@ -183,6 +192,45 @@ fn sym_exec(
         ActionResult::Finish => {
             return SymResult::Valid;
         }
+        ActionResult::ArrayInitialization(array_name) => {
+            const N: u64 = 3;
+            let StackFrame { params, .. } = state.stack.last_mut().unwrap();
+
+            let inner_type = match params[&array_name].type_of() {
+                RuntimeType::ArrayRuntimeType { inner_type } => inner_type,
+                _ => panic!(
+                    "Expected array type, found {:?}",
+                    params[&array_name].type_of()
+                ),
+            };
+
+            for array_size in 0..N {
+                let mut new_state = state.clone();
+                let r = new_state.next_reference_id();
+                let StackFrame { params, .. } = state.stack.last_mut().unwrap();
+                params.insert(
+                    array_name.clone(),
+                    Rc::new(Expression::Ref {
+                        ref_: r,
+                        type_: RuntimeType::ARRAYRuntimeType,
+                    }),
+                );
+
+                let array_elements = (0..array_size)
+                    .map(|_i| {
+                        create_symbolic_var(
+                            format!("{}{}", array_name, new_state.next_reference_id()),
+                            *inner_type.clone(),
+                        )
+                        .into()
+                    })
+                    .collect();
+
+                state.heap.insert(r, HeapValue::ArrayValue(array_elements));
+
+                sym_exec(&mut new_state, program, flows, k, st); // note k does not decrease, we stay at the same statement containing array access
+            }
+        }
     };
     SymResult::Valid
 }
@@ -194,6 +242,7 @@ enum ActionResult {
     InvalidAssertion,
     InfeasiblePath,
     Finish,
+    ArrayInitialization(Identifier),
 }
 
 fn action(
@@ -215,9 +264,38 @@ fn action(
             ActionResult::Continue
         }
         CFGStatement::Statement(Statement::Assign { lhs, rhs }) => {
-            if let Rhs::RhsCall { invocation, type_ } = rhs {
-                return exec_invocation(state, invocation, &program, pc, Some(lhs.clone()), st);
+            // If lhs or rhs contains an uninitialized array, we must initialize it
+            // When we initialize an array, we split up the state into multiple states each with an increasingly longer instance of the array.
+            // In other words, we must split this path into multiple paths.
+            // This will be done in sym_exec. We return an ActionResult::ArrayInitialization with the current program counter.
+
+            if let Lhs::LhsElem { var, .. } = lhs {
+                // if var is an uninitialized array (symbolic reference)
+                if let Expression::SymbolicRef { .. } =
+                    state.stack.last().unwrap().params[var].as_ref()
+                {
+                    return ActionResult::ArrayInitialization(var.clone());
+                }
             }
+            match rhs {
+                Rhs::RhsElem {
+                    // if rhs contains an uninitialized array
+                    var: Expression::Var { var, .. },
+                    ..
+                } => {
+                    if let Expression::SymbolicRef { .. } =
+                        state.stack.last().unwrap().params[var].as_ref()
+                    {
+                        return ActionResult::ArrayInitialization(var.clone());
+                    }
+                }
+                Rhs::RhsCall { invocation, type_ } => {
+                    // if rhs contains an invocation.
+                    return exec_invocation(state, invocation, &program, pc, Some(lhs.clone()), st);
+                }
+                _ => (),
+            }
+
             let value = evaluateRhs(state, rhs, st);
             let e = evaluate(state, value, st);
             execute_assign(state, lhs, e, st);
@@ -256,7 +334,6 @@ fn action(
             // we assume that the previous stackframe is of this method
             let StackFrame { current_member, .. } = state.stack.last().unwrap();
             if let Some(requires) = current_member.requires() {
-
                 // if this is the program entry, assume that require is true, otherwise assert it.
                 if (state.path_length == 0) {
                     let expression = evaluate(state, requires, st);
@@ -274,7 +351,7 @@ fn action(
                     }
                 }
             }
-            
+
             ActionResult::Continue
         }
         CFGStatement::FunctionExit(_name) => {
@@ -776,7 +853,7 @@ pub fn init_symbolic_reference(
                     Rc::new(initialize_symbolic_var(
                         &field_name,
                         &type_.type_of(),
-                        &mut state.ref_counter,
+                        state.next_reference_id(),
                     )),
                 )
             })
@@ -871,19 +948,27 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, st: &Symbolic
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             let ref_ = params
                 .get(var)
-                .unwrap_or_else(|| panic!("infeasible, array does not exit"));
+                .unwrap_or_else(|| panic!("infeasible, array does not exit"))
+                .clone();
 
-            // match ref_ {
-            //     Expression::Ref { ref_, type_ } => {
-            //         write_field_concrete_ref(heap, *ref_, field, e);
-            //     }
-            //     sym_ref @ Expression::SymbolicRef { var, type_ } => {
-            //         init(heap, &mut state.alias_map, var, type_, &mut state.ref_counter);
-            //         let concrete_refs = &state.alias_map[var];
-            //         write_field_symbolic_ref(heap, concrete_refs, field, sym_ref, e);
-            //     },
-            //     _ => panic!("expected ref, found expr {:?}", &ref_),
-            // }
+            // let int_value = if let Expression::Lit { lit: Lit::IntLit { int_value }, type_ } = index {
+            //     *int_value
+            // } else {
+            //     panic!("Array index is not an integer value");
+            // };
+
+            match ref_.as_ref() {
+                Expression::Ref { ref_, type_ } => {
+                    let index = evaluateAsInt(state, index.clone(), st);
+
+                    match index {
+                        Either::Left(expr) => todo!(),
+                        Either::Right(i) => write_elem_concrete_index(state, *ref_, i, e),
+                    }
+                    // let size = evaluate(state, Rc::new(Expression::))
+                }
+                _ => panic!("expected array ref, found expr {:?}", &ref_),
+            }
         }
     }
 }
@@ -910,7 +995,7 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolicTable) -> Rc<Expressio
         }
         Rhs::RhsElem { var, index, type_ } => todo!("Arrays are wip"),
         Rhs::RhsCall { invocation, type_ } => {
-            unreachable!("Don't know why this is unreachable tbh")
+            unreachable!("unreachable, invocations are handled in function exec_invocation()")
         }
         Rhs::RhsArray {
             array_type,
@@ -994,23 +1079,64 @@ fn remove_symbolic_null(alias_map: &mut AliasMap, var: &String) {
         });
 }
 
-fn create_symbolic_var(name: String, type_: RuntimeType) -> Expression {
-    match type_ {
-        RuntimeType::ReferenceRuntimeType { .. } => Expression::SymbolicRef {
+fn create_symbolic_var(name: String, type_: impl Typeable) -> Expression {
+    if type_.is_of_type(RuntimeType::REFRuntimeType) {
+        Expression::SymbolicRef {
             var: name,
-            type_: type_,
-        },
-        _ => Expression::SymbolicVar {
+            type_: type_.type_of(),
+        }
+    } else {
+        Expression::SymbolicVar {
             var: name,
-            type_: type_,
-        },
+            type_: type_.type_of(),
+        }
     }
 }
 
-fn initialize_symbolic_var(name: &str, type_: &RuntimeType, ref_counter: &mut i64) -> Expression {
-    let sym_name = format!("{}{}", name, *ref_counter);
-    *ref_counter += 1;
+fn initialize_symbolic_var(name: &str, type_: &RuntimeType, ref_: i64) -> Expression {
+    let sym_name = format!("{}{}", name, ref_);
     create_symbolic_var(sym_name, type_.clone())
+}
+
+fn write_elem_concrete_index(
+    state: &mut State,
+    ref_: Reference,
+    index: i64,
+    expression: Rc<Expression>,
+) {
+    if let HeapValue::ArrayValue(elements) = state.heap.get_mut(&ref_).unwrap() {
+        if index >= 0 && index < elements.len() as i64 {
+            elements[index as usize] = expression;
+        } else {
+            panic!("infeasible due to added checked array bounds");
+        }
+    } else {
+        panic!("expected Array object")
+    }
+}
+
+fn write_elem_symbolic_index(
+    state: &mut State,
+    ref_: Reference,
+    index: Rc<Expression>,
+    expression: Rc<Expression>,
+) {
+    if let HeapValue::ArrayValue(elements) = state.heap.get_mut(&ref_).unwrap() {
+        let indices = (0..elements.len()).map(|i| toIntExpr(i as i64));
+
+        let indexed_elements = elements.iter_mut().zip(indices);
+
+        for (value, concrete_index) in indexed_elements {
+            *value = ite(
+                equal(index.clone(), concrete_index).into(),
+                expression.clone(),
+                value.clone(),
+            )
+            .into()
+        }
+    } else {
+        panic!("expected Array object")
+    }
 }
 
 fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
@@ -1067,7 +1193,7 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
             alias_map: HashMap::new(),
             ref_counter: 1,
             exception_handler: Default::default(),
-            path_length: 0
+            path_length: 0,
         };
 
         return sym_exec(&mut state, &program, &flows, k, &symbolic_table);
@@ -1189,18 +1315,22 @@ fn sym_exec_exceptions_m0() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
     assert_eq!(verify_file(&file_content, "m0", 20), SymResult::Valid);
-    assert_eq!(verify_file(&file_content, "m0_invalid", 20), SymResult::Invalid);
+    assert_eq!(
+        verify_file(&file_content, "m0_invalid", 20),
+        SymResult::Invalid
+    );
 }
-
 
 #[test]
 fn sym_exec_exceptions_m1() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
     assert_eq!(verify_file(&file_content, "m1", 20), SymResult::Valid);
-    assert_eq!(verify_file(&file_content, "m1_invalid", 20), SymResult::Invalid);
+    assert_eq!(
+        verify_file(&file_content, "m1_invalid", 20),
+        SymResult::Invalid
+    );
 }
-
 
 #[test]
 fn sym_exec_exceptions_m2() {
@@ -1209,14 +1339,19 @@ fn sym_exec_exceptions_m2() {
     assert_eq!(verify_file(&file_content, "m2", 20), SymResult::Valid);
 }
 
-
 #[test]
 fn sym_exec_exceptions_m3() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
     assert_eq!(verify_file(&file_content, "m3", 30), SymResult::Valid);
-    assert_eq!(verify_file(&file_content, "m3_invalid1", 30), SymResult::Invalid);
-    assert_eq!(verify_file(&file_content, "m3_invalid2", 30), SymResult::Invalid);
+    assert_eq!(
+        verify_file(&file_content, "m3_invalid1", 30),
+        SymResult::Invalid
+    );
+    assert_eq!(
+        verify_file(&file_content, "m3_invalid2", 30),
+        SymResult::Invalid
+    );
 }
 
 #[test]
@@ -1227,4 +1362,11 @@ fn sym_exec_exceptions_null() {
     assert_eq!(verify_file(&file_content, "nullExc2", 30), SymResult::Valid);
     // assert_eq!(verify_file(&file_content, "m3_invalid1", 30), SymResult::Invalid);
     // assert_eq!(verify_file(&file_content, "m3_invalid2", 30), SymResult::Invalid);
+}
+
+#[test]
+fn sym_exec_array1() {
+    let file_content = std::fs::read_to_string("./examples/array/array1.oox").unwrap();
+
+    assert_eq!(verify_file(&file_content, "foo", 50), SymResult::Valid);
 }

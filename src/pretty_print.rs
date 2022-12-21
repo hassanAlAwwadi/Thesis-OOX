@@ -75,7 +75,7 @@ impl Debug for Expression {
                     }
                     Lit::CharLit { char_value } => f.write_fmt(format_args!("{}", char_value))?,
                 },
-                Expression::SizeOf { var, type_ } => todo!(),
+                Expression::SizeOf { var, .. } => f.write_fmt(format_args!("#{}", var))?,
                 Expression::Ref { ref_, type_ } => f.write_fmt(format_args!("#{}", ref_))?,
                 Expression::SymbolicRef { var, type_ } => f.write_fmt(format_args!("%{}", var))?,
                 Expression::Conditional {
@@ -100,15 +100,23 @@ impl Debug for Expression {
                     range,
                     domain,
                     formula,
-                    type_,
-                } => todo!(),
+                    ..
+                } => {
+                    // forall elem, index : a : elem > 0
+                    f.write_fmt(format_args!("forall {}, {} : {} : ", elem, range, domain))?;
+                    helper(&formula, f)?;
+                },
                 Expression::Exists {
                     elem,
                     range,
                     domain,
                     formula,
                     type_,
-                } => todo!(),
+                } => {
+                    // exists elem, index : a : elem > 0
+                    f.write_fmt(format_args!("exists {}, {} : {} : ", elem, range, domain))?;
+                    helper(&formula, f)?;
+                },
             };
             Ok(())
         }
