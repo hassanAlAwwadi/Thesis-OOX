@@ -1209,15 +1209,3 @@ fn parsing_array1() {
     let c = parse(&as_ref).unwrap();
     dbg!(&c);
 }
-
-#[test]
-fn parsing_multiple_classes() {
-    let file_content = std::fs::read_to_string("./examples/test.oox").unwrap();
-
-    let tokens = tokens(&file_content);
-    let as_ref = tokens.as_slice();
-    dbg!(as_ref);
-    let c = parse(&as_ref).unwrap();
-    dbg!(&c);
-    
-}

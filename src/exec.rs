@@ -1,23 +1,28 @@
 use core::panic;
 use std::{
+    array,
+    cell::RefCell,
     collections::{HashMap, HashSet},
-    ops::Deref,
-    rc::Rc, cell::RefCell, array,
+    ops::{AddAssign, Deref},
+    rc::Rc,
+    sync::Mutex,
 };
 
 use itertools::{Either, Itertools};
+use num::One;
 use ordered_float::NotNan;
+use slog::{o, Drain, Logger, info, Level};
 use z3::SatResult;
 
 use crate::{
     cfg::{labelled_statements, CFGStatement},
     concretization::{concretizations, find_symbolic_refs},
-    dsl::{equal, ite, negate, toIntExpr, or},
+    dsl::{equal, ite, negate, or, toIntExpr},
     eval::{self, evaluate, evaluateAsInt},
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
     lexer::tokens,
     parser_pom::{insert_exceptional_clauses, parse},
-    stack::{lookup_in_stack, StackFrame, write_to_stack},
+    stack::{lookup_in_stack, write_to_stack, StackFrame},
     symbolic_table::SymbolicTable,
     syntax::{
         BinOp, Declaration, DeclarationMember, Expression, Identifier, Invocation, Lhs, Lit,
@@ -74,6 +79,30 @@ enum Output {
     Unknown,
 }
 
+/// A type to provide fresh id values (numerical).
+/// Useful for generating new ids (addresses) for heap values
+/// or generating new path ids when paths split.
+#[derive(Debug, Clone)]
+pub struct IdCounter<T> {
+    last_value: T,
+}
+
+impl<T> IdCounter<T>
+where
+    T: AddAssign + One + Clone,
+{
+    fn new(initial: T) -> IdCounter<T> {
+        IdCounter {
+            last_value: initial,
+        }
+    }
+
+    fn next_id(&mut self) -> T {
+        self.last_value += T::one();
+        self.last_value.clone()
+    }
+}
+
 // perhaps separate program from this structure, such that we can have multiple references to it.
 #[derive(Clone)]
 pub struct State {
@@ -84,16 +113,26 @@ pub struct State {
 
     constraints: PathConstraints,
     pub alias_map: AliasMap,
-    pub ref_counter: Reference,
+    pub ref_counter: IdCounter<i64>,
     exception_handler: ExceptionHandlerStack,
+
+    // logger and other (non-functional) metrics
+    logger: Logger,
     path_length: u64,
+    path_id: u64,
 }
 
 impl State {
     fn next_reference_id(&mut self) -> Reference {
-        let id = self.ref_counter;
-        self.ref_counter += 1;
-        id
+        self.ref_counter.next_id()
+    }
+
+    /// Create a copy from this state, 'state splitting'
+    /// path_id is for the new state to reflect that this is a new path.
+    fn new_state(&self, path_counter: &mut IdCounter<u64>) -> State {
+        let mut new_state = self.clone();
+        new_state.path_id = path_counter.next_id();
+        new_state
     }
 }
 
@@ -103,17 +142,16 @@ enum SymResult {
     Invalid,
 }
 
-// The main function for the symbolic execution, any path splitting due to the control flow graph or array initialization happens here.
+/// The main function for the symbolic execution, any path splitting due to the control flow graph or array initialization happens here.
 fn sym_exec(
     state: &mut State,
     program: &HashMap<u64, CFGStatement>,
     flows: &HashMap<u64, Vec<u64>>,
     k: u64,
     st: &SymbolicTable,
+    root_logger: Logger,
+    path_counter: Rc<RefCell<IdCounter<u64>>>,
 ) -> SymResult {
-
-
-
     if k == 0 {
         // finishing current branch
         //dbg!("FINITO");
@@ -127,7 +165,7 @@ fn sym_exec(
         ActionResult::FunctionCall(next) => {
             // function call or return
             state.pc = next;
-            let result = sym_exec(state, program, flows, k - 1, st);
+            let result = sym_exec(state, program, flows, k - 1, st, root_logger, path_counter);
             if result != SymResult::Valid {
                 return result;
             }
@@ -138,7 +176,15 @@ fn sym_exec(
                     let mut new_state = state.clone();
                     new_state.pc = *neighbour_pc;
 
-                    let result = sym_exec(&mut new_state, program, flows, k - 1, st);
+                    let result = sym_exec(
+                        &mut new_state,
+                        program,
+                        flows,
+                        k - 1,
+                        st,
+                        root_logger.clone(),
+                        path_counter.clone(),
+                    );
                     if result != SymResult::Valid {
                         return result;
                     }
@@ -150,12 +196,25 @@ fn sym_exec(
         ActionResult::Continue => {
             if let Some(neighbours) = flows.get(&state.pc) {
                 // //dbg!(&neighbours);
-                for neighbour_pc in neighbours {
+
+                let new_path_ids = std::iter::once(state.path_id)
+                    .chain((1..neighbours.len()).map(|_| path_counter.borrow_mut().next_id()));
+
+                for (neighbour_pc, path_id) in neighbours.iter().zip(new_path_ids) {
                     let mut new_state = state.clone();
+                    new_state.path_id = path_id;
                     new_state.pc = *neighbour_pc;
                     new_state.path_length += 1;
 
-                    let result = sym_exec(&mut new_state, program, flows, k - 1, st);
+                    let result = sym_exec(
+                        &mut new_state,
+                        program,
+                        flows,
+                        k - 1,
+                        st,
+                        root_logger.clone(),
+                        path_counter.clone(),
+                    );
                     if result != SymResult::Valid {
                         return result;
                     }
@@ -191,8 +250,13 @@ fn sym_exec(
                 ),
             };
 
-            for array_size in 0..N {
+            let new_path_ids = std::iter::once(state.path_id)
+                    .chain((1..N).map(|_| path_counter.borrow_mut().next_id()));
+
+            for (array_size, path_id) in (0..N).zip(new_path_ids) {
                 let mut new_state = state.clone();
+                new_state.path_id = path_id;
+
                 let r = new_state.next_reference_id();
                 let StackFrame { params, .. } = new_state.stack.last_mut().unwrap();
                 params.insert(
@@ -205,11 +269,8 @@ fn sym_exec(
 
                 let array_elements = (0..array_size)
                     .map(|i| {
-                        create_symbolic_var(
-                            format!("{}{}", array_name, i),
-                            *inner_type.clone(),
-                        )
-                        .into()
+                        create_symbolic_var(format!("{}{}", array_name, i), *inner_type.clone())
+                            .into()
                     })
                     .collect();
 
@@ -217,11 +278,22 @@ fn sym_exec(
                     .heap
                     .insert(r, HeapValue::ArrayValue(array_elements).into());
 
-
-                dbg!("after array initialization", &new_state.heap, &new_state.alias_map);
+                dbg!(
+                    "after array initialization",
+                    &new_state.heap,
+                    &new_state.alias_map
+                );
 
                 // note k does not decrease, we stay at the same statement containing array access
-                let result = sym_exec(&mut new_state, program, flows, k, st);
+                let result = sym_exec(
+                    &mut new_state,
+                    program,
+                    flows,
+                    k,
+                    st,
+                    root_logger.clone(),
+                    path_counter.clone(),
+                );
                 if result != SymResult::Valid {
                     return result;
                 }
@@ -231,28 +303,45 @@ fn sym_exec(
             let StackFrame { params, .. } = state.stack.last_mut().unwrap();
             params.insert(array_name.clone(), Expression::NULL.into());
 
-            let result = sym_exec(state, program, flows, k, st);
+            let result = sym_exec(state, program, flows, k, st, root_logger, path_counter);
             if result != SymResult::Valid {
                 return result;
             }
-        },
+        }
         ActionResult::StateSplit((guard, true_lhs, false_lhs, lhs_name)) => {
             // split up the paths into two, one where guard == true and one where guard == false.
             let mut true_state = state.clone();
             let feasible_path = exec_assume(&mut true_state, guard.clone(), st);
             if feasible_path {
                 write_to_stack(lhs_name.clone(), true_lhs, &mut true_state.stack);
-                let result = sym_exec(&mut true_state, program, flows, k, st);
+                let result = sym_exec(
+                    &mut true_state,
+                    program,
+                    flows,
+                    k,
+                    st,
+                    root_logger.clone(),
+                    path_counter.clone(),
+                );
                 if result != SymResult::Valid {
                     return result;
                 }
             }
 
             let false_state = state;
+            false_state.path_id = path_counter.borrow_mut().next_id();
             let feasible_path = exec_assume(false_state, guard, st);
             if feasible_path {
                 write_to_stack(lhs_name, false_lhs, &mut false_state.stack);
-                let result = sym_exec(false_state, program, flows, k, st);
+                let result = sym_exec(
+                    false_state,
+                    program,
+                    flows,
+                    k,
+                    st,
+                    root_logger.clone(),
+                    path_counter.clone(),
+                );
                 if result != SymResult::Valid {
                     return result;
                 }
@@ -270,7 +359,7 @@ enum ActionResult {
     InfeasiblePath,
     Finish,
     ArrayInitialization(Identifier),
-    StateSplit((Rc<Expression>, Rc<Expression>, Rc<Expression>, Identifier))
+    StateSplit((Rc<Expression>, Rc<Expression>, Rc<Expression>, Identifier)),
 }
 
 fn action(
@@ -282,7 +371,12 @@ fn action(
     let pc = state.pc;
     let action = &program[&pc];
 
-    dbg!(&action, state.stack.last().map(|s| &s.params), &state.heap, &state.alias_map);
+    dbg!(
+        &action,
+        state.stack.last().map(|s| &s.params),
+        &state.heap,
+        &state.alias_map
+    );
 
     match action {
         CFGStatement::Statement(Statement::Declare { type_, var }) => {
@@ -305,7 +399,7 @@ fn action(
                     return ActionResult::ArrayInitialization(var.clone());
                 }
             }
-            // RhsElem 'a[i]' and RhsCall 'x.foo()' have a special case, 
+            // RhsElem 'a[i]' and RhsCall 'x.foo()' have a special case,
             // others are handled in evaluateRhs
             match rhs {
                 Rhs::RhsElem {
@@ -322,18 +416,17 @@ fn action(
                 Rhs::RhsCall { invocation, type_ } => {
                     // if rhs contains an invocation.
                     return exec_invocation(state, invocation, &program, pc, Some(lhs.clone()), st);
-                },
+                }
                 _ => (),
             }
 
             let value = evaluateRhs(state, rhs, st);
             let e = evaluate(state, value, st);
-            
+
             let state_split = execute_assign(state, lhs, e, st);
 
             if let Some(state_split) = state_split {
                 return ActionResult::StateSplit(state_split);
-
             }
 
             ActionResult::Continue
@@ -800,9 +893,9 @@ fn prepare_assert_expression(
     //         type_: RuntimeType::BoolRuntimeType,
     //     },
     // );
-    dbg!(&expression);
+    info!(state.logger, "Expression to evaluate: {:?}", expression);
     let z = evaluate(state, Rc::new(expression), st);
-    dbg!(&z);
+    info!(state.logger, "Evaluated expression: {:?}", z);
     z
 }
 
@@ -913,8 +1006,7 @@ pub fn init_symbolic_reference(
     st: &SymbolicTable,
 ) {
     if !state.alias_map.contains_key(sym_ref) {
-        let ref_fresh = state.ref_counter;
-        state.ref_counter = ref_fresh + 1;
+        let ref_fresh = state.next_reference_id();
 
         let class_name = if let RuntimeType::ReferenceRuntimeType { type_ } = type_ref {
             type_
@@ -942,7 +1034,8 @@ pub fn init_symbolic_reference(
             HeapValue::ObjectValue {
                 fields,
                 type_: type_ref.clone(),
-            }.into(),
+            }
+            .into(),
         );
 
         // Find all other possible concrete references of the same type as sym_ref
@@ -985,7 +1078,12 @@ fn write_index(heap: &mut Heap, ref_: i64, index: &Expression, value: &Expressio
 
 type ConditionalStateSplit = (Rc<Expression>, Rc<Expression>, Rc<Expression>, Identifier);
 
-fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, st: &SymbolicTable) -> Option<ConditionalStateSplit>{
+fn execute_assign(
+    state: &mut State,
+    lhs: &Lhs,
+    e: Rc<Expression>,
+    st: &SymbolicTable,
+) -> Option<ConditionalStateSplit> {
     match lhs {
         Lhs::LhsVar { var, type_ } => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
@@ -1021,8 +1119,13 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, st: &Symbolic
                         Rc::new(sym_ref.clone()),
                         e,
                     );
-                },
-                e@Expression::Conditional { guard, true_, false_, type_ } => {
+                }
+                e @ Expression::Conditional {
+                    guard,
+                    true_,
+                    false_,
+                    type_,
+                } => {
                     return Some((guard.clone(), true_.clone(), false_.clone(), var.clone()));
                 }
 
@@ -1093,8 +1196,12 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolicTable) -> Rc<Expressio
         Rhs::RhsCall { invocation, type_ } => {
             unreachable!("unreachable, invocations are handled in function exec_invocation()")
         }
-        
-        Rhs::RhsArray { array_type, sizes, type_ } => {
+
+        Rhs::RhsArray {
+            array_type,
+            sizes,
+            type_,
+        } => {
             return exec_array_construction(state, array_type, sizes, type_, st);
         }
         _ => unimplemented!(),
@@ -1157,12 +1264,8 @@ fn exec_rhs_elem(
     if let Expression::Ref { ref_, .. } = array.as_ref() {
         let index = evaluateAsInt(state, index, st);
         match index {
-            Either::Left(index) => {
-                read_elem_symbolic_index(state, *ref_, index)
-            },
-            Either::Right(index) => {
-                read_elem_concrete_index(state, *ref_, index)
-            }
+            Either::Left(index) => read_elem_symbolic_index(state, *ref_, index),
+            Either::Right(index) => read_elem_concrete_index(state, *ref_, index),
         }
     } else {
         panic!("Expected array reference");
@@ -1301,23 +1404,35 @@ fn write_elem_symbolic_index(
 /// int[] a = new int[10];
 /// ```
 /// in this example, array_type = int, sizes = { 10 }, type_ = int[].
-fn exec_array_construction(state: &mut State, array_type: &NonVoidType, sizes: &Vec<Expression>, type_: &RuntimeType, st: &SymbolicTable) -> Rc<Expression> {
+fn exec_array_construction(
+    state: &mut State,
+    array_type: &NonVoidType,
+    sizes: &Vec<Expression>,
+    type_: &RuntimeType,
+    st: &SymbolicTable,
+) -> Rc<Expression> {
     let ref_id = state.next_reference_id();
-    
+
     assert!(sizes.len() == 1, "Support for only 1D arrays");
     // int[][] a = new int[10][10];
 
-    let size = evaluateAsInt(state, Rc::new(sizes[0].clone()), st).expect_right("no symbolic array sizes");
+    let size =
+        evaluateAsInt(state, Rc::new(sizes[0].clone()), st).expect_right("no symbolic array sizes");
 
-    let array = (0..size).map(|_| Rc::new(array_type.default())).collect_vec();
+    let array = (0..size)
+        .map(|_| Rc::new(array_type.default()))
+        .collect_vec();
 
     state.heap.insert(ref_id, HeapValue::ArrayValue(array));
 
-    Rc::new(Expression::Ref { ref_: ref_id, type_: type_.clone() })
+    Rc::new(Expression::Ref {
+        ref_: ref_id,
+        type_: type_.clone(),
+    })
 }
 
 /// Helper function, does not invoke Z3 but tries to evaluate the assumption locally.
-/// Returns whether the assumption was found to be infeasible. 
+/// Returns whether the assumption was found to be infeasible.
 /// Otherwise it inserts the assumption into the constraints.
 fn exec_assume(state: &mut State, assumption: Rc<Expression>, st: &SymbolicTable) -> bool {
     let expression = evaluate(state, assumption, st);
@@ -1329,7 +1444,6 @@ fn exec_assume(state: &mut State, assumption: Rc<Expression>, st: &SymbolicTable
     }
     true
 }
-
 
 fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
     let tokens = tokens(file_content);
@@ -1365,6 +1479,11 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
             .collect();
         // dbg!(&params);
 
+        let root_logger = slog::Logger::root(
+            Mutex::new(slog_bunyan::default(std::io::stdout())).fuse(),
+            o!(),
+        );
+
         let mut state = State {
             pc,
             stack: vec![StackFrame {
@@ -1377,12 +1496,24 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
             precondition: true_lit(),
             constraints: HashSet::new(),
             alias_map: HashMap::new(),
-            ref_counter: 1,
+            ref_counter: IdCounter::new(0),
             exception_handler: Default::default(),
             path_length: 0,
+            logger: root_logger.new(o!("pathId" => 0)),
+            path_id: 0,
         };
 
-        return sym_exec(&mut state, &program, &flows, k, &symbolic_table);
+        let path_counter = Rc::new(RefCell::new(IdCounter::new(0)));
+
+        return sym_exec(
+            &mut state,
+            &program,
+            &flows,
+            k,
+            &symbolic_table,
+            root_logger,
+            path_counter
+        );
     } else {
         panic!()
     }
@@ -1555,18 +1686,45 @@ fn sym_exec_array1() {
     let file_content = std::fs::read_to_string("./examples/array/array1.oox").unwrap();
 
     assert_eq!(verify_file(&file_content, "foo", 50), SymResult::Valid);
-    assert_eq!(verify_file(&file_content, "foo_invalid", 50), SymResult::Invalid);
+    assert_eq!(
+        verify_file(&file_content, "foo_invalid", 50),
+        SymResult::Invalid
+    );
     assert_eq!(verify_file(&file_content, "sort", 300), SymResult::Valid);
-    assert_eq!(verify_file(&file_content, "sort_invalid1", 50), SymResult::Invalid);
+    assert_eq!(
+        verify_file(&file_content, "sort_invalid1", 50),
+        SymResult::Invalid
+    );
     assert_eq!(verify_file(&file_content, "max", 50), SymResult::Valid);
-    assert_eq!(verify_file(&file_content, "max_invalid1", 50), SymResult::Invalid);
-    assert_eq!(verify_file(&file_content, "max_invalid2", 50), SymResult::Invalid);
-    assert_eq!(verify_file(&file_content, "exists_valid", 50), SymResult::Valid);
+    assert_eq!(
+        verify_file(&file_content, "max_invalid1", 50),
+        SymResult::Invalid
+    );
+    assert_eq!(
+        verify_file(&file_content, "max_invalid2", 50),
+        SymResult::Invalid
+    );
+    assert_eq!(
+        verify_file(&file_content, "exists_valid", 50),
+        SymResult::Valid
+    );
     // assert_eq!(verify_file(&file_content, "exists_invalid1", 50), SymResult::Invalid);
-    assert_eq!(verify_file(&file_content, "exists_invalid2", 50), SymResult::Invalid);
-    assert_eq!(verify_file(&file_content, "array_creation1", 50), SymResult::Valid);
-    assert_eq!(verify_file(&file_content, "array_creation2", 50), SymResult::Valid);
-    assert_eq!(verify_file(&file_content, "array_creation_invalid", 50), SymResult::Invalid);
+    assert_eq!(
+        verify_file(&file_content, "exists_invalid2", 50),
+        SymResult::Invalid
+    );
+    assert_eq!(
+        verify_file(&file_content, "array_creation1", 50),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify_file(&file_content, "array_creation2", 50),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify_file(&file_content, "array_creation_invalid", 50),
+        SymResult::Invalid
+    );
 }
 
 #[test]
@@ -1574,7 +1732,13 @@ fn sym_exec_array2() {
     let file_content = std::fs::read_to_string("./examples/array/array2.oox").unwrap();
 
     assert_eq!(verify_file(&file_content, "foo1", 50), SymResult::Valid);
-    assert_eq!(verify_file(&file_content, "foo1_invalid", 50), SymResult::Invalid);
-    assert_eq!(verify_file(&file_content, "foo2_invalid", 50), SymResult::Invalid);
+    assert_eq!(
+        verify_file(&file_content, "foo1_invalid", 50),
+        SymResult::Invalid
+    );
+    assert_eq!(
+        verify_file(&file_content, "foo2_invalid", 50),
+        SymResult::Invalid
+    );
     assert_eq!(verify_file(&file_content, "sort", 100), SymResult::Valid);
 }
