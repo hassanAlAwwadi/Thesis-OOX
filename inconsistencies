@@ -5,6 +5,14 @@ expression9:
 
 order of the parsed items in pLhs is different from the thesis docs
 
+
+while loop break's are, in the control flow graph, linked to the 'assume !guard' statement after the while loop.
+This is problematic since we cannot assume this when a break occurs, feasible paths will be marked infeasible because the assumption is false.
+I fixed this currently by adding a ite(!guard, skip, skip) statement in the parser, which is called after the while loop.
+This ensures that we check whether the while loop has exited through !guard condition or a break statement.
+
+    ^ nvm, sort function fails after doing this.
+
 // cfg:
  fallthrough missing for ite en seq
 
@@ -75,6 +83,8 @@ dat is een nadeel aan lazy initialisation, je genereerd het object pas echt als
 
 For arrays we use state splitting, each path has its own array (as a concrete reference) with a unique size. (increasingly larger)
 Unlike objects, we don't use the alias map for arrays. 
+
+Currently only support 1D arrays, old OOX supports multiple dimensional arrays.
 
 
 

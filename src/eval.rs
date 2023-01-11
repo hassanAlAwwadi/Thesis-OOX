@@ -1,22 +1,30 @@
 // simplify the expression
 
-use std::{collections::HashMap, rc::Rc, ops::Deref};
+use std::{collections::HashMap, ops::Deref, rc::Rc};
 
-use itertools::Either;
+use itertools::{Either, Itertools};
 
 use crate::{
-    dsl::{negate, negative},
-    exec::{init_symbolic_reference, AliasMap, Heap, State, HeapValue},
-    stack::StackFrame,
+    dsl::{and, equal, ite, negate, negative, or, ors, toIntExpr, ands},
+    exec::{get_element, init_symbolic_reference, AliasMap, Heap, HeapValue, State},
+    stack::{remove_from_stack, write_to_stack, StackFrame},
     symbolic_table::SymbolicTable,
     syntax::{BinOp, Expression, Lit, RuntimeType, UnOp},
 };
 
 pub type EvaluationResult<T> = Either<Rc<Expression>, T>;
 
-pub fn evaluateAsInt(state: &mut State, expression: Rc<Expression>, st: &SymbolicTable) -> EvaluationResult<i64> {
+pub fn evaluateAsInt(
+    state: &mut State,
+    expression: Rc<Expression>,
+    st: &SymbolicTable,
+) -> EvaluationResult<i64> {
     let expression = evaluate(state, expression, st);
-    if let Expression::Lit { lit: Lit::IntLit { int_value }, .. } = expression.deref() {
+    if let Expression::Lit {
+        lit: Lit::IntLit { int_value },
+        ..
+    } = expression.deref()
+    {
         Either::Right(*int_value)
     } else {
         Either::Left(expression)
@@ -38,11 +46,7 @@ pub fn evaluate(
     return expression;
 }
 
-fn substitute(
-    state: &mut State,
-    expression: Rc<Expression>,
-    st: &SymbolicTable,
-) -> Rc<Expression> {
+fn substitute(state: &mut State, expression: Rc<Expression>, st: &SymbolicTable) -> Rc<Expression> {
     match expression.as_ref() {
         Expression::BinOp {
             bin_op,
@@ -75,7 +79,8 @@ fn substitute(
             let StackFrame { pc, t, params, .. } = state.stack.last().unwrap();
             let o = params
                 .get(var)
-                .unwrap_or_else(|| panic!("infeasible, object does not exit")).clone();
+                .unwrap_or_else(|| panic!("infeasible, object does not exit"))
+                .clone();
 
             match o.as_ref() {
                 Expression::SymbolicRef { var, type_ } => {
@@ -90,7 +95,6 @@ fn substitute(
                         }
                     };
                     init_symbolic_reference(state, &var, type_, st);
-
 
                     value.clone()
                 }
@@ -172,7 +176,7 @@ fn eval_locally(
             let StackFrame { pc, t, params, .. } = state.stack.last().unwrap();
             let o = params
                 .get(var)
-                .unwrap_or_else(|| panic!("infeasible, object does not exit"));
+                .unwrap_or_else(|| panic!("infeasible, object does not exist: {:?}", var));
             let exp = eval_locally(state, o.clone(), st);
 
             exp.clone()
@@ -204,12 +208,22 @@ fn eval_locally(
         Expression::Lit { .. } => expression,
         Expression::SizeOf { var, type_ } => {
             let StackFrame { pc, t, params, .. } = state.stack.last().unwrap();
-
-            if let Expression::Ref { ref_, .. } = params[var].as_ref() {
-                if let HeapValue::ArrayValue(elems) = &state.heap[ref_] {
-                    return Expression::int(elems.len() as i64);
+            match params[var].as_ref() {
+                Expression::Lit {
+                    lit: Lit::NullLit,
+                    type_,
+                } => {
+                    // infeasible path
+                    return Expression::int(-1);
                 }
+                Expression::Ref { ref_, .. } => {
+                    if let HeapValue::ArrayValue(elems) = &state.heap[ref_] {
+                        return Expression::int(elems.len() as i64);
+                    }
+                }
+                _ => todo!(),
             }
+            dbg!(&state.heap, var, params[var].as_ref());
             panic!("invalid state, expected initialised array with arrayvalue in heap");
         }
         Expression::Ref { .. } => expression,
@@ -228,8 +242,8 @@ fn eval_locally(
             type_,
         } => {
             let guard = eval_locally(state, guard.clone(), st);
-            let false_ = eval_locally(state, false_.clone(), st);
             let true_ = eval_locally(state, true_.clone(), st);
+            let false_ = eval_locally(state, false_.clone(), st);
 
             match *guard {
                 Expression::Lit {
@@ -255,14 +269,14 @@ fn eval_locally(
             domain,
             formula,
             type_,
-        } => todo!(),
+        } => evaluate_quantifier(ands, elem, range, domain, formula, state, st),
         Expression::Exists {
             elem,
             range,
             domain,
             formula,
             type_,
-        } => todo!(),
+        } => evaluate_quantifier(ors, elem, range, domain, formula, state, st),
     }
 }
 
@@ -471,6 +485,78 @@ fn evaluate_unop(unop: UnOp, expression: Rc<Expression>) -> Rc<Expression> {
             type_: RuntimeType::BoolRuntimeType,
         }),
         (UnOp::Negate, _) => Rc::new(negate(expression)),
+    }
+}
+
+/// Turns a `forall` or an `exists` into an expression with chained binary operators
+/// forall <elem>, <range> : <domain> : <formula>
+/// For example the expression: 
+/// ```
+/// "forall elem, index : a : elem > 0"
+/// ```
+/// becomes, when a = { 0, 1, 2 }
+/// ```
+/// 0 > 0 && 1 > 0 && 2 > 0
+/// ```
+/// 
+/// F is a function that chains each subexpression together with a binary operator into one expression.
+fn evaluate_quantifier<'a, F>(
+    quantifier: F,
+    elem: &'a String,
+    range: &'a String,
+    domain: &'a String,
+    formula: &'a Expression,
+    state: &'a mut State,
+    st: &'a SymbolicTable,
+) -> Rc<Expression>
+where
+    F: Fn(Vec<Rc<Expression>>) -> Expression,
+{
+    let array = state
+        .stack
+        .last()
+        .unwrap()
+        .params
+        .get(domain)
+        .unwrap()
+        .clone();
+    let array = evaluate(state, array, st);
+    match array.as_ref() {
+        Expression::Lit {
+            lit: Lit::NullLit, ..
+        } => Expression::FALSE.into(), // return false?
+        Expression::Ref { ref_, type_ } => {
+            // This might be optimized by not passing in &mut State, but instead pass in &Heap, &mut AliasMap, &mut reference_counter
+            // for i in 0..elements.len()
+            //    clone value, clone index
+            //    run evaluation on other stuff
+
+            let len = if let HeapValue::ArrayValue(elements) = state.heap.get(&ref_).unwrap() {
+                elements.len()
+            } else {
+                panic!("expected Array object")
+            };
+
+            //
+            let formulas = (0..len).map(|i| {
+                let element = get_element(i, *ref_, &state.heap);
+                let index = toIntExpr(i as i64);
+
+                write_to_stack(elem.to_string(), element.clone(), &mut state.stack);
+                write_to_stack(range.to_string(), index, &mut state.stack);
+                let value = evaluate(state, formula.clone().into(), st);
+                remove_from_stack(elem, &mut state.stack);
+                remove_from_stack(range, &mut state.stack);
+
+                value.clone()
+            }).collect_vec();
+
+            quantifier(formulas).into()
+        }
+        Expression::SymbolicRef { var, type_ } => {
+            unreachable!("Arrays are initialized as concrete references for each path")
+        },
+        _ => unreachable!("Expected array to be a reference, found {:?}", array),
     }
 }
 

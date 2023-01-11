@@ -592,7 +592,7 @@ fn referencetype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
             }
         },
     );
-    classtype() | arraytype
+    arraytype | classtype()
 }
 
 fn classtype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
@@ -749,7 +749,7 @@ fn exceptional_rhs(rhs: &Rhs) -> HashSet<Expression> {
             )
         }
         Rhs::RhsCall { invocation, type_ } => exceptional_invocation(invocation),
-        Rhs::RhsArray { .. } => todo!(),
+        Rhs::RhsArray { array_type, sizes, type_ } => HashSet::new(),
     }
 }
 
@@ -938,6 +938,16 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
         }
     }
     compilation_unit
+}
+
+
+
+fn union<T>(mut set1: HashSet<T>, set2: HashSet<T>) -> HashSet<T>
+where
+    HashSet<T>: Extend<T>,
+{
+    set1.extend(set2);
+    set1
 }
 
 #[test]
@@ -1200,10 +1210,14 @@ fn parsing_array1() {
     dbg!(&c);
 }
 
-fn union<T>(mut set1: HashSet<T>, set2: HashSet<T>) -> HashSet<T>
-where
-    HashSet<T>: Extend<T>,
-{
-    set1.extend(set2);
-    set1
+#[test]
+fn parsing_multiple_classes() {
+    let file_content = std::fs::read_to_string("./examples/test.oox").unwrap();
+
+    let tokens = tokens(&file_content);
+    let as_ref = tokens.as_slice();
+    dbg!(as_ref);
+    let c = parse(&as_ref).unwrap();
+    dbg!(&c);
+    
 }

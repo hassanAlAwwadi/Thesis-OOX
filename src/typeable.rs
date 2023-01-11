@@ -1,6 +1,8 @@
 use std::{borrow::Borrow, ops::Deref};
 
-use crate::syntax::{Expression, NonVoidType, RuntimeType};
+use ordered_float::NotNan;
+
+use crate::syntax::{Expression, NonVoidType, RuntimeType, Lit};
 
 pub trait Typeable {
     fn type_of(&self) -> RuntimeType;
@@ -34,6 +36,32 @@ pub trait Typeable {
             (ArrayRuntimeType { .. }, ARRAYRuntimeType) => true,
             (a, b) => a == b,
         }
+    }
+    
+    /// Returns the default expression for the type,
+    /// For integers this would be 0, etc.
+    fn default(&self) -> Expression {
+        let type_ = self.type_of();
+        let lit = match &type_ {
+            RuntimeType::UIntRuntimeType => Lit::UIntLit { uint_value: 0 },
+            RuntimeType::IntRuntimeType => Lit::IntLit { int_value: 0 },
+            RuntimeType::FloatRuntimeType => Lit::FloatLit {
+                float_value: NotNan::new(0.0).unwrap(),
+            },
+            RuntimeType::BoolRuntimeType => Lit::BoolLit { bool_value: false },
+            RuntimeType::StringRuntimeType => Lit::NullLit,
+            RuntimeType::CharRuntimeType => Lit::CharLit { char_value: '\0' },
+            RuntimeType::ReferenceRuntimeType { type_ } => Lit::NullLit,
+            RuntimeType::ArrayRuntimeType { inner_type } => Lit::NullLit,
+            RuntimeType::ANYRuntimeType => todo!(),
+            RuntimeType::NUMRuntimeType => todo!(),
+            RuntimeType::REFRuntimeType => todo!(),
+            RuntimeType::ARRAYRuntimeType => todo!(),
+            RuntimeType::VoidRuntimeType => todo!(),
+            RuntimeType::UnknownRuntimeType => todo!(),
+        };
+
+        Expression::Lit { lit, type_ }
     }
 }
 

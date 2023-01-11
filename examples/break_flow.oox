@@ -1,0 +1,14 @@
+class Main {
+
+    // bug, due to break
+    static int exists_invalid(bool[] array, int i)
+    {
+        int j := 0;
+
+        while (j < #array) {
+            array[j] := false;
+            break;
+        }
+        assert(false);
+    }
+}
