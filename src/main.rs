@@ -17,7 +17,7 @@ fn main() {
     let log = slog::Logger::root(
         Mutex::new(
             slog_bunyan::default(
-                std::io::stderr()
+                std::io::stdout()
             )
         ).fuse(),
         o!()

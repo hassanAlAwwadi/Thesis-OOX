@@ -11,7 +11,7 @@ pub struct StackFrame {
     pub current_member: DeclarationMember
 }
 
-pub fn lookup_in_stack<'a>(identifier: &Identifier, stack: &'a Vec<StackFrame>) -> Option<Rc<Expression>> {
+pub fn lookup_in_stack<'a>(identifier: &str, stack: &'a Vec<StackFrame>) -> Option<Rc<Expression>> {
     stack.last().unwrap().params.get(identifier).cloned()
 }
 

@@ -217,8 +217,8 @@ fn eval_locally(
                     return Expression::int(-1);
                 }
                 Expression::Ref { ref_, .. } => {
-                    if let HeapValue::ArrayValue(elems) = &state.heap[ref_] {
-                        return Expression::int(elems.len() as i64);
+                    if let HeapValue::ArrayValue { elements, .. } = &state.heap[ref_] {
+                        return Expression::int(elements.len() as i64);
                     }
                 }
                 _ => todo!(),
@@ -492,11 +492,11 @@ fn evaluate_unop(unop: UnOp, expression: Rc<Expression>) -> Rc<Expression> {
 /// forall <elem>, <range> : <domain> : <formula>
 /// For example the expression: 
 /// ```
-/// "forall elem, index : a : elem > 0"
+/// "forall elem, index : a : elem > 0";
 /// ```
 /// becomes, when a = { 0, 1, 2 }
 /// ```
-/// 0 > 0 && 1 > 0 && 2 > 0
+/// "0 > 0 && 1 > 0 && 2 > 0";
 /// ```
 /// 
 /// F is a function that chains each subexpression together with a binary operator into one expression.
@@ -531,7 +531,7 @@ where
             //    clone value, clone index
             //    run evaluation on other stuff
 
-            let len = if let HeapValue::ArrayValue(elements) = state.heap.get(&ref_).unwrap() {
+            let len = if let HeapValue::ArrayValue { elements, .. } = state.heap.get(&ref_).unwrap() {
                 elements.len()
             } else {
                 panic!("expected Array object")

@@ -90,3 +90,13 @@ Currently only support 1D arrays, old OOX supports multiple dimensional arrays.
 
 // exceptions
 in thesis, the exceptions(rhs_elem(i, E)) =
+
+// resolving:
+During exceptional clauses insertion, whether an invocation is static is determined by looking at the lhs of the call,
+for example Foo.foo()
+If "Foo" is a class name this is a static invocation call. 
+As a result of this you can't call this.foo(); in OOX even though this would be possible in Java.
+
+// constructor:
+return this; is added to the CFG at some point (after parsing)
+in Analysis.hs @ 164

@@ -12,7 +12,7 @@ impl SymbolicTable {
     pub fn from_ast(compilation_unit: &CompilationUnit) -> SymbolicTable {
         let mut class_to_fields = HashMap::new();
         for member in &compilation_unit.members {
-            let Declaration::Class {name: class_name, members } = member;
+            let Declaration::Class {name: class_name, members, .. } = member.as_ref();
             let mut fields = Vec::new();
             for declaration_member in  members {
                 match declaration_member {

@@ -4,17 +4,30 @@ pub type Identifier = String;
 pub type Reference = i64;
 
 pub type Float = NotNan<f64>;
-use std::{fmt::Debug, rc::Rc, cell::{RefCell, Ref}};
+use std::{
+    cell::{Ref, RefCell},
+    fmt::{Debug, Display},
+    rc::{Rc, Weak},
+};
 
 #[derive(Debug)]
-pub struct CompilationUnit {
-    pub members: Vec<Declaration>,
+pub struct CompilationUnit<D = Declaration> {
+    pub members: Vec<Rc<D>>,
 }
 
 impl CompilationUnit {
-    pub fn find_declaration(&self, identifier: &str) -> Option<DeclarationMember> {
+    pub fn find_declaration(
+        &self,
+        identifier: &str,
+        class_name: Option<&str>,
+    ) -> Option<DeclarationMember> {
         for member in &self.members {
-            let Declaration::Class { members, .. } = member;
+            let Declaration::Class { members, name, .. } = member.as_ref();
+            if let Some(class_name) = class_name {
+                if name != class_name {
+                    continue;
+                }
+            }
             for declaration_member in members {
                 match declaration_member {
                     DeclarationMember::Constructor { name, .. } if identifier == name => {
@@ -31,10 +44,43 @@ impl CompilationUnit {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Declaration {
     Class {
         name: Identifier,
+        extends: Option<Rc<Declaration>>,
+        implements: Vec<Rc<Declaration>>,
+        members: Vec<DeclarationMember>,
+    },
+}
+
+impl Debug for Declaration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Class {
+                name,
+                extends,
+                implements,
+                members,
+            } => f
+                .debug_struct("Class")
+                .field("name", name)
+                .field("extends",&extends.is_some())
+                .field("implements", &implements.len())
+                .field("members", members)
+                .finish(),
+        }
+    }
+}
+
+/// Intermediate state, where the Declaration does not know the declarations of its extends and implements
+/// After resolving this will be replaced with a Declaration in the syntax tree.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum UnresolvedDeclaration {
+    Class {
+        name: Identifier,
+        extends: Option<Identifier>,
+        implements: Vec<Identifier>,
         members: Vec<DeclarationMember>,
     },
 }
@@ -77,7 +123,7 @@ impl DeclarationMember {
     pub fn post_condition(&self) -> Option<Rc<Expression>> {
         self.specification().and_then(|s| s.ensures.clone())
     }
-    
+
     pub fn exceptional(&self) -> Option<Rc<Expression>> {
         self.specification().and_then(|s| s.exceptional.clone())
     }
@@ -159,6 +205,10 @@ pub enum Invocation {
         arguments: Vec<Expression>,
         resolved: Option<Box<(Declaration, DeclarationMember)>>, // What is this?
     },
+    InvokeSuperConstructor {
+        arguments: Vec<Expression>,
+        resolved: Option<Box<(Declaration, DeclarationMember)>>,
+    },
 }
 
 impl Invocation {
@@ -166,6 +216,9 @@ impl Invocation {
         match &self {
             Invocation::InvokeMethod { resolved, .. } => resolved.as_ref().map(Box::as_ref),
             Invocation::InvokeConstructor { resolved, .. } => resolved.as_ref().map(Box::as_ref),
+            Invocation::InvokeSuperConstructor { resolved, .. } => {
+                resolved.as_ref().map(Box::as_ref)
+            }
         }
     }
 
@@ -173,6 +226,7 @@ impl Invocation {
         match &self {
             Invocation::InvokeMethod { arguments, .. } => arguments.as_ref(),
             Invocation::InvokeConstructor { arguments, .. } => arguments.as_ref(),
+            Invocation::InvokeSuperConstructor { arguments, .. } => arguments.as_ref(),
         }
     }
 
@@ -180,6 +234,7 @@ impl Invocation {
         match &self {
             Invocation::InvokeMethod { rhs, .. } => rhs,
             Invocation::InvokeConstructor { class_name, .. } => class_name,
+            _ => panic!("Invocation of super(); - does not have an identifier"),
         }
     }
 }
@@ -206,7 +261,16 @@ impl Debug for Invocation {
             } => f
                 .debug_struct("InvokeConstructor")
                 .field("class_name", class_name)
-                .field("arguments", arguments).field("resolved", &resolved.is_some())
+                .field("arguments", arguments)
+                .field("resolved", &resolved.is_some())
+                .finish(),
+            Self::InvokeSuperConstructor {
+                arguments,
+                resolved,
+            } => f
+                .debug_struct("InvokeSuperConstructor")
+                .field("arguments", arguments)
+                .field("resolved", &resolved.is_some())
                 .finish(),
         }
     }
@@ -289,7 +353,8 @@ pub enum Expression {
         var: Identifier,
         type_: RuntimeType,
     },
-    SymbolicVar {   // symbolic variables of primitives such as integers, boolean, floats
+    SymbolicVar {
+        // symbolic variables of primitives such as integers, boolean, floats
         var: Identifier,
         type_: RuntimeType,
     },
@@ -305,7 +370,8 @@ pub enum Expression {
         ref_: Reference,
         type_: RuntimeType,
     },
-    SymbolicRef {   // symbolic references to arrays, objects
+    SymbolicRef {
+        // symbolic references to arrays, objects
         var: Identifier,
         type_: RuntimeType,
     },
@@ -401,6 +467,7 @@ pub enum NonVoidType {
     ReferenceType { identifier: String },
     ArrayType { inner_type: Box<NonVoidType> },
 }
+
 
 // how is this used during parsing? or is it only used during execution
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

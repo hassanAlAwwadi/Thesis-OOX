@@ -5,13 +5,14 @@ use std::{
     collections::{HashMap, HashSet},
     ops::{AddAssign, Deref},
     rc::Rc,
-    sync::Mutex,
+    sync::Mutex, string,
 };
 
 use itertools::{Either, Itertools};
 use num::One;
 use ordered_float::NotNan;
-use slog::{o, Drain, Logger, info, Level};
+use slog::{info, o, Drain, Level, Logger, debug, Value, log};
+use slog::{Key, Record, Result, Serializer};
 use z3::SatResult;
 
 use crate::{
@@ -25,8 +26,8 @@ use crate::{
     stack::{lookup_in_stack, write_to_stack, StackFrame},
     symbolic_table::SymbolicTable,
     syntax::{
-        BinOp, Declaration, DeclarationMember, Expression, Identifier, Invocation, Lhs, Lit,
-        NonVoidType, Parameter, Reference, Rhs, RuntimeType, Statement, UnOp,
+        BinOp, CompilationUnit, Declaration, DeclarationMember, Expression, Identifier, Invocation,
+        Lhs, Lit, NonVoidType, Parameter, Reference, Rhs, RuntimeType, Statement, UnOp,
     },
     typeable::Typeable,
     utils, z3_checker,
@@ -44,7 +45,7 @@ fn retval() -> String {
 pub type Heap = HashMap<Reference, HeapValue>;
 
 pub fn get_element(index: usize, ref_: Reference, heap: &Heap) -> Rc<Expression> {
-    if let HeapValue::ArrayValue(elements) = &heap[&ref_] {
+    if let HeapValue::ArrayValue { elements, .. } = &heap[&ref_] {
         return elements[index].clone();
     }
     panic!("Expected an array");
@@ -56,7 +57,10 @@ pub enum HeapValue {
         fields: HashMap<Identifier, Rc<Expression>>,
         type_: RuntimeType,
     },
-    ArrayValue(Vec<Rc<Expression>>),
+    ArrayValue {
+        elements: Vec<Rc<Expression>>,
+        type_: RuntimeType,
+    },
 }
 
 impl HeapValue {
@@ -133,6 +137,18 @@ impl State {
         let mut new_state = self.clone();
         new_state.path_id = path_counter.next_id();
         new_state
+    }
+
+    /// allocates structure on heap, returning a reference to the value.
+    fn allocate_on_heap(&mut self, structure: HeapValue) -> Rc<Expression> {
+        let ref_fresh = self.next_reference_id();
+        let type_ = structure.type_of();
+
+        self.heap.insert(ref_fresh, structure);
+        return Rc::new(Expression::Ref {
+            ref_: ref_fresh,
+            type_,
+        });
     }
 }
 
@@ -242,7 +258,9 @@ fn sym_exec(
             const N: u64 = 3;
             let StackFrame { params, .. } = state.stack.last_mut().unwrap();
 
-            let inner_type = match params[&array_name].type_of() {
+            let array_type = params[&array_name].type_of();
+
+            let inner_type = match array_type.clone() {
                 RuntimeType::ArrayRuntimeType { inner_type } => inner_type,
                 _ => panic!(
                     "Expected array type, found {:?}",
@@ -251,7 +269,7 @@ fn sym_exec(
             };
 
             let new_path_ids = std::iter::once(state.path_id)
-                    .chain((1..N).map(|_| path_counter.borrow_mut().next_id()));
+                .chain((1..N).map(|_| path_counter.borrow_mut().next_id()));
 
             for (array_size, path_id) in (0..N).zip(new_path_ids) {
                 let mut new_state = state.clone();
@@ -274,9 +292,14 @@ fn sym_exec(
                     })
                     .collect();
 
-                new_state
-                    .heap
-                    .insert(r, HeapValue::ArrayValue(array_elements).into());
+                new_state.heap.insert(
+                    r,
+                    HeapValue::ArrayValue {
+                        elements: array_elements,
+                        type_: array_type.clone(),
+                    }
+                    .into(),
+                );
 
                 dbg!(
                     "after array initialization",
@@ -362,6 +385,7 @@ enum ActionResult {
     StateSplit((Rc<Expression>, Rc<Expression>, Rc<Expression>, Identifier)),
 }
 
+
 fn action(
     state: &mut State,
     program: &HashMap<u64, CFGStatement>,
@@ -371,6 +395,12 @@ fn action(
     let pc = state.pc;
     let action = &program[&pc];
 
+
+    // debug!(state.logger, "Action";
+    //  "action" => format!("{:?}", &action),
+    //  "stack" => ?state.stack.last().map(|s| &s.params), 
+    //  "heap" => ?state.heap, 
+    //  "alias_map" => ?state.alias_map);
     dbg!(
         &action,
         state.stack.last().map(|s| &s.params),
@@ -671,7 +701,7 @@ fn exec_invocation(
     lhs: Option<Lhs>,
     st: &SymbolicTable,
 ) -> ActionResult {
-    // dbg!(invocation);
+    dbg!(invocation);
     let (
         Declaration::Class {
             name: class_name, ..
@@ -758,12 +788,54 @@ fn exec_invocation(
             params,
             specification,
             body,
-        } => todo!(),
+        } => {
+            // evaluate arguments
+            let arguments = invocation
+                .arguments()
+                .into_iter()
+                .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
+                .collect::<Vec<_>>();
+
+            let this_param = Parameter {
+                type_: NonVoidType::ReferenceType {
+                    identifier: class_name.to_string(),
+                },
+                name: "this".to_owned(),
+            };
+            if let Invocation::InvokeSuperConstructor { .. } = invocation {
+                exec_super_constructor(
+                    state,
+                    return_point,
+                    member.clone(),
+                    lhs,
+                    &arguments,
+                    params,
+                    st,
+                    this_param
+                )
+            } else {
+                exec_constructor(
+                    state,
+                    return_point,
+                    member.clone(),
+                    lhs,
+                    &arguments,
+                    params,
+                    class_name,
+                    st,
+                    this_param
+                );
+            }
+
+            let next_entry = find_entry_for_static_invocation(&name, program);
+            ActionResult::FunctionCall(next_entry)
+        }
         DeclarationMember::Field { type_, name } => todo!(),
     }
 }
 
 fn find_entry_for_static_invocation(invocation: &str, program: &HashMap<u64, CFGStatement>) -> u64 {
+    dbg!(invocation);
     let (entry, _) = program
         .iter()
         .find(|(k, v)| **v == CFGStatement::FunctionEntry(invocation.to_string()))
@@ -771,15 +843,6 @@ fn find_entry_for_static_invocation(invocation: &str, program: &HashMap<u64, CFG
 
     *entry
 }
-
-// fn exec_invocation(stack: &mut Vec<StackFrame>, invocation: &Invocation, return_point: u64, member: DeclarationMember, lhs_return: Option<Lhs>) {
-//     match invocation {
-//         Invocation::InvokeMethod { lhs, rhs, arguments, resolved } =>
-//         exec_static_method(&mut stack, *pc, member.clone(), lhs),
-//         Invocation::InvokeConstructor { class_name, arguments, resolved } => todo!(),
-//     }
-
-// }
 
 fn exec_method(
     state: &mut State,
@@ -827,6 +890,68 @@ fn exec_static_method(
         member,
         lhs,
         parameters.iter().zip(arguments.iter().cloned()),
+        st,
+    )
+}
+
+fn exec_constructor(
+    state: &mut State,
+    return_point: u64,
+    member: DeclarationMember,
+    lhs: Option<Lhs>,
+    arguments: &[Rc<Expression>],
+    parameters: &[Parameter],
+    class_name: &str,
+    st: &SymbolicTable,
+    this_param: Parameter,
+) {
+    let parameters = std::iter::once(&this_param).chain(parameters.iter());
+
+    let fields = st
+        .get_all_fields(class_name)
+        .iter()
+        .map(|(s, t)| (s.to_string(), t.default().into()))
+        .collect();
+    let structure = HeapValue::ObjectValue {
+        fields,
+        type_: member.type_of(),
+    };
+
+    let object_ref = state.allocate_on_heap(structure);
+    let arguments = std::iter::once(object_ref).chain(arguments.iter().cloned());
+
+    push_stack_frame(
+        state,
+        return_point,
+        member,
+        lhs,
+        parameters.zip(arguments),
+        st,
+    )
+}
+
+fn exec_super_constructor(
+    state: &mut State,
+    return_point: u64,
+    member: DeclarationMember,
+    lhs: Option<Lhs>,
+    arguments: &[Rc<Expression>],
+    parameters: &[Parameter],
+    st: &SymbolicTable,
+    this_param: Parameter,
+) {
+    let parameters = std::iter::once(&this_param).chain(parameters.iter());
+
+    // instead of allocating a new object, add the new fields to the existing 'this' object.
+    let object_ref = lookup_in_stack("this", &state.stack).expect("super() is called in a constructor with a 'this' object on the stack");
+    let arguments = std::iter::once(object_ref).chain(arguments.iter().cloned());
+
+    push_stack_frame(
+        state,
+        return_point,
+        member,
+        lhs,
+        parameters.zip(arguments),
         st,
     )
 }
@@ -1006,8 +1131,6 @@ pub fn init_symbolic_reference(
     st: &SymbolicTable,
 ) {
     if !state.alias_map.contains_key(sym_ref) {
-        let ref_fresh = state.next_reference_id();
-
         let class_name = if let RuntimeType::ReferenceRuntimeType { type_ } = type_ref {
             type_
         } else {
@@ -1029,8 +1152,7 @@ pub fn init_symbolic_reference(
             })
             .collect();
 
-        state.heap.insert(
-            ref_fresh,
+        let object_ref = state.allocate_on_heap(
             HeapValue::ObjectValue {
                 fields,
                 type_: type_ref.clone(),
@@ -1049,16 +1171,7 @@ pub fn init_symbolic_reference(
 
         let aliases = existing_aliases
             .cloned()
-            .chain(
-                [
-                    Rc::new(Expression::NULL),
-                    Rc::new(Expression::Ref {
-                        ref_: ref_fresh,
-                        type_: type_ref.clone(),
-                    }),
-                ]
-                .into_iter(),
-            )
+            .chain([Rc::new(Expression::NULL), object_ref].into_iter())
             .collect();
 
         state.alias_map.insert(sym_ref.clone(), aliases);
@@ -1318,7 +1431,7 @@ fn initialize_symbolic_var(name: &str, type_: &RuntimeType, ref_: i64) -> Expres
 }
 
 fn read_elem_concrete_index(state: &mut State, ref_: Reference, index: i64) -> Rc<Expression> {
-    if let HeapValue::ArrayValue(elements) = state.heap.get(&ref_).unwrap() {
+    if let HeapValue::ArrayValue { elements, .. } = state.heap.get(&ref_).unwrap() {
         elements[index as usize].clone()
     } else {
         panic!("Expected Array object");
@@ -1336,7 +1449,7 @@ fn read_elem_symbolic_index(
     ref_: Reference,
     index: Rc<Expression>,
 ) -> Rc<Expression> {
-    if let HeapValue::ArrayValue(elements) = state.heap.get(&ref_).unwrap() {
+    if let HeapValue::ArrayValue { elements, .. } = state.heap.get(&ref_).unwrap() {
         let indices = (0..elements.len()).map(|i| toIntExpr(i as i64));
 
         let mut indexed_elements = elements.iter().zip(indices).rev();
@@ -1364,7 +1477,7 @@ fn write_elem_concrete_index(
     index: i64,
     expression: Rc<Expression>,
 ) {
-    if let HeapValue::ArrayValue(elements) = state.heap.get_mut(&ref_).unwrap() {
+    if let HeapValue::ArrayValue { elements, .. } = state.heap.get_mut(&ref_).unwrap() {
         if index >= 0 && index < elements.len() as i64 {
             elements[index as usize] = expression;
         } else {
@@ -1381,7 +1494,7 @@ fn write_elem_symbolic_index(
     index: Rc<Expression>,
     expression: Rc<Expression>,
 ) {
-    if let HeapValue::ArrayValue(elements) = state.heap.get_mut(&ref_).unwrap() {
+    if let HeapValue::ArrayValue { elements, .. } = state.heap.get_mut(&ref_).unwrap() {
         let indices = (0..elements.len()).map(|i| toIntExpr(i as i64));
 
         let indexed_elements = elements.iter_mut().zip(indices);
@@ -1400,9 +1513,9 @@ fn write_elem_symbolic_index(
 }
 
 /// Constructs an array that was created by an OOX statement like this:
-/// ```
-/// int[] a = new int[10];
-/// ```
+// / ```
+// / int[] a = new int[10];
+// / ```
 /// in this example, array_type = int, sizes = { 10 }, type_ = int[].
 fn exec_array_construction(
     state: &mut State,
@@ -1423,7 +1536,13 @@ fn exec_array_construction(
         .map(|_| Rc::new(array_type.default()))
         .collect_vec();
 
-    state.heap.insert(ref_id, HeapValue::ArrayValue(array));
+    state.heap.insert(
+        ref_id,
+        HeapValue::ArrayValue {
+            elements: array,
+            type_: type_.clone(),
+        },
+    );
 
     Rc::new(Expression::Ref {
         ref_: ref_id,
@@ -1451,22 +1570,48 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
     // dbg!(as_ref);
     let c = parse(&tokens);
     let c = c.unwrap();
-    let c = insert_exceptional_clauses(c);
 
     // dbg!(&c);
 
+    let declaration_member_initial_function = c.find_declaration(method, None).unwrap();
+
+    verify(c, declaration_member_initial_function, k)
+}
+
+fn verify_file_class_method(file_content: &str, class: &str, method: &str, k: u64) -> SymResult {
+    let tokens = tokens(file_content);
+    let as_ref = tokens.as_slice();
+    // dbg!(as_ref);
+    let c = parse(&tokens);
+    let c = c.unwrap();
+
+    // dbg!(&c);
+
+    let declaration_member_initial_function = c.find_declaration(method, class.into()).unwrap();
+    verify(c, declaration_member_initial_function, k)
+}
+
+fn verify(c: CompilationUnit, initial_function: DeclarationMember, k: u64) -> SymResult {
     let mut i = 0;
-    let declaration_member_initial_function = c.find_declaration(method).unwrap();
     let symbolic_table = SymbolicTable::from_ast(&c);
     let (result, flw) = labelled_statements(c, &mut i);
 
     let program = result.into_iter().collect();
 
+    // dbg!(&program);
+
     let flows: HashMap<u64, Vec<u64>> = utils::group_by(flw.into_iter());
 
-    let pc = find_entry_for_static_invocation(method, &program);
+    // dbg!(&flows);
+    // panic!();
 
-    if let DeclarationMember::Method { params, .. } = &declaration_member_initial_function {
+    if let DeclarationMember::Method {
+        params,
+        name: method_name,
+        ..
+    } = &initial_function
+    {
+        let pc = find_entry_for_static_invocation(method_name, &program);
         // dbg!(&params);
         let params = params
             .iter()
@@ -1480,7 +1625,7 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
         // dbg!(&params);
 
         let root_logger = slog::Logger::root(
-            Mutex::new(slog_bunyan::default(std::io::stdout())).fuse(),
+            Mutex::new(slog_bunyan::default(std::io::stderr()).filter_level(Level::Error)).fuse(),
             o!(),
         );
 
@@ -1490,7 +1635,7 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
                 pc,
                 t: None,
                 params,
-                current_member: declaration_member_initial_function,
+                current_member: initial_function,
             }],
             heap: HashMap::new(),
             precondition: true_lit(),
@@ -1512,7 +1657,7 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
             k,
             &symbolic_table,
             root_logger,
-            path_counter
+            path_counter,
         );
     } else {
         panic!()
@@ -1741,4 +1886,40 @@ fn sym_exec_array2() {
         SymResult::Invalid
     );
     assert_eq!(verify_file(&file_content, "sort", 100), SymResult::Valid);
+}
+
+#[test]
+fn sym_exec_inheritance() {
+    let file_content = std::fs::read_to_string("./examples/inheritance/inheritance.oox").unwrap();
+
+    assert_eq!(
+        verify_file_class_method(&file_content, "Main", "test1", 60),
+        SymResult::Valid
+    );
+    // assert_eq!(
+    //     verify_file_class_method(&file_content, "Main", "test1_invalid", 60),
+    //     SymResult::Valid
+    // );
+    // assert_eq!(
+    //     verify_file_class_method(&file_content, "Main", "test2", 30),
+    //     SymResult::Valid
+    // );
+    // assert_eq!(
+    //     verify_file_class_method(&file_content, "Main", "test3_valid", 30),
+    //     SymResult::Valid
+    // );
+    // assert_eq!(
+    //     verify_file_class_method(&file_content, "Main", "test3_invalid", 30),
+    //     SymResult::Invalid
+    // );
+}
+
+#[test]
+fn sym_exec_interface() {
+    let file_content = std::fs::read_to_string("./examples/inheritance/interface.oox").unwrap();
+
+    assert_eq!(
+        verify_file_class_method(&file_content, "Main", "main", 60),
+        SymResult::Valid
+    );
 }

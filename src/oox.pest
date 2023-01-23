@@ -35,6 +35,10 @@ keyword = { "assert" | "catch" | "else"
 | "return"
 | "throw"
 | "void"
+| "extends"
+| "implements"
+| "interface"
+| "super"
 }
 
 punctuator = {

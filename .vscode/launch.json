@@ -4,18 +4,49 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
+        {
+            "name": "(OSX) Launch",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceRoot}/target/debug/main",
+            "stdio": [null, "log.txt", null],
+            "cwd": "${workspaceRoot}",
+            "args": [],
+            "console": "integratedTerminal",
+        },
+        
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'oox'",
+            "name": "Debug unit tests in library 'lib'",
             "cargo": {
                 "args": [
-                    "build",
-                    "--bin=oox",
+                    "test",
+                    "--no-run",
+                    "--lib",
                     "--package=oox"
                 ],
                 "filter": {
-                    "name": "oox",
+                    "name": "lib",
+                    "kind": "lib"
+                }
+            },
+            "args": ["sym_exec_inheritance", "bunyan"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'main'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=main",
+                    "--package=oox"
+                ],
+                "filter": {
+                    "name": "main",
                     "kind": "bin"
                 }
             },
@@ -25,20 +56,20 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'oox'",
+            "name": "Debug unit tests in executable 'main'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=oox",
+                    "--bin=main",
                     "--package=oox"
                 ],
                 "filter": {
-                    "name": "oox",
+                    "name": "main",
                     "kind": "bin"
                 }
             },
-            "args": ["sym_exec"],
+            "args": [],
             "cwd": "${workspaceFolder}"
         }
     ]

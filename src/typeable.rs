@@ -2,7 +2,7 @@ use std::{borrow::Borrow, ops::Deref};
 
 use ordered_float::NotNan;
 
-use crate::syntax::{Expression, NonVoidType, RuntimeType, Lit};
+use crate::{syntax::{DeclarationMember, Expression, Lit, NonVoidType, RuntimeType, Type}, exec::HeapValue};
 
 pub trait Typeable {
     fn type_of(&self) -> RuntimeType;
@@ -37,7 +37,7 @@ pub trait Typeable {
             (a, b) => a == b,
         }
     }
-    
+
     /// Returns the default expression for the type,
     /// For integers this would be 0, etc.
     fn default(&self) -> Expression {
@@ -107,5 +107,37 @@ impl Typeable for Expression {
 impl Typeable for RuntimeType {
     fn type_of(&self) -> RuntimeType {
         self.clone()
+    }
+}
+
+impl Typeable for DeclarationMember {
+    fn type_of(&self) -> RuntimeType {
+        use DeclarationMember::*;
+        match self {
+            Constructor { name, .. } => RuntimeType::ReferenceRuntimeType {
+                type_: name.clone(),
+            },
+            Method {
+                return_type,
+                ..
+            } => return_type.type_of(),
+            Field { type_, .. } => type_.type_of(),
+        }
+    }
+}
+
+
+impl Typeable for Type {
+    fn type_of(&self) -> RuntimeType {
+        self.type_.as_ref().map_or(RuntimeType::VoidRuntimeType, |t|t.type_of())
+    }
+}
+
+impl Typeable for HeapValue {
+    fn type_of(&self) -> RuntimeType {
+        match self {
+            HeapValue::ObjectValue { type_, .. } => type_.clone(),
+            HeapValue::ArrayValue { type_, .. } => type_.clone(),
+        }
     }
 }

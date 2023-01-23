@@ -1,0 +1,36 @@
+interface Animal {
+  void animalSound();
+}
+
+interface Sleeper {
+  void sleep();
+}
+
+class Pig implements Animal, Sleeper {
+  bool hasMadeSound;
+  bool hasSlept;
+
+  void animalSound() {
+    this.sound := true;
+  }
+
+  void sleep() {
+    this.hasSlept := true;
+  }
+}
+
+class Main {
+  static void main() {
+    Pig myPig = new Pig();  // Create a Pig object
+
+    assert hasMadeSound == false && hasSlept == false;
+
+    myPig.animalSound();
+    myPig.sleep();
+
+    bool hasMadeSound := myPig.hasMadeSound;
+    bool hasSlept := myPig.hasSlept;
+
+    assert hasMadeSound == true && hasSlept == true;
+  }
+}

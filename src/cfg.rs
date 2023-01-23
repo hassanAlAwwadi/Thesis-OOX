@@ -1,7 +1,7 @@
 // use std::intrinsics::unreachable;
 
 
-use crate::{lexer::tokens, parser_pom::parse, syntax::*};
+use crate::{lexer::tokens, parser_pom::parse, syntax::*, typeable::Typeable};
 
 
 const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
@@ -28,7 +28,8 @@ pub fn labelled_statements(
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
     let mut flow: Vec<(u64, u64)> = vec![];
 
-    for Declaration::Class { name, members } in compilation_unit.members {
+    for class in compilation_unit.members {
+        let Declaration::Class { name, members, .. } = class.as_ref();
         for member in members {
             let (mut member_statements, mut member_flow) = memberCFG(member, i);
             labelled_statements.append(&mut member_statements);
@@ -40,38 +41,60 @@ pub fn labelled_statements(
 }
 
 fn memberCFG(
-    member: DeclarationMember,
+    member: &DeclarationMember,
     i: &mut u64,
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
     match member {
+        DeclarationMember::Method {
+            name,
+            body,
+            ..
+        }  => {
+            let mut v = Vec::new();
+            v.push((*i, CFGStatement::FunctionEntry(name.clone())));
+            let entry_label = *i;
+            *i += 1;
+            v.append(&mut statementCFG(&body, i));
+            v.push((*i, CFGStatement::FunctionExit(name.clone())));
+            let exit_label = *i;
+            *i += 1;
+        
+            let init_l = init(&v[1]);
+            let init = (init_l, lookup(init(&v[1]), &v));
+            let mut flw = flow(&v[1], &v);
+        
+            flw.push((entry_label, init.0));
+        
+            // //dbg!(&v[1]);
+            // final(S)
+            for l in r#final(&v[1], &v) {
+                flw.push((l, exit_label));
+            }
+            // fallthrough(S)
+            // //dbg!(&fallthrough(&v[1], &v));
+            for (l, _s) in fallthrough(&v[1], &v) {
+                flw.push((l, exit_label));
+            }
+        
+            labelled_statements.append(&mut v);
+            (labelled_statements, flw)
+        },
         DeclarationMember::Constructor {
             name,
-            params,
-            specification,
             body,
-        } => {
-            labelled_statements.push((*i, CFGStatement::FunctionEntry(name.clone())));
-            *i += 1;
-            labelled_statements.append(&mut statementCFG(&body, i));
-            labelled_statements.push((*i, CFGStatement::FunctionExit(name)));
-            *i += 1;
-            (Vec::new(), Vec::new())
-        }
-        DeclarationMember::Method {
-            is_static,
-            return_type,
-            name,
-            params,
-            specification,
-            body,
+            ..
         } => {
             let mut v = Vec::new();
             v.push((*i, CFGStatement::FunctionEntry(name.clone())));
             let entry_label = *i;
             *i += 1;
             v.append(&mut statementCFG(&body, i));
-            v.push((*i, CFGStatement::FunctionExit(name)));
+            // insert `return this;` at the end of the constructor flow.
+            v.push((*i, CFGStatement::Statement(Statement::Return { expression: Expression::Var { var: "this".to_string(), type_: member.type_of() }.into() })));
+            let return_this_label = *i;
+            *i += 1;
+            v.push((*i, CFGStatement::FunctionExit(name.clone())));
             let exit_label = *i;
             *i += 1;
 
@@ -84,13 +107,16 @@ fn memberCFG(
             // //dbg!(&v[1]);
             // final(S)
             for l in r#final(&v[1], &v) {
-                flw.push((l, exit_label));
+                flw.push((l, return_this_label));
             }
             // fallthrough(S)
             // //dbg!(&fallthrough(&v[1], &v));
             for (l, _s) in fallthrough(&v[1], &v) {
-                flw.push((l, exit_label));
+                flw.push((l, return_this_label));
             }
+
+            // from `return this;` to function exit.
+            flw.push((return_this_label, exit_label));
 
             labelled_statements.append(&mut v);
             (labelled_statements, flw)
@@ -98,6 +124,10 @@ fn memberCFG(
         DeclarationMember::Field { type_, name } => (Vec::new(), Vec::new()),
     }
 }
+
+// fn label_method(name: &String, body: &Statement, i: &mut u64) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
+
+// }
 
 fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> {
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];

@@ -1,9 +1,10 @@
+use itertools::Itertools;
 use nom::Slice;
 use ordered_float::NotNan;
 use pom::parser::*;
 
 use std::collections::HashSet;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::str::{self, FromStr};
 
 use std::iter::Extend;
@@ -16,21 +17,30 @@ use crate::lexer::*;
 
 pub fn parse<'a>(tokens: &[Token<'a>]) -> Result<CompilationUnit, pom::Error> {
     (program() - end()).parse(tokens).map(|mut c| {
-        resolver::set_resolvers(&mut c); // set the resolvers in Invocations
+        let c = insert_exceptional_clauses(c);
+        let c = resolver::set_resolvers(c); // set the resolvers in Invocations
         c
     })
 }
 
-fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit> {
-    class()
-        .repeat(0..)
-        .map(|members| CompilationUnit { members })
+fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit<UnresolvedDeclaration>> {
+    class().repeat(0..).map(|members| CompilationUnit {
+        members: members.into_iter().map(Rc::new).collect(),
+    })
 }
 
-fn class<'a>() -> Parser<'a, Token<'a>, Declaration> {
-    let identifier_and_members =
-        (keyword("class") * identifier()) + (punct("{") * member().repeat(0..) - punct("}"));
-    identifier_and_members.map(|(name, members)| Declaration::Class { name, members })
+fn class<'a>() -> Parser<'a, Token<'a>, UnresolvedDeclaration> {
+    let identifier_and_members = (keyword("class") * identifier())
+        + extends().opt()
+        + (punct("{") * member().repeat(0..) - punct("}"));
+    identifier_and_members.map(
+        |(((name, extends)), members)| UnresolvedDeclaration::Class {
+            name,
+            members,
+            extends,
+            implements: vec![], // tdo
+        },
+    )
 }
 
 fn member<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
@@ -68,7 +78,7 @@ fn method<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
 fn constructor<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     let p = identifier() - punct("(") + parameters() - punct(")");
     // let specification = todo!();
-    let body = punct("{") * statement() - punct("}");
+    let body = constructor_body();
 
     (p + specification() + body).map(|(((name, params), specification), body)| {
         DeclarationMember::Constructor {
@@ -81,6 +91,10 @@ fn constructor<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
 }
 
 fn body<'a>() -> Parser<'a, Token<'a>, Statement> {
+    (punct("{") * statement().opt() - punct("}")).map(|s| s.unwrap_or(Statement::Skip))
+}
+
+fn constructor_body<'a>() -> Parser<'a, Token<'a>, Statement> {
     (punct("{") * statement().opt() - punct("}")).map(|s| s.unwrap_or(Statement::Skip))
 }
 
@@ -261,14 +275,32 @@ fn verification_expression<'a>() -> Parser<'a, Token<'a>, Expression> {
 }
 
 fn invocation<'a>() -> Parser<'a, Token<'a>, Invocation> {
-    (identifier() - punct(".") + identifier() - punct("(") + arguments() - punct(")")).map(
-        |((lhs, rhs), arguments)| Invocation::InvokeMethod {
-            lhs,
-            rhs,
+    let method_invocation = (identifier() - punct(".") + identifier() - punct("(") + arguments()
+        - punct(")"))
+    .map(|((lhs, rhs), arguments)| Invocation::InvokeMethod {
+        lhs,
+        rhs,
+        arguments,
+        resolved: None,
+    });
+
+    let rhs_constructor_call = (keyword("new") * identifier() - punct("(") + arguments()
+        - punct(")"))
+    .map(|(class_name, arguments)|
+        Invocation::InvokeConstructor {
+            class_name,
             arguments,
             resolved: None,
         },
-    )
+    );
+
+    let super_constructor_invocation = (keyword("super") * punct("(") * arguments() - punct(")"))
+        .map(|arguments| Invocation::InvokeSuperConstructor {
+            arguments,
+            resolved: None,
+        });
+
+    method_invocation | rhs_constructor_call | super_constructor_invocation
 }
 
 fn arguments<'a>() -> Parser<'a, Token<'a>, Vec<Expression>> {
@@ -538,16 +570,6 @@ fn rhs<'a>() -> Parser<'a, Token<'a>, Rhs> {
             index,
             type_: RuntimeType::UnknownRuntimeType,
         });
-    let rhs_constructor_call = (keyword("new") * identifier() - punct("(") + arguments()
-        - punct(")"))
-    .map(|(class_name, arguments)| Rhs::RhsCall {
-        invocation: Invocation::InvokeConstructor {
-            class_name,
-            arguments,
-            resolved: None,
-        },
-        type_: RuntimeType::UnknownRuntimeType,
-    });
     let rhs_array = (keyword("new") * (classtype() | primitivetype())
         + (punct("[") * integer() - punct("]")).repeat(1..))
     .map(|(array_type, sizes)| Rhs::RhsArray {
@@ -556,7 +578,7 @@ fn rhs<'a>() -> Parser<'a, Token<'a>, Rhs> {
         type_: RuntimeType::UnknownRuntimeType,
     });
 
-    rhs_call | rhs_field | rhs_elem | rhs_expression | rhs_constructor_call | rhs_array
+    rhs_call | rhs_field | rhs_elem | rhs_expression | rhs_array
 }
 
 fn parameters<'a>() -> Parser<'a, Token<'a>, Vec<Parameter>> {
@@ -668,16 +690,13 @@ fn identifier<'a>() -> Parser<'a, Token<'a>, Identifier> {
     })
 }
 
-// fn identifier_or_this<'a>() -> Parser<'a, Token<'a>, Identifier> {
-//     take(1).convert(|tokens| {
-//         let token = tokens[0]; // only one taken
-//         if let Token::Identifier(s) = token {
-//             Ok(s.to_string())
-//         } else {
-//             Err(())
-//         }
-//     }) | keyword("this").map(|_| "this".to_string())
-// }
+fn extends<'a>() -> Parser<'a, Token<'a>, Identifier> {
+    keyword("extends") * identifier()
+}
+
+fn implements<'a>() -> Parser<'a, Token<'a>, Vec<Identifier>> {
+    keyword("implements") * list(identifier(), punct(","))
+}
 
 fn punct<'a>(p: &'a str) -> Parser<'a, Token<'a>, Token> {
     sym(Token::Punctuator(p))
@@ -687,9 +706,9 @@ fn keyword<'a>(kw: &'a str) -> Parser<'a, Token<'a>, Token> {
     sym(Token::Keyword(kw))
 }
 
-fn exceptional_assignment(lhs: &Lhs, rhs: &Rhs) -> HashSet<Expression> {
+fn exceptional_assignment(lhs: &Lhs, rhs: &Rhs, class_names: &[String]) -> HashSet<Expression> {
     let mut lhs = exceptional_lhs(lhs);
-    lhs.extend(exceptional_rhs(rhs).into_iter());
+    lhs.extend(exceptional_rhs(rhs, class_names).into_iter());
     lhs
 }
 
@@ -722,7 +741,7 @@ fn exceptional_lhs(lhs: &Lhs) -> HashSet<Expression> {
     }
 }
 
-fn exceptional_rhs(rhs: &Rhs) -> HashSet<Expression> {
+fn exceptional_rhs(rhs: &Rhs, class_names: &[String]) -> HashSet<Expression> {
     match rhs {
         Rhs::RhsExpression { value, .. } => exceptional_expression(value),
         Rhs::RhsField { var, .. } => HashSet::from([equal(var.clone(), Expression::NULL)]),
@@ -748,8 +767,12 @@ fn exceptional_rhs(rhs: &Rhs) -> HashSet<Expression> {
                 exceptional_expression(index),
             )
         }
-        Rhs::RhsCall { invocation, type_ } => exceptional_invocation(invocation),
-        Rhs::RhsArray { array_type, sizes, type_ } => HashSet::new(),
+        Rhs::RhsCall { invocation, type_ } => exceptional_invocation(invocation, class_names),
+        Rhs::RhsArray {
+            array_type,
+            sizes,
+            type_,
+        } => HashSet::new(),
     }
 }
 
@@ -801,22 +824,17 @@ fn exceptional_expression(expression: &Expression) -> HashSet<Expression> {
     }
 }
 
-fn exceptional_invocation(invocation: &Invocation) -> HashSet<Expression> {
+fn exceptional_invocation(invocation: &Invocation, class_names: &[String]) -> HashSet<Expression> {
     match invocation {
-        Invocation::InvokeMethod {
-            lhs,
-            arguments,
-            resolved,
-            ..
-        } => {
+        Invocation::InvokeMethod { lhs, arguments, .. } => {
             let exceptional_args: HashSet<_> = arguments
                 .into_iter()
                 .flat_map(|arg| exceptional_expression(arg).into_iter())
                 .collect();
-            if let DeclarationMember::Method {
-                is_static: false, ..
-            } = resolved.as_ref().unwrap().1
-            {
+
+            let is_static_method = class_names.contains(lhs);
+
+            if !is_static_method {
                 let exp = ors(std::iter::once(equal(
                     Expression::Var {
                         var: lhs.clone(),
@@ -831,10 +849,11 @@ fn exceptional_invocation(invocation: &Invocation) -> HashSet<Expression> {
             }
         }
         Invocation::InvokeConstructor {
-            class_name,
-            arguments,
-            resolved,
-        } => todo!(),
+            ..
+        } => HashSet::new(),
+        Invocation::InvokeSuperConstructor {
+            ..
+        } => HashSet::new(),
     }
 }
 
@@ -865,30 +884,50 @@ fn create_exceptional_ites(conditions: HashSet<Expression>, body: Statement) -> 
 // } else {
 //  int x := o.y;
 // }`
-pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> CompilationUnit {
-    let members = compilation_unit.members.iter_mut().filter_map(|m| match m {
-        Declaration::Class { members, name } => Some((name, members)),
-    });
+pub fn insert_exceptional_clauses(
+    mut compilation_unit: CompilationUnit<UnresolvedDeclaration>,
+) -> CompilationUnit<UnresolvedDeclaration> {
+    // used to check if an invocation is a static call.
+    let class_names = compilation_unit
+        .members
+        .iter()
+        .map(AsRef::as_ref)
+        .map(|UnresolvedDeclaration::Class { name, .. }| name.clone())
+        .collect_vec();
 
-    for (_, class) in members {
-        let method_bodies = class.iter_mut().filter_map(|dcl| match dcl {
+    for class in compilation_unit.members.iter_mut() {
+        let UnresolvedDeclaration::Class {
+            name,
+            mut members,
+            extends,
+            implements,
+        } = class.as_ref().clone();
+
+        let method_bodies = members.iter_mut().filter_map(|dcl| match dcl {
             DeclarationMember::Method { body, .. } => Some(body),
+            DeclarationMember::Constructor {  body, .. } => Some(body),
             _ => None,
         });
         for body in method_bodies {
-            *body = helper(body.clone());
+            *body = helper(body.clone(), &class_names);
         }
+        *class = Rc::new(UnresolvedDeclaration::Class {
+            name,
+            members,
+            extends,
+            implements,
+        });
     }
 
-    fn helper(statement: Statement) -> Statement {
+    fn helper(statement: Statement, class_names: &[String]) -> Statement {
         match statement {
             Statement::Assign { lhs, rhs } => {
-                let conditions = exceptional_assignment(&lhs, &rhs);
+                let conditions = exceptional_assignment(&lhs, &rhs, class_names);
 
                 create_exceptional_ites(conditions, Statement::Assign { lhs, rhs })
             }
             Statement::Call { invocation } => {
-                let conditions = exceptional_invocation(&invocation);
+                let conditions = exceptional_invocation(&invocation, class_names);
 
                 create_exceptional_ites(conditions, Statement::Call { invocation })
             }
@@ -898,28 +937,28 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
                 false_body,
             } => Statement::Ite {
                 guard,
-                true_body: Box::new(helper(*true_body)),
-                false_body: Box::new(helper(*false_body)),
+                true_body: Box::new(helper(*true_body, class_names)),
+                false_body: Box::new(helper(*false_body, class_names)),
             },
 
             Statement::Seq { stat1, stat2 } => Statement::Seq {
-                stat1: Box::new(helper(*stat1)),
-                stat2: Box::new(helper(*stat2)),
+                stat1: Box::new(helper(*stat1, class_names)),
+                stat2: Box::new(helper(*stat2, class_names)),
             },
             Statement::While { guard, body } => Statement::While {
                 guard,
-                body: Box::new(helper(*body)),
+                body: Box::new(helper(*body, class_names)),
             },
             Statement::Try {
                 try_body,
                 catch_body,
             } => Statement::Try {
-                try_body: Box::new(helper(*try_body)),
-                catch_body: Box::new(helper(*catch_body)),
+                try_body: Box::new(helper(*try_body, class_names)),
+                catch_body: Box::new(helper(*catch_body, class_names)),
             },
 
             Statement::Block { body } => Statement::Block {
-                body: Box::new(helper(*body)),
+                body: Box::new(helper(*body, class_names)),
             },
             Statement::Return { expression } => {
                 if let Some(e) = expression {
@@ -939,8 +978,6 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
     }
     compilation_unit
 }
-
-
 
 fn union<T>(mut set1: HashSet<T>, set2: HashSet<T>) -> HashSet<T>
 where
@@ -1180,9 +1217,6 @@ fn parsing_exceptions() {
     let as_ref = tokens.as_slice();
     dbg!(as_ref);
     let c = parse(&as_ref).unwrap();
-    dbg!(&c);
-
-    let c = insert_exceptional_clauses(c);
     dbg!(&c);
 }
 

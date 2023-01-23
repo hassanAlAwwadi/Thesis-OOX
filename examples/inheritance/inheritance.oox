@@ -1,0 +1,95 @@
+class Foo {
+    int x;
+    int y;
+
+    Foo(int x, int y) {
+        this.x := x;
+        this.y := y;
+    }
+
+    void shift() {
+        int xBefore := this.x;
+        int yBefore := this.y;
+
+        int temp := this.x;
+        this.x := this.y;
+        this.y := temp;
+
+        int xAfter := this.x;
+        int yAfter := this.y;
+
+        assert xAfter == yBefore && yAfter == xBefore;
+    }
+
+    void something() {
+        assert false;
+    }
+}
+
+class Bar extends Foo {
+    int z;
+
+    Bar(int x, int y, int z) {
+        super(x, y);
+        this.z := z;
+    }
+
+    void shift() {
+        int xBefore := this.x;
+        int yBefore := this.y;
+        int zBefore := this.z;
+
+        //super.shift();
+        int temp := this.z;
+        this.z := this.y;
+        this.y := temp;
+
+        int xAfter := this.x;
+        int yAfter := this.y;
+        int zAfter := this.z;
+
+        assert false;
+        assert xAfter == yBefore && yAfter == zBefore && zAfter == xBefore;
+    }
+
+    void something() {
+        assert true;
+    }
+}
+
+class Main {
+    static void test1(int x, int y, int z) {
+        Foo foo := new Bar(x, y, z);
+        
+        // this should call Bar::something, since Bar has overwritten it.
+        foo.something();
+    }
+
+    static void test1_invalid(int x, int y, int z) {
+        Foo foo := new Foo(x, y);
+
+        // this should call Foo::something and thus fail.
+        foo.something();
+
+    }
+
+    static void test2(int x, int y, int z) {
+        Foo foo := new Bar(x, y, z);
+        
+        foo.shift();
+    }
+
+    static void test3(Foo foo) {
+        foo.shift();
+    }
+
+    // Bar::something is called here, which asserts true;
+    static void test4_valid(Bar bar) {
+        bar.something();
+    }
+
+    // Foo::something can be called here, which asserts false so this is invalid.
+    static void test4_invalid(Foo foo) {
+        foo.something();
+    }
+}
