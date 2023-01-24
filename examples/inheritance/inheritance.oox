@@ -61,7 +61,7 @@ class Main {
     static void test1(int x, int y, int z) {
         Foo foo := new Bar(x, y, z);
         
-        // this should call Bar::something, since Bar has overwritten it.
+        // this should call Bar::something, since Bar has overridden that method.
         foo.something();
     }
 

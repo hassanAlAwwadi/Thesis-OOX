@@ -2,7 +2,10 @@ use std::{borrow::Borrow, ops::Deref};
 
 use ordered_float::NotNan;
 
-use crate::{syntax::{DeclarationMember, Expression, Lit, NonVoidType, RuntimeType, Type}, exec::HeapValue};
+use crate::{
+    exec::HeapValue,
+    syntax::{DeclarationMember, Expression, Lit, NonVoidType, RuntimeType, Type},
+};
 
 pub trait Typeable {
     fn type_of(&self) -> RuntimeType;
@@ -117,19 +120,17 @@ impl Typeable for DeclarationMember {
             Constructor { name, .. } => RuntimeType::ReferenceRuntimeType {
                 type_: name.clone(),
             },
-            Method {
-                return_type,
-                ..
-            } => return_type.type_of(),
+            Method { return_type, .. } => return_type.type_of(),
             Field { type_, .. } => type_.type_of(),
         }
     }
 }
 
-
 impl Typeable for Type {
     fn type_of(&self) -> RuntimeType {
-        self.type_.as_ref().map_or(RuntimeType::VoidRuntimeType, |t|t.type_of())
+        self.type_
+            .as_ref()
+            .map_or(RuntimeType::VoidRuntimeType, |t| t.type_of())
     }
 }
 
@@ -139,5 +140,23 @@ impl Typeable for HeapValue {
             HeapValue::ObjectValue { type_, .. } => type_.clone(),
             HeapValue::ArrayValue { type_, .. } => type_.clone(),
         }
+    }
+}
+
+pub fn runtime_to_nonvoidtype(type_: RuntimeType) -> Option<NonVoidType> {
+    match type_ {
+        RuntimeType::UIntRuntimeType => Some(NonVoidType::UIntType),
+        RuntimeType::IntRuntimeType => Some(NonVoidType::IntType),
+        RuntimeType::FloatRuntimeType => Some(NonVoidType::FloatType),
+        RuntimeType::BoolRuntimeType => Some(NonVoidType::BoolType),
+        RuntimeType::StringRuntimeType => Some(NonVoidType::StringType),
+        RuntimeType::CharRuntimeType => Some(NonVoidType::CharType),
+        RuntimeType::ReferenceRuntimeType { type_ } => {
+            Some(NonVoidType::ReferenceType { identifier: type_ })
+        }
+        RuntimeType::ArrayRuntimeType { inner_type } => Some(NonVoidType::ArrayType {
+            inner_type: runtime_to_nonvoidtype(*inner_type).map(Box::new)?,
+        }),
+        _ => None,
     }
 }

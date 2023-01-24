@@ -43,8 +43,8 @@ fn class<'a>() -> Parser<'a, Token<'a>, UnresolvedDeclaration> {
     )
 }
 
-fn member<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
-    field() | constructor() | method().name("method")
+fn member<'a>() -> Parser<'a, Token<'a>, Rc<DeclarationMember>> {
+    (field() | constructor() | method().name("method")).map(Rc::new)
 
     // empty().map(|_| vec![])
 }
@@ -286,13 +286,11 @@ fn invocation<'a>() -> Parser<'a, Token<'a>, Invocation> {
 
     let rhs_constructor_call = (keyword("new") * identifier() - punct("(") + arguments()
         - punct(")"))
-    .map(|(class_name, arguments)|
-        Invocation::InvokeConstructor {
-            class_name,
-            arguments,
-            resolved: None,
-        },
-    );
+    .map(|(class_name, arguments)| Invocation::InvokeConstructor {
+        class_name,
+        arguments,
+        resolved: None,
+    });
 
     let super_constructor_invocation = (keyword("super") * punct("(") * arguments() - punct(")"))
         .map(|arguments| Invocation::InvokeSuperConstructor {
@@ -848,12 +846,8 @@ fn exceptional_invocation(invocation: &Invocation, class_names: &[String]) -> Ha
                 exceptional_args
             }
         }
-        Invocation::InvokeConstructor {
-            ..
-        } => HashSet::new(),
-        Invocation::InvokeSuperConstructor {
-            ..
-        } => HashSet::new(),
+        Invocation::InvokeConstructor { .. } => HashSet::new(),
+        Invocation::InvokeSuperConstructor { .. } => HashSet::new(),
     }
 }
 
@@ -903,14 +897,46 @@ pub fn insert_exceptional_clauses(
             implements,
         } = class.as_ref().clone();
 
-        let method_bodies = members.iter_mut().filter_map(|dcl| match dcl {
-            DeclarationMember::Method { body, .. } => Some(body),
-            DeclarationMember::Constructor {  body, .. } => Some(body),
-            _ => None,
-        });
-        for body in method_bodies {
-            *body = helper(body.clone(), &class_names);
-        }
+        let members = members
+            .iter()
+            .map(|dcl| match dcl.as_ref().clone() {
+                DeclarationMember::Method {
+                    body,
+                    is_static,
+                    return_type,
+                    name,
+                    params,
+                    specification,
+                } => {
+                    let body = helper(body, &class_names);
+                    DeclarationMember::Method {
+                        body,
+                        is_static,
+                        return_type,
+                        name,
+                        params,
+                        specification,
+                    }
+                }
+                DeclarationMember::Constructor {
+                    body,
+                    name,
+                    params,
+                    specification,
+                } => {
+                    let body = helper(body, &class_names);
+                    DeclarationMember::Constructor {
+                        name,
+                        params,
+                        specification,
+                        body,
+                    }
+                }
+                field @ DeclarationMember::Field { .. } => field,
+            })
+            .map(Rc::new)
+            .collect_vec();
+
         *class = Rc::new(UnresolvedDeclaration::Class {
             name,
             members,

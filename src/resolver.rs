@@ -1,6 +1,6 @@
 // since the class and method declaration must be inserted into the abstract syntax tree, this mess is needed.
 
-use std::{collections::HashMap, ops::Deref, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, ops::Deref, rc::Rc};
 
 use itertools::Itertools;
 
@@ -24,37 +24,85 @@ pub fn set_resolvers(
             mut members,
             extends,
             implements,
+            subclasses,
         } = class.as_ref().clone();
 
-        let method_bodies = members.iter_mut().filter_map(|dcl| match dcl {
-            DeclarationMember::Method { name, body, params, .. } => Some((name, body, params)),
-            DeclarationMember::Constructor { name, params, body, .. } => Some((name, body, params)),
-            _ => None,
-        });
-        for (method_name, body, params) in method_bodies {
-            let mut local_variables: HashMap<&String, NonVoidType> = HashMap::new(); // 'this' must also be set
-            for param in params {
-                local_variables.insert(&param.name, param.type_.to_owned());
-            }
-            helper(
-                body,
-                &old_members,
-                &name,
-                &mut local_variables,
-                extends.as_ref(),
-            );
-        }
+        let members = members
+            .into_iter()
+            .map(|dcl| match dcl.as_ref().clone() {
+                DeclarationMember::Method {
+                    name: method_name,
+                    body,
+                    params,
+                    is_static,
+                    return_type,
+                    specification,
+                } => {
+                    let mut local_variables: HashMap<&String, NonVoidType> = HashMap::new(); // 'this' must also be set
+                    for param in &params {
+                        local_variables.insert(&param.name, param.type_.to_owned());
+                    }
+                    let mut new_body = body;
+                    helper(
+                        &mut new_body,
+                        &old_members,
+                        &name,
+                        &mut local_variables,
+                        extends.as_ref(),
+                    );
+
+                    DeclarationMember::Method {
+                        name: method_name,
+                        body: new_body,
+                        params,
+                        is_static,
+                        return_type,
+                        specification,
+                    }
+                }
+                DeclarationMember::Constructor {
+                    name,
+                    params,
+                    body,
+                    specification,
+                } => {
+                    let mut local_variables: HashMap<&String, NonVoidType> = HashMap::new(); // 'this' must also be set
+                    for param in &params {
+                        local_variables.insert(&param.name, param.type_.to_owned());
+                    }
+                    let mut new_body = body;
+                    helper(
+                        &mut new_body,
+                        &old_members,
+                        &name,
+                        &mut local_variables,
+                        extends.as_ref(),
+                    );
+
+                    DeclarationMember::Constructor {
+                        body: new_body,
+                        name,
+                        params,
+                        specification,
+                    }
+                }
+                field => field,
+            })
+            .map(Rc::new)
+            .collect_vec();
 
         *class = Rc::new(Declaration::Class {
             name,
             members,
             extends,
             implements,
+            subclasses,
         });
     }
     compilation_unit
 }
 
+/// Set resolvers in the body statement
 fn helper<'a>(
     statement: &'a mut Statement,
     declarations: &Vec<Rc<Declaration>>,
@@ -83,10 +131,9 @@ fn helper<'a>(
                     resolved,
                     ..
                 } => constructor_call_helper(resolved, declarations, class_name),
-                Invocation::InvokeSuperConstructor {
-                    resolved,
-                    ..
-                } => constructor_super_call_helper(class_name, resolved, extends),
+                Invocation::InvokeSuperConstructor { resolved, .. } => {
+                    constructor_super_call_helper(class_name, resolved, extends)
+                }
             }
         }
 
@@ -169,36 +216,52 @@ fn helper<'a>(
         _ => (),
     }
 
+    /// This method resolves the invocation by finding the declaration corresponding to the class type.
+    /// Then it looks for any method that could be called by this invocation
+    /// either by superclasses or subclasses.
+    ///
+    /// The result is added to resolved.
     #[inline(always)]
     fn method_call_helper(
-        resolved: &mut Option<Box<(Declaration, DeclarationMember)>>,
+        resolved: &mut Option<Vec<(Declaration, Rc<DeclarationMember>)>>,
         declarations: &Vec<Rc<Declaration>>,
-        lhs: &String,
-        rhs: &String,
+        class_name: &String,
+        method_name: &String,
     ) {
-        for class in declarations {
-            let Declaration::Class {
-                name: class_name,
-                members,
-                ..
-            } = class.as_ref();
-            for member in members {
-                if let DeclarationMember::Method {
-                    name: member_name, ..
-                } = &member
-                {
-                    //dbg!("{:?}, {:?}, {:?}, {:?}", lhs, rhs, class_name, member_name);
-                    if lhs == class_name && rhs == member_name {
-                        *resolved = Some(Box::new((class.as_ref().clone(), member.clone())));
-                        // very bad
-                    }
-                }
+        let class = declarations
+            .iter()
+            .find(|declaration| {
+                let Declaration::Class { name, .. } = declaration.as_ref();
+                class_name == name
+            })
+            .unwrap();
+
+        let Declaration::Class {
+            name: other_class_name,
+            members,
+            extends,
+            subclasses,
+            ..
+        } = class.as_ref();
+
+        let method = members.iter().find(|member| {
+            if let DeclarationMember::Method { name, .. } = member.as_ref() {
+                name == method_name
+            } else {
+                false
             }
-        }
+        }).unwrap();
+
+        let mut resolved_so_far = vec![(class.as_ref().clone(), method.clone())];
+
+        // Find other potential methods in superclasses and subclasses
+
+
+        *resolved = Some(resolved_so_far);
     }
 
     fn constructor_call_helper(
-        resolved: &mut Option<Box<(Declaration, DeclarationMember)>>,
+        resolved: &mut Option<Box<(Declaration, Rc<DeclarationMember>)>>,
         declarations: &Vec<Rc<Declaration>>,
         called_constructor: &String,
     ) {
@@ -208,7 +271,7 @@ fn helper<'a>(
                 if let DeclarationMember::Constructor {
                     name: constructor_name,
                     ..
-                } = &member
+                } = member.as_ref()
                 {
                     //dbg!("{:?}, {:?}, {:?}, {:?}", lhs, rhs, class_name, member_name);
                     if called_constructor == constructor_name {
@@ -222,7 +285,7 @@ fn helper<'a>(
 
     fn constructor_super_call_helper(
         class_name: &String,
-        resolved: &mut Option<Box<(Declaration, DeclarationMember)>>,
+        resolved: &mut Option<Box<(Declaration, Rc<DeclarationMember>)>>,
         extends: Option<&Rc<Declaration>>,
     ) {
         let extends =
@@ -232,12 +295,9 @@ fn helper<'a>(
         let Declaration::Class { members, .. } = extends.as_ref();
 
         for member in members {
-            if let DeclarationMember::Constructor {
-                ..
-            } = &member
-            {
+            if let DeclarationMember::Constructor { .. } = member.as_ref() {
                 *resolved = Some(Box::new((extends.as_ref().clone(), member.clone())));
-                    // very bad
+                // very bad
             }
         }
     }
@@ -282,6 +342,7 @@ fn resolve_inheritance(mut unresolved: Vec<Rc<UnresolvedDeclaration>>) -> Vec<Rc
             Rc::new(Declaration::Class {
                 name,
                 extends: None,
+                subclasses: RefCell::new(Vec::new()),
                 implements: vec![],
                 members,
             })
@@ -303,15 +364,21 @@ fn resolve_inheritance(mut unresolved: Vec<Rc<UnresolvedDeclaration>>) -> Vec<Rc
                     ..
                 } = d.as_ref();
                 &extends == other_class_name
-            });
+            }).cloned();
 
             if let Some(class_it_extends) = class_it_extends {
-                resolved.push(Rc::new(Declaration::Class {
+                let resolved_class = Rc::new(Declaration::Class {
                     name: name.clone(),
                     extends: Some(class_it_extends.clone()),
+                    subclasses: RefCell::new(Vec::new()),
                     members: members.clone(),
                     implements: vec![],
-                }));
+                });
+                resolved.push(resolved_class.clone());
+                // Also add this class to the list of extended classes of the superclass.
+                let Declaration::Class { subclasses, .. } = class_it_extends.as_ref();
+                subclasses.borrow_mut().push(resolved_class);
+
                 false
             } else {
                 true

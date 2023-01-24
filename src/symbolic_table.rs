@@ -15,7 +15,7 @@ impl SymbolicTable {
             let Declaration::Class {name: class_name, members, .. } = member.as_ref();
             let mut fields = Vec::new();
             for declaration_member in  members {
-                match declaration_member {
+                match declaration_member.as_ref() {
                     DeclarationMember::Field { type_, name } => fields.push((name.to_owned(), type_.to_owned())),
                     _ => ()
                 };

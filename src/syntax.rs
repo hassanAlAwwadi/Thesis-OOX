@@ -20,7 +20,7 @@ impl CompilationUnit {
         &self,
         identifier: &str,
         class_name: Option<&str>,
-    ) -> Option<DeclarationMember> {
+    ) -> Option<Rc<DeclarationMember>> {
         for member in &self.members {
             let Declaration::Class { members, name, .. } = member.as_ref();
             if let Some(class_name) = class_name {
@@ -29,7 +29,7 @@ impl CompilationUnit {
                 }
             }
             for declaration_member in members {
-                match declaration_member {
+                match declaration_member.as_ref() {
                     DeclarationMember::Constructor { name, .. } if identifier == name => {
                         return Some(declaration_member.clone());
                     }
@@ -49,8 +49,9 @@ pub enum Declaration {
     Class {
         name: Identifier,
         extends: Option<Rc<Declaration>>,
+        subclasses: RefCell<Vec<Rc<Declaration>>>, // classes that extend from this class.
         implements: Vec<Rc<Declaration>>,
-        members: Vec<DeclarationMember>,
+        members: Vec<Rc<DeclarationMember>>,
     },
 }
 
@@ -60,12 +61,14 @@ impl Debug for Declaration {
             Self::Class {
                 name,
                 extends,
+                subclasses,
                 implements,
                 members,
             } => f
                 .debug_struct("Class")
                 .field("name", name)
                 .field("extends",&extends.is_some())
+                .field("subclasses", &subclasses.borrow().len())
                 .field("implements", &implements.len())
                 .field("members", members)
                 .finish(),
@@ -81,7 +84,7 @@ pub enum UnresolvedDeclaration {
         name: Identifier,
         extends: Option<Identifier>,
         implements: Vec<Identifier>,
-        members: Vec<DeclarationMember>,
+        members: Vec<Rc<DeclarationMember>>,
     },
 }
 
@@ -198,29 +201,29 @@ pub enum Invocation {
         lhs: Identifier,
         rhs: Identifier,
         arguments: Vec<Expression>,
-        resolved: Option<Box<(Declaration, DeclarationMember)>>, // What is this? -- potential case for Weak<..>
+        resolved: Option<Vec<(Declaration, Rc<DeclarationMember>)>>, // What is this? -- potential case for Weak<..>
     },
     InvokeConstructor {
         class_name: Identifier,
         arguments: Vec<Expression>,
-        resolved: Option<Box<(Declaration, DeclarationMember)>>, // What is this?
+        resolved: Option<Box<(Declaration, Rc<DeclarationMember>)>>, // What is this?
     },
     InvokeSuperConstructor {
         arguments: Vec<Expression>,
-        resolved: Option<Box<(Declaration, DeclarationMember)>>,
+        resolved: Option<Box<(Declaration, Rc<DeclarationMember>)>>,
     },
 }
 
 impl Invocation {
-    pub fn resolved(&self) -> Option<&(Declaration, DeclarationMember)> {
-        match &self {
-            Invocation::InvokeMethod { resolved, .. } => resolved.as_ref().map(Box::as_ref),
-            Invocation::InvokeConstructor { resolved, .. } => resolved.as_ref().map(Box::as_ref),
-            Invocation::InvokeSuperConstructor { resolved, .. } => {
-                resolved.as_ref().map(Box::as_ref)
-            }
-        }
-    }
+    // pub fn resolved(&self) -> impl Iterator<Item=&(Declaration, DeclarationMember)>{
+    //     match &self {
+    //         Invocation::InvokeMethod { resolved, .. } => resolved.as_ref().unwrap().iter(),
+    //         Invocation::InvokeConstructor { resolved, .. } => resolved.as_ref().map(Box::as_ref).map(std::iter::once),
+    //         Invocation::InvokeSuperConstructor { resolved, .. } => {
+    //             resolved.as_ref().map(Box::as_ref)
+    //         }
+    //     }
+    // }
 
     pub fn arguments(&self) -> &Vec<Expression> {
         match &self {

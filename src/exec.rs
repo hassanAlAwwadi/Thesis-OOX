@@ -5,15 +5,18 @@ use std::{
     collections::{HashMap, HashSet},
     ops::{AddAssign, Deref},
     rc::Rc,
-    sync::Mutex, string,
+    string,
+    sync::Mutex,
 };
 
 use itertools::{Either, Itertools};
 use num::One;
 use ordered_float::NotNan;
-use slog::{info, o, Drain, Level, Logger, debug, Value, log};
+use slog::{debug, info, log, o, Drain, Level, Logger, Value};
 use slog::{Key, Record, Result, Serializer};
 use z3::SatResult;
+
+mod invocation;
 
 use crate::{
     cfg::{labelled_statements, CFGStatement},
@@ -21,6 +24,7 @@ use crate::{
     dsl::{equal, ite, negate, or, toIntExpr},
     eval::{self, evaluate, evaluateAsInt},
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
+    exec::invocation::{non_static_resolved_method_invocation, single_method_invocation},
     lexer::tokens,
     parser_pom::{insert_exceptional_clauses, parse},
     stack::{lookup_in_stack, write_to_stack, StackFrame},
@@ -29,7 +33,7 @@ use crate::{
         BinOp, CompilationUnit, Declaration, DeclarationMember, Expression, Identifier, Invocation,
         Lhs, Lit, NonVoidType, Parameter, Reference, Rhs, RuntimeType, Statement, UnOp,
     },
-    typeable::Typeable,
+    typeable::{runtime_to_nonvoidtype, Typeable},
     utils, z3_checker,
 };
 
@@ -75,6 +79,7 @@ impl HeapValue {
 type PathConstraints = HashSet<Expression>;
 
 // refactor to Vec<Reference>? neins, since it can also be ITE and stuff, can it though?
+// nope it can't, refactor this!
 pub type AliasMap = HashMap<String, Vec<Rc<Expression>>>;
 
 enum Output {
@@ -237,7 +242,7 @@ fn sym_exec(
                 }
             } else {
                 // Function exit of the main function under verification
-                if let CFGStatement::FunctionExit(_) = program[&state.pc] {
+                if let CFGStatement::FunctionExit { .. } = &program[&state.pc] {
                     return SymResult::Valid;
                 } else {
                     return SymResult::Invalid;
@@ -385,7 +390,6 @@ enum ActionResult {
     StateSplit((Rc<Expression>, Rc<Expression>, Rc<Expression>, Identifier)),
 }
 
-
 fn action(
     state: &mut State,
     program: &HashMap<u64, CFGStatement>,
@@ -395,11 +399,10 @@ fn action(
     let pc = state.pc;
     let action = &program[&pc];
 
-
     // debug!(state.logger, "Action";
     //  "action" => format!("{:?}", &action),
-    //  "stack" => ?state.stack.last().map(|s| &s.params), 
-    //  "heap" => ?state.heap, 
+    //  "stack" => ?state.stack.last().map(|s| &s.params),
+    //  "heap" => ?state.heap,
     //  "alias_map" => ?state.alias_map);
     dbg!(
         &action,
@@ -479,12 +482,13 @@ fn action(
         }
         CFGStatement::Statement(Statement::Return { expression }) => {
             if let Some(expression) = expression {
+                let expression = evaluate(state, Rc::new(expression.clone()), st);
                 let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
-                params.insert("retval".to_string(), Rc::new(expression.clone()));
+                params.insert("retval".to_string(), expression);
             }
             ActionResult::Continue
         }
-        CFGStatement::FunctionEntry(_name) => {
+        CFGStatement::FunctionEntry { .. } => {
             // only check preconditions when it's the first method called??
             // we assume that the previous stackframe is of this method
             let StackFrame { current_member, .. } = state.stack.last().unwrap();
@@ -535,7 +539,10 @@ fn action(
 
             ActionResult::Continue
         }
-        CFGStatement::FunctionExit(_name) => {
+        CFGStatement::FunctionExit {
+            class_name,
+            method_name,
+        } => {
             state.exception_handler.decrement_handler();
 
             let StackFrame {
@@ -556,16 +563,26 @@ fn action(
                 // we are pbobably done now
             } else {
                 //dbg!(&state.stack);
-                let rv = state.stack.last().unwrap().params.get(&retval()).unwrap();
-                let return_value = evaluate(state, rv.clone(), st);
 
-                let StackFrame { pc, t, .. } = state.stack.pop().unwrap();
-                if let Some(lhs) = t {
-                    // perhaps also write retval to current stack?
-                    // will need to do this due to this case: `return o.func();`
+                let StackFrame {
+                    pc,
+                    t,
+                    params,
+                    current_member,
+                } = state.stack.pop().unwrap();
+                let return_type = current_member.type_of();
+                if return_type != RuntimeType::VoidRuntimeType {
+                    if let Some(lhs) = t {
+                        let rv = params.get(&retval()).unwrap();
+                        let return_value = evaluate(state, rv.clone(), st);
 
-                    execute_assign(state, &lhs, return_value, st);
+                        // perhaps also write retval to current stack?
+                        // will need to do this due to this case: `return o.func();`
+
+                        execute_assign(state, &lhs, return_value, st);
+                    }
                 }
+
                 ActionResult::Return(pc)
             }
         }
@@ -702,118 +719,115 @@ fn exec_invocation(
     st: &SymbolicTable,
 ) -> ActionResult {
     dbg!(invocation);
-    let (
-        Declaration::Class {
-            name: class_name, ..
-        },
-        member,
-    ) = invocation.resolved().unwrap(); // i don't get this
 
     state.exception_handler.increment_handler();
 
-    match member {
-        // ??
-        DeclarationMember::Method {
-            is_static: true,
-            return_type,
-            name,
-            params,
-            specification,
-            body,
+    match invocation {
+        Invocation::InvokeMethod {
+            resolved,
+            lhs: invocation_lhs,
+            arguments,
+            ..
         } => {
-            // evaluate arguments
-            let arguments = invocation
-                .arguments()
-                .into_iter()
-                .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
-                .collect::<Vec<_>>();
+            let potential_methods = resolved.as_ref().unwrap();
 
-            exec_static_method(
-                state,
-                return_point,
-                member.clone(),
-                lhs,
-                &arguments,
-                params,
-                st,
-            );
-            let next_entry = find_entry_for_static_invocation(invocation.identifier(), program);
-
-            ActionResult::FunctionCall(next_entry)
-        }
-        DeclarationMember::Method {
-            is_static: false,
-            return_type,
-            name,
-            params,
-            specification,
-            body,
-        } => {
-            // evaluate arguments
-            let arguments = invocation
-                .arguments()
-                .into_iter()
-                .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
-                .collect::<Vec<_>>();
-
-            let invocation_lhs = if let Invocation::InvokeMethod { lhs, .. } = invocation {
-                lhs
-            } else {
-                panic!("expected invokemethod");
-            };
-
-            let this = (
-                NonVoidType::ReferenceType {
-                    identifier: class_name.to_string(),
-                },
-                invocation_lhs.to_owned(),
-            );
-
-            exec_method(
-                state,
-                return_point,
-                member.clone(),
-                lhs,
-                &arguments,
-                params,
-                st,
-                this,
-            );
-            let next_entry = find_entry_for_static_invocation(invocation.identifier(), program);
-
-            ActionResult::FunctionCall(next_entry)
-        }
-        DeclarationMember::Constructor {
-            name,
-            params,
-            specification,
-            body,
-        } => {
-            // evaluate arguments
-            let arguments = invocation
-                .arguments()
-                .into_iter()
-                .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
-                .collect::<Vec<_>>();
-
-            let this_param = Parameter {
-                type_: NonVoidType::ReferenceType {
-                    identifier: class_name.to_string(),
-                },
-                name: "this".to_owned(),
-            };
-            if let Invocation::InvokeSuperConstructor { .. } = invocation {
-                exec_super_constructor(
+            if potential_methods.len() == 1 {
+                // potentially a static method.
+                let potential_method = &potential_methods[0];
+                // A static method, or a method that is not overriden anywhere (non-polymorphic)
+                let next_entry = invocation::single_method_invocation(
                     state,
+                    invocation,
+                    potential_method,
                     return_point,
-                    member.clone(),
                     lhs,
-                    &arguments,
-                    params,
+                    program,
                     st,
-                    this_param
-                )
+                );
+                return ActionResult::FunctionCall(next_entry);
             } else {
+                dbg!(invocation_lhs);
+                
+                return invocation::multiple_method_invocation(state, invocation_lhs, invocation, potential_methods, return_point, lhs, program, st);
+            }
+        }
+        // (Invocation::InvokeMethod { resolved: Some((DeclarationMember::Method {
+        //     is_static: false,
+        //     return_type,
+        //     name,
+        //     params,
+        //     specification,
+        //     body,
+        // })), .. }) => {
+        //     // evaluate arguments
+        //     let arguments = invocation
+        //         .arguments()
+        //         .into_iter()
+        //         .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
+        //         .collect::<Vec<_>>();
+
+        //     let invocation_lhs = if let Invocation::InvokeMethod { lhs, .. } = invocation {
+        //         lhs
+        //     } else {
+        //         panic!("expected invokemethod");
+        //     };
+        //     dbg!(invocation_lhs);
+        //     let object = lookup_in_stack(invocation_lhs, &state.stack).unwrap();
+        //     // object can be either a concrete reference to a heap object, or a symbolic object
+        //     // the latter means that we have to split states here, one path for every alias object types,
+        //     // if there is only one possible then we can also continue with that path
+        //     let type_ = match object.as_ref() {
+        //         Expression::Ref { ref_, type_ } => type_,
+        //         Expression::SymbolicRef { var, type_ } => todo!(),
+        //         _ => unreachable!(),
+        //     };
+
+        //     let this = (type_.clone(), invocation_lhs.to_owned());
+
+        //     exec_method(
+        //         state,
+        //         return_point,
+        //         member.clone(),
+        //         lhs,
+        //         &arguments,
+        //         &params,
+        //         st,
+        //         this,
+        //     );
+        //     // TODO: add lookup for overrides, in case of an object with superclasses
+        //     let next_entry =
+        //         find_entry_for_static_invocation(class_name, invocation.identifier(), program);
+
+        //     ActionResult::FunctionCall(next_entry)
+        // }
+        Invocation::InvokeConstructor { resolved, .. } => {
+            let (
+                Declaration::Class {
+                    name: class_name, ..
+                },
+                member,
+            ) = resolved.as_ref().map(AsRef::as_ref).unwrap();
+
+            if let DeclarationMember::Constructor {
+                name,
+                params,
+                specification,
+                body,
+            } = member.as_ref()
+            {
+                // evaluate arguments
+                let arguments = invocation
+                    .arguments()
+                    .into_iter()
+                    .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
+                    .collect::<Vec<_>>();
+
+                let this_param = Parameter {
+                    type_: NonVoidType::ReferenceType {
+                        identifier: class_name.to_string(),
+                    },
+                    name: "this".to_owned(),
+                };
                 exec_constructor(
                     state,
                     return_point,
@@ -823,22 +837,83 @@ fn exec_invocation(
                     params,
                     class_name,
                     st,
-                    this_param
+                    this_param,
                 );
-            }
 
-            let next_entry = find_entry_for_static_invocation(&name, program);
-            ActionResult::FunctionCall(next_entry)
+                let next_entry = find_entry_for_static_invocation(&class_name, &name, program);
+                ActionResult::FunctionCall(next_entry)
+            } else {
+                panic!()
+            }
         }
-        DeclarationMember::Field { type_, name } => todo!(),
+        Invocation::InvokeSuperConstructor { resolved, .. } => {
+            let (
+                Declaration::Class {
+                    name: class_name, ..
+                },
+                member,
+            ) = resolved.as_ref().map(AsRef::as_ref).unwrap();
+
+            if let DeclarationMember::Constructor {
+                name,
+                params,
+                specification,
+                body,
+            } = member.as_ref()
+            {
+                // evaluate arguments
+                let arguments = invocation
+                    .arguments()
+                    .into_iter()
+                    .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
+                    .collect::<Vec<_>>();
+
+                let this_param = Parameter {
+                    type_: NonVoidType::ReferenceType {
+                        identifier: class_name.to_string(),
+                    },
+                    name: "this".to_owned(),
+                };
+                exec_super_constructor(
+                    state,
+                    return_point,
+                    member.clone(),
+                    lhs,
+                    &arguments,
+                    params,
+                    st,
+                    this_param,
+                );
+                let next_entry = find_entry_for_static_invocation(&class_name, &name, program);
+                ActionResult::FunctionCall(next_entry)
+            } else {
+                panic!()
+            }
+        }
+        // (_, DeclarationMember::Field { type_, name }) => todo!(),
+        (_) => panic!("Incorrect pair of Invocation and DeclarationMember"),
     }
 }
 
-fn find_entry_for_static_invocation(invocation: &str, program: &HashMap<u64, CFGStatement>) -> u64 {
-    dbg!(invocation);
+fn find_entry_for_static_invocation(
+    class_name: &str,
+    method_name: &str,
+    program: &HashMap<u64, CFGStatement>,
+) -> u64 {
+    // dbg!(invocation);
     let (entry, _) = program
         .iter()
-        .find(|(k, v)| **v == CFGStatement::FunctionEntry(invocation.to_string()))
+        .find(|(k, v)| {
+            if let CFGStatement::FunctionEntry {
+                class_name: other_class_name,
+                method_name: other_method_name,
+            } = *v
+            {
+                other_class_name == class_name && other_method_name == method_name
+            } else {
+                false
+            }
+        })
         .unwrap();
 
     *entry
@@ -847,20 +922,20 @@ fn find_entry_for_static_invocation(invocation: &str, program: &HashMap<u64, CFG
 fn exec_method(
     state: &mut State,
     return_point: u64,
-    member: DeclarationMember,
+    member: Rc<DeclarationMember>,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
     st: &SymbolicTable,
-    this: (NonVoidType, Identifier),
+    this: (RuntimeType, Identifier),
 ) {
     let this_param = Parameter {
-        type_: this.0.clone(),
+        type_: runtime_to_nonvoidtype(this.0.clone()).expect("concrete, nonvoid type"),
         name: "this".to_owned(),
     };
     let this_expr = Expression::Var {
         var: this.1.clone(),
-        type_: this.0.type_of(),
+        type_: this.0,
     };
     let parameters = std::iter::once(&this_param).chain(parameters.iter());
     let arguments = std::iter::once(Rc::new(this_expr)).chain(arguments.iter().cloned());
@@ -878,7 +953,7 @@ fn exec_method(
 fn exec_static_method(
     state: &mut State,
     return_point: u64,
-    member: DeclarationMember,
+    member: Rc<DeclarationMember>,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
@@ -897,7 +972,7 @@ fn exec_static_method(
 fn exec_constructor(
     state: &mut State,
     return_point: u64,
-    member: DeclarationMember,
+    member: Rc<DeclarationMember>,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
@@ -933,7 +1008,7 @@ fn exec_constructor(
 fn exec_super_constructor(
     state: &mut State,
     return_point: u64,
-    member: DeclarationMember,
+    member: Rc<DeclarationMember>,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
@@ -943,7 +1018,8 @@ fn exec_super_constructor(
     let parameters = std::iter::once(&this_param).chain(parameters.iter());
 
     // instead of allocating a new object, add the new fields to the existing 'this' object.
-    let object_ref = lookup_in_stack("this", &state.stack).expect("super() is called in a constructor with a 'this' object on the stack");
+    let object_ref = lookup_in_stack("this", &state.stack)
+        .expect("super() is called in a constructor with a 'this' object on the stack");
     let arguments = std::iter::once(object_ref).chain(arguments.iter().cloned());
 
     push_stack_frame(
@@ -959,7 +1035,7 @@ fn exec_super_constructor(
 fn push_stack_frame<'a, P>(
     state: &mut State,
     return_point: u64,
-    member: DeclarationMember,
+    member: Rc<DeclarationMember>,
     lhs: Option<Lhs>,
     params: P,
     st: &SymbolicTable,
@@ -1564,7 +1640,7 @@ fn exec_assume(state: &mut State, assumption: Rc<Expression>, st: &SymbolicTable
     true
 }
 
-fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
+fn verify(file_content: &str, class_name: &str, method_name: &str, k: u64) -> SymResult {
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
     // dbg!(as_ref);
@@ -1573,25 +1649,8 @@ fn verify_file(file_content: &str, method: &str, k: u64) -> SymResult {
 
     // dbg!(&c);
 
-    let declaration_member_initial_function = c.find_declaration(method, None).unwrap();
+    let initial_function = c.find_declaration(method_name, class_name.into()).unwrap();
 
-    verify(c, declaration_member_initial_function, k)
-}
-
-fn verify_file_class_method(file_content: &str, class: &str, method: &str, k: u64) -> SymResult {
-    let tokens = tokens(file_content);
-    let as_ref = tokens.as_slice();
-    // dbg!(as_ref);
-    let c = parse(&tokens);
-    let c = c.unwrap();
-
-    // dbg!(&c);
-
-    let declaration_member_initial_function = c.find_declaration(method, class.into()).unwrap();
-    verify(c, declaration_member_initial_function, k)
-}
-
-fn verify(c: CompilationUnit, initial_function: DeclarationMember, k: u64) -> SymResult {
     let mut i = 0;
     let symbolic_table = SymbolicTable::from_ast(&c);
     let (result, flw) = labelled_statements(c, &mut i);
@@ -1605,13 +1664,8 @@ fn verify(c: CompilationUnit, initial_function: DeclarationMember, k: u64) -> Sy
     // dbg!(&flows);
     // panic!();
 
-    if let DeclarationMember::Method {
-        params,
-        name: method_name,
-        ..
-    } = &initial_function
-    {
-        let pc = find_entry_for_static_invocation(method_name, &program);
+    if let DeclarationMember::Method { params, name, .. } = initial_function.as_ref() {
+        let pc = find_entry_for_static_invocation(class_name, method_name, &program);
         // dbg!(&params);
         let params = params
             .iter()
@@ -1667,31 +1721,34 @@ fn verify(c: CompilationUnit, initial_function: DeclarationMember, k: u64) -> Sy
 #[test]
 fn sym_exec_of_absolute_simplest() {
     let file_content = include_str!("../examples/absolute_simplest.oox");
-    assert_eq!(verify_file(file_content, "f", 20), SymResult::Valid);
+    assert_eq!(verify(file_content, "Foo", "f", 20), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_min() {
     let file_content = include_str!("../examples/psv/min.oox");
-    assert_eq!(verify_file(file_content, "min", 20), SymResult::Valid);
+    assert_eq!(verify(file_content, "Foo", "min", 20), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_method() {
     let file_content = include_str!("../examples/psv/method.oox");
-    assert_eq!(verify_file(file_content, "min", 20), SymResult::Valid);
+    assert_eq!(verify(file_content, "Main", "min", 20), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_fib() {
     let file_content = std::fs::read_to_string("./examples/psv/fib.oox").unwrap();
-    assert_eq!(verify_file(&file_content, "main", 70), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "main", 70), SymResult::Valid);
 }
 
 #[test]
 fn sym_test_failure() {
     let file_content = std::fs::read_to_string("./examples/psv/test.oox").unwrap();
-    assert_eq!(verify_file(&file_content, "main", 30), SymResult::Invalid);
+    assert_eq!(
+        verify(&file_content, "Main", "main", 30),
+        SymResult::Invalid
+    );
 }
 
 #[test]
@@ -1699,7 +1756,7 @@ fn sym_exec_div_by_n() {
     let file_content = std::fs::read_to_string("./examples/psv/divByN.oox").unwrap();
     // so this one is invalid at k = 100, in OOX it's invalid at k=105, due to exceptions (more if statements are added)
     assert_eq!(
-        verify_file(&file_content, "divByN_invalid", 100),
+        verify(&file_content, "Main", "divByN_invalid", 100),
         SymResult::Invalid
     );
 }
@@ -1708,20 +1765,20 @@ fn sym_exec_div_by_n() {
 fn sym_exec_nonstatic_function() {
     let file_content = std::fs::read_to_string("./examples/nonstatic_function.oox").unwrap();
     // so this one is invalid at k = 100, in OOX it's invalid at k=105, due to exceptions (more if statements are added)
-    assert_eq!(verify_file(&file_content, "f", 20), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "f", 20), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_linked_list1() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
-    assert_eq!(verify_file(&file_content, "test2", 90), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Node", "test2", 90), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_linked_list1_invalid() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
     assert_eq!(
-        verify_file(&file_content, "test2_invalid", 90),
+        verify(&file_content, "Node", "test2_invalid", 90),
         SymResult::Invalid
     );
 }
@@ -1731,7 +1788,7 @@ fn sym_exec_linked_list3_invalid() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
     // at k=80 it fails, after ~170 sec in hs oox, rs oox does this in ~90 sec
     assert_eq!(
-        verify_file(&file_content, "test3_invalid1", 110),
+        verify(&file_content, "Node", "test3_invalid1", 110),
         SymResult::Invalid
     );
 }
@@ -1739,14 +1796,14 @@ fn sym_exec_linked_list3_invalid() {
 #[test]
 fn sym_exec_linked_list4() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
-    assert_eq!(verify_file(&file_content, "test4", 90), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Node", "test4", 90), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_linked_list4_invalid() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
     assert_eq!(
-        verify_file(&file_content, "test4_invalid", 90),
+        verify(&file_content, "Node", "test4_invalid", 90),
         SymResult::Invalid
     );
 }
@@ -1755,7 +1812,7 @@ fn sym_exec_linked_list4_invalid() {
 fn sym_exec_linked_list4_if_problem() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
     assert_eq!(
-        verify_file(&file_content, "test4_if_problem", 90),
+        verify(&file_content, "Node", "test4_if_problem", 90),
         SymResult::Valid
     );
 }
@@ -1764,21 +1821,21 @@ fn sym_exec_linked_list4_if_problem() {
 fn sym_exec_exceptions1() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
-    assert_eq!(verify_file(&file_content, "test1", 20), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "test1", 20), SymResult::Valid);
     assert_eq!(
-        verify_file(&file_content, "test1_invalid", 20),
+        verify(&file_content, "Main", "test1_invalid", 20),
         SymResult::Invalid
     );
-    assert_eq!(verify_file(&file_content, "div", 30), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "div", 30), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_exceptions_m0() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
-    assert_eq!(verify_file(&file_content, "m0", 20), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "m0", 20), SymResult::Valid);
     assert_eq!(
-        verify_file(&file_content, "m0_invalid", 20),
+        verify(&file_content, "Main", "m0_invalid", 20),
         SymResult::Invalid
     );
 }
@@ -1787,9 +1844,9 @@ fn sym_exec_exceptions_m0() {
 fn sym_exec_exceptions_m1() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
-    assert_eq!(verify_file(&file_content, "m1", 20), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "m1", 20), SymResult::Valid);
     assert_eq!(
-        verify_file(&file_content, "m1_invalid", 20),
+        verify(&file_content, "Main", "m1_invalid", 20),
         SymResult::Invalid
     );
 }
@@ -1798,20 +1855,20 @@ fn sym_exec_exceptions_m1() {
 fn sym_exec_exceptions_m2() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
-    assert_eq!(verify_file(&file_content, "m2", 20), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "m2", 20), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_exceptions_m3() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
-    assert_eq!(verify_file(&file_content, "m3", 30), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "m3", 30), SymResult::Valid);
     assert_eq!(
-        verify_file(&file_content, "m3_invalid1", 30),
+        verify(&file_content, "Main", "m3_invalid1", 30),
         SymResult::Invalid
     );
     assert_eq!(
-        verify_file(&file_content, "m3_invalid2", 30),
+        verify(&file_content, "Main", "m3_invalid2", 30),
         SymResult::Invalid
     );
 }
@@ -1820,8 +1877,14 @@ fn sym_exec_exceptions_m3() {
 fn sym_exec_exceptions_null() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
-    assert_eq!(verify_file(&file_content, "nullExc1", 30), SymResult::Valid);
-    assert_eq!(verify_file(&file_content, "nullExc2", 30), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "nullExc1", 30),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify(&file_content, "Main", "nullExc2", 30),
+        SymResult::Valid
+    );
     // assert_eq!(verify_file(&file_content, "m3_invalid1", 30), SymResult::Invalid);
     // assert_eq!(verify_file(&file_content, "m3_invalid2", 30), SymResult::Invalid);
 }
@@ -1830,44 +1893,44 @@ fn sym_exec_exceptions_null() {
 fn sym_exec_array1() {
     let file_content = std::fs::read_to_string("./examples/array/array1.oox").unwrap();
 
-    assert_eq!(verify_file(&file_content, "foo", 50), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "foo", 50), SymResult::Valid);
     assert_eq!(
-        verify_file(&file_content, "foo_invalid", 50),
+        verify(&file_content, "Main", "foo_invalid", 50),
         SymResult::Invalid
     );
-    assert_eq!(verify_file(&file_content, "sort", 300), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "sort", 300), SymResult::Valid);
     assert_eq!(
-        verify_file(&file_content, "sort_invalid1", 50),
+        verify(&file_content, "Main", "sort_invalid1", 50),
         SymResult::Invalid
     );
-    assert_eq!(verify_file(&file_content, "max", 50), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "max", 50), SymResult::Valid);
     assert_eq!(
-        verify_file(&file_content, "max_invalid1", 50),
-        SymResult::Invalid
-    );
-    assert_eq!(
-        verify_file(&file_content, "max_invalid2", 50),
+        verify(&file_content, "Main", "max_invalid1", 50),
         SymResult::Invalid
     );
     assert_eq!(
-        verify_file(&file_content, "exists_valid", 50),
+        verify(&file_content, "Main", "max_invalid2", 50),
+        SymResult::Invalid
+    );
+    assert_eq!(
+        verify(&file_content, "Main", "exists_valid", 50),
         SymResult::Valid
     );
     // assert_eq!(verify_file(&file_content, "exists_invalid1", 50), SymResult::Invalid);
     assert_eq!(
-        verify_file(&file_content, "exists_invalid2", 50),
+        verify(&file_content, "Main", "exists_invalid2", 50),
         SymResult::Invalid
     );
     assert_eq!(
-        verify_file(&file_content, "array_creation1", 50),
+        verify(&file_content, "Main", "array_creation1", 50),
         SymResult::Valid
     );
     assert_eq!(
-        verify_file(&file_content, "array_creation2", 50),
+        verify(&file_content, "Main", "array_creation2", 50),
         SymResult::Valid
     );
     assert_eq!(
-        verify_file(&file_content, "array_creation_invalid", 50),
+        verify(&file_content, "Main", "array_creation_invalid", 50),
         SymResult::Invalid
     );
 }
@@ -1876,26 +1939,23 @@ fn sym_exec_array1() {
 fn sym_exec_array2() {
     let file_content = std::fs::read_to_string("./examples/array/array2.oox").unwrap();
 
-    assert_eq!(verify_file(&file_content, "foo1", 50), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "foo1", 50), SymResult::Valid);
     assert_eq!(
-        verify_file(&file_content, "foo1_invalid", 50),
+        verify(&file_content, "Main", "foo1_invalid", 50),
         SymResult::Invalid
     );
     assert_eq!(
-        verify_file(&file_content, "foo2_invalid", 50),
+        verify(&file_content, "Main", "foo2_invalid", 50),
         SymResult::Invalid
     );
-    assert_eq!(verify_file(&file_content, "sort", 100), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "sort", 100), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_inheritance() {
     let file_content = std::fs::read_to_string("./examples/inheritance/inheritance.oox").unwrap();
 
-    assert_eq!(
-        verify_file_class_method(&file_content, "Main", "test1", 60),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&file_content, "Main", "test1", 60), SymResult::Valid);
     // assert_eq!(
     //     verify_file_class_method(&file_content, "Main", "test1_invalid", 60),
     //     SymResult::Valid
@@ -1918,8 +1978,5 @@ fn sym_exec_inheritance() {
 fn sym_exec_interface() {
     let file_content = std::fs::read_to_string("./examples/inheritance/interface.oox").unwrap();
 
-    assert_eq!(
-        verify_file_class_method(&file_content, "Main", "main", 60),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&file_content, "Main", "main", 60), SymResult::Valid);
 }

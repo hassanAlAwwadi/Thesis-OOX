@@ -17,8 +17,14 @@ pub enum CFGStatement {
     CatchEntry(u64),
     CatchExit,
     Seq(u64, u64),
-    FunctionEntry(String),
-    FunctionExit(String),
+    FunctionEntry{
+        class_name: String, 
+        method_name: String
+    },
+    FunctionExit {
+        class_name: String, 
+        method_name: String
+    },
 }
 
 pub fn labelled_statements(
@@ -31,7 +37,7 @@ pub fn labelled_statements(
     for class in compilation_unit.members {
         let Declaration::Class { name, members, .. } = class.as_ref();
         for member in members {
-            let (mut member_statements, mut member_flow) = memberCFG(member, i);
+            let (mut member_statements, mut member_flow) = memberCFG(name.clone(), member, i);
             labelled_statements.append(&mut member_statements);
             flow.append(&mut member_flow);
         }
@@ -41,6 +47,7 @@ pub fn labelled_statements(
 }
 
 fn memberCFG(
+    class_name: String,
     member: &DeclarationMember,
     i: &mut u64,
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
@@ -52,11 +59,11 @@ fn memberCFG(
             ..
         }  => {
             let mut v = Vec::new();
-            v.push((*i, CFGStatement::FunctionEntry(name.clone())));
+            v.push((*i, CFGStatement::FunctionEntry { class_name: class_name.clone(), method_name: name.clone() }));
             let entry_label = *i;
             *i += 1;
             v.append(&mut statementCFG(&body, i));
-            v.push((*i, CFGStatement::FunctionExit(name.clone())));
+            v.push((*i, CFGStatement::FunctionExit { class_name, method_name: name.clone() }));
             let exit_label = *i;
             *i += 1;
         
@@ -86,7 +93,7 @@ fn memberCFG(
             ..
         } => {
             let mut v = Vec::new();
-            v.push((*i, CFGStatement::FunctionEntry(name.clone())));
+            v.push((*i, CFGStatement::FunctionEntry { class_name: class_name.clone(), method_name: name.clone() }));
             let entry_label = *i;
             *i += 1;
             v.append(&mut statementCFG(&body, i));
@@ -94,7 +101,7 @@ fn memberCFG(
             v.push((*i, CFGStatement::Statement(Statement::Return { expression: Expression::Var { var: "this".to_string(), type_: member.type_of() }.into() })));
             let return_this_label = *i;
             *i += 1;
-            v.push((*i, CFGStatement::FunctionExit(name.clone())));
+            v.push((*i, CFGStatement::FunctionExit{ class_name, method_name: name.clone() }));
             let exit_label = *i;
             *i += 1;
 
@@ -239,8 +246,8 @@ fn init((l, stmt): &(u64, CFGStatement)) -> u64 {
         CFGStatement::TryExit => l,
         CFGStatement::CatchEntry(_) => l,
         CFGStatement::CatchExit => l,
-        CFGStatement::FunctionEntry(_) => unreachable!(),
-        CFGStatement::FunctionExit(_) => unreachable!(),
+        CFGStatement::FunctionEntry{ .. } => unreachable!(),
+        CFGStatement::FunctionExit { .. } => unreachable!(),
     }
 }
 
@@ -292,8 +299,8 @@ fn fallthrough(
         CFGStatement::TryExit => Vec::new(),
         CFGStatement::CatchEntry(_) => Vec::new(),
         CFGStatement::CatchExit => Vec::new(),
-        CFGStatement::FunctionEntry(_) => todo!(),
-        CFGStatement::FunctionExit(_) => todo!(),
+        CFGStatement::FunctionEntry { .. } => todo!(),
+        CFGStatement::FunctionExit {.. }=> todo!(),
     }
 }
 
@@ -344,8 +351,8 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
                 CFGStatement::Statement(Statement::Return { .. }) => Vec::new(),
                 CFGStatement::Statement(Statement::Throw { .. }) => Vec::new(),
                 CFGStatement::Statement(_) => final_s2,
-                CFGStatement::FunctionEntry(_) => unreachable!(),
-                CFGStatement::FunctionExit(_) => unreachable!(),
+                CFGStatement::FunctionEntry{ .. } => unreachable!(),
+                CFGStatement::FunctionExit{..} => unreachable!(),
                 CFGStatement::Ite(_, _, _) => final_s2,
                 CFGStatement::While(_, _) => final_s2,
                 CFGStatement::TryCatch(_, _, _, _) => final_s2,
@@ -381,8 +388,8 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
             final_s_l
         },
         CFGStatement::CatchExit => vec![*l],
-        CFGStatement::FunctionEntry(_) => unreachable!(),
-        CFGStatement::FunctionExit(_) => unreachable!(),
+        CFGStatement::FunctionEntry{..} => unreachable!(),
+        CFGStatement::FunctionExit{..} => unreachable!(),
     }
 }
 
@@ -479,8 +486,8 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
             v
         }
         CFGStatement::CatchExit => Vec::new(),
-        CFGStatement::FunctionEntry(_) => todo!(),
-        CFGStatement::FunctionExit(_) => todo!(),
+        CFGStatement::FunctionEntry{..} => todo!(),
+        CFGStatement::FunctionExit{..} => todo!(),
     }
 }
 

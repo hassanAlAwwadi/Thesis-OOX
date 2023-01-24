@@ -8,7 +8,7 @@ pub struct StackFrame {
     pub pc: u64,
     pub t: Option<Lhs>,
     pub params: HashMap<Identifier, Rc<Expression>>,
-    pub current_member: DeclarationMember
+    pub current_member: Rc<DeclarationMember>
 }
 
 pub fn lookup_in_stack<'a>(identifier: &str, stack: &'a Vec<StackFrame>) -> Option<Rc<Expression>> {
