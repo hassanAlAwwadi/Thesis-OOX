@@ -1956,20 +1956,30 @@ fn sym_exec_inheritance() {
     let file_content = std::fs::read_to_string("./examples/inheritance/inheritance.oox").unwrap();
 
     assert_eq!(verify(&file_content, "Main", "test1", 60), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "test1_invalid", 60),
+        SymResult::Invalid
+    );
+    assert_eq!(
+        verify(&file_content, "Main", "test2a", 60),
+        SymResult::Valid
+    );
+
     // assert_eq!(
-    //     verify_file_class_method(&file_content, "Main", "test1_invalid", 60),
+    //     verify(&file_content, "Main", "test2b", 60),
     //     SymResult::Valid
     // );
+    
     // assert_eq!(
-    //     verify_file_class_method(&file_content, "Main", "test2", 30),
+    //     verify(&file_content, "Main", "test3", 60),
     //     SymResult::Valid
     // );
+    assert_eq!(
+        verify(&file_content, "Main", "test4_valid", 60),
+        SymResult::Valid
+    );
     // assert_eq!(
-    //     verify_file_class_method(&file_content, "Main", "test3_valid", 30),
-    //     SymResult::Valid
-    // );
-    // assert_eq!(
-    //     verify_file_class_method(&file_content, "Main", "test3_invalid", 30),
+    //     verify(&file_content, "Main", "test4_invalid", 60),
     //     SymResult::Invalid
     // );
 }

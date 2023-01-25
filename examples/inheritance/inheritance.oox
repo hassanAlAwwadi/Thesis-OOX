@@ -48,7 +48,6 @@ class Bar extends Foo {
         int yAfter := this.y;
         int zAfter := this.z;
 
-        assert false;
         assert xAfter == yBefore && yAfter == zBefore && zAfter == xBefore;
     }
 
@@ -73,7 +72,13 @@ class Main {
 
     }
 
-    static void test2(int x, int y, int z) {
+    static void test2a(int x, int y, int z) {
+        Foo foo := new Foo(x, y);
+        
+        foo.shift();
+    }
+
+    static void test2b(int x, int y, int z) {
         Foo foo := new Bar(x, y, z);
         
         foo.shift();

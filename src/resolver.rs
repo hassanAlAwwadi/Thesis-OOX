@@ -237,27 +237,99 @@ fn helper<'a>(
             .unwrap();
 
         let Declaration::Class {
-            name: other_class_name,
             members,
             extends,
+            ..
+        } = class.as_ref();
+
+        // Check if class itself contains the method in question
+        let method = find_method(&method_name, members);
+
+        let class_contains_method = method.is_some();
+
+        let mut resolved_so_far = Vec::new();
+
+        // Find other potential methods in superclasses and subclasses
+
+        // superclasses
+        if !class_contains_method {
+            if let Some(extends) = extends {
+                // The method is not overridden by this class, check superclasses for the method
+
+                resolved_so_far
+                    .extend(method_in_superclass(extends.clone(), method_name).into_iter());
+            }
+        }
+
+        resolved_so_far.extend(methods_in_subclasses(class.clone(), method_name).into_iter());
+
+        *resolved = Some(resolved_so_far);
+    }
+
+    fn find_method(
+        method_name: &str,
+        members: &Vec<Rc<DeclarationMember>>,
+    ) -> Option<Rc<DeclarationMember>> {
+        members
+            .iter()
+            .find(|member| {
+                if let DeclarationMember::Method { name, .. } = member.as_ref() {
+                    name == method_name
+                } else {
+                    false
+                }
+            })
+            .cloned()
+    }
+
+    /// Find the first method with the name method_name
+    /// in the chain of superclasses, or return None
+    fn method_in_superclass(
+        superclass: Rc<Declaration>,
+        method_name: &str,
+    ) -> Option<(Declaration, Rc<DeclarationMember>)> {
+        // Find the first superclass (in the chain) with the method
+        let Declaration::Class {
+            name: other_class_name,
+            members,
+            extends: superclass_extends,
+            subclasses,
+            ..
+        } = superclass.as_ref();
+
+        let method = find_method(method_name, members);
+        if let Some(method) = method {
+            // Stop on the first overriden method in the chain.
+            Some((superclass.as_ref().clone(), method))
+        } else if let Some(superclass) = superclass_extends {
+            method_in_superclass(superclass.clone(), method_name)
+        } else {
+            None
+        }
+    }
+
+    /// Finds all (declaration, method) pairs that match the method_name
+    /// in the subclasses of class
+    fn methods_in_subclasses(
+        class: Rc<Declaration>,
+        method_name: &str,
+    ) -> Vec<(Declaration, Rc<DeclarationMember>)> {
+        let Declaration::Class {
+            members,
             subclasses,
             ..
         } = class.as_ref();
 
-        let method = members.iter().find(|member| {
-            if let DeclarationMember::Method { name, .. } = member.as_ref() {
-                name == method_name
-            } else {
-                false
-            }
-        }).unwrap();
+        let method = find_method(method_name, members);
+        let mut methods =
+            method.map_or(Vec::new(), |method| vec![(class.as_ref().clone(), method)]);
 
-        let mut resolved_so_far = vec![(class.as_ref().clone(), method.clone())];
-
-        // Find other potential methods in superclasses and subclasses
-
-
-        *resolved = Some(resolved_so_far);
+        methods.extend(
+            subclasses.borrow().iter().flat_map(|subclass| {
+                methods_in_subclasses(subclass.clone(), method_name).into_iter()
+            }),
+        );
+        methods
     }
 
     fn constructor_call_helper(
@@ -358,13 +430,16 @@ fn resolve_inheritance(mut unresolved: Vec<Rc<UnresolvedDeclaration>>) -> Vec<Rc
                 ..
             } = class.as_ref();
             let extends = extends.as_ref().unwrap().clone();
-            let class_it_extends = resolved.iter().find(|d| {
-                let Declaration::Class {
-                    name: other_class_name,
-                    ..
-                } = d.as_ref();
-                &extends == other_class_name
-            }).cloned();
+            let class_it_extends = resolved
+                .iter()
+                .find(|d| {
+                    let Declaration::Class {
+                        name: other_class_name,
+                        ..
+                    } = d.as_ref();
+                    &extends == other_class_name
+                })
+                .cloned();
 
             if let Some(class_it_extends) = class_it_extends {
                 let resolved_class = Rc::new(Declaration::Class {
