@@ -204,10 +204,10 @@ pub(super) fn non_static_resolved_method_invocation(
         .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
         .collect::<Vec<_>>();
 
-    let invocation_lhs = if let Invocation::InvokeMethod { lhs, .. } = invocation {
-        lhs
-    } else {
-        panic!("expected invokemethod");
+    let invocation_lhs = match invocation {
+        Invocation::InvokeMethod { lhs, .. } => lhs, 
+        Invocation::InvokeSuperMethod { .. } => "this", // we pass "this" object to superclass methods aswell.
+        _ => panic!("expected invoke method or invokeSuperMethod")
     };
 
     let this = (

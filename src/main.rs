@@ -2,8 +2,6 @@ use lib::playground;
 
 #[macro_use]
 extern crate slog;
-extern crate slog_bunyan;
-
 use slog::Drain;
 use std::sync::Mutex;
 
@@ -14,17 +12,17 @@ use std::sync::Mutex;
 /// ```
 fn main() {
     // playground();
-    let log = slog::Logger::root(
-        Mutex::new(
-            slog_bunyan::default(
-                std::io::stdout()
-            )
-        ).fuse(),
-        o!()
-    );
+    // let log = slog::Logger::root(
+    //     Mutex::new(
+    //         slog_bunyan::default(
+    //             std::io::stdout()
+    //         )
+    //     ).fuse(),
+    //     o!()
+    // );
     
-    // log.new(values)
-    info!(log, "all gucci here"; "stage" => "start");
+    // // log.new(values)
+    // info!(log, "all gucci here"; "stage" => "start");
 }
 
 

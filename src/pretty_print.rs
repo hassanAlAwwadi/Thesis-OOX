@@ -262,10 +262,18 @@ impl Display for Invocation {
                 }
                 write!(f, ")")
             }
+            Self::InvokeSuperMethod { arguments, rhs, .. } => {
+                write!(f, "super.{}(", rhs)?;
+                for arg in arguments {
+                    write!(f, "{:?}", arg)?;
+                    write!(f, ", ")?;
+                }
+                write!(f, ")")
+            }
             Self::InvokeConstructor {
                 class_name,
                 arguments,
-                resolved,
+                ..
             } => {
                 write!(f, "new {}", class_name)?;
                 write!(f, "(")?;

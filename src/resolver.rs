@@ -113,10 +113,15 @@ fn helper<'a>(
     match statement {
         Statement::Call { invocation } => {
             match invocation {
+                Invocation::InvokeSuperMethod {resolved, rhs, ..} => {
+                    super_method_call_helper(resolved, declarations, class_name, &rhs)
+                }
                 Invocation::InvokeMethod {
                     lhs, rhs, resolved, ..
                 } => {
-                    if let Some(NonVoidType::ReferenceType { identifier }) =
+                    if lhs == "this" {
+                        method_call_helper(resolved, declarations, class_name, &rhs);
+                    } else if let Some(NonVoidType::ReferenceType { identifier }) =
                         &local_variables.get(lhs)
                     {
                         // This is a normal method call
@@ -216,6 +221,26 @@ fn helper<'a>(
         _ => (),
     }
 
+    fn super_method_call_helper(
+        resolved: &mut Option<Box<(Declaration, Rc<DeclarationMember>)>>,
+        declarations: &Vec<Rc<Declaration>>,
+        class_name: &String,
+        method_name: &String,
+    ) {
+        let class = find_class(class_name, declarations).unwrap();
+
+        let Declaration::Class {
+            extends, ..
+        } = class.as_ref();
+
+        let extends = extends.clone().expect("expected at least one superclass");
+
+        let super_class_method = method_in_superclass(extends, method_name)
+                .expect("at least one superclass should have this method");
+
+        *resolved = Some(Box::new(super_class_method));
+    }
+
     /// This method resolves the invocation by finding the declaration corresponding to the class type.
     /// Then it looks for any method that could be called by this invocation
     /// either by superclasses or subclasses.
@@ -228,18 +253,11 @@ fn helper<'a>(
         class_name: &String,
         method_name: &String,
     ) {
-        let class = declarations
-            .iter()
-            .find(|declaration| {
-                let Declaration::Class { name, .. } = declaration.as_ref();
-                class_name == name
-            })
-            .unwrap();
+        // dbg!(declarations, class_name, method_name);
+        let class = find_class(class_name, declarations).unwrap();
 
         let Declaration::Class {
-            members,
-            extends,
-            ..
+            members, extends, ..
         } = class.as_ref();
 
         // Check if class itself contains the method in question
@@ -255,15 +273,28 @@ fn helper<'a>(
         if !class_contains_method {
             if let Some(extends) = extends {
                 // The method is not overridden by this class, check superclasses for the method
-
-                resolved_so_far
-                    .extend(method_in_superclass(extends.clone(), method_name).into_iter());
+                let super_class_method = method_in_superclass(extends.clone(), method_name)
+                    .expect("at least one superclass should have this method");
+                resolved_so_far.push(super_class_method);
             }
         }
 
         resolved_so_far.extend(methods_in_subclasses(class.clone(), method_name).into_iter());
 
         *resolved = Some(resolved_so_far);
+    }
+
+    fn find_class(
+        class_name: &String,
+        declarations: &Vec<Rc<Declaration>>,
+    ) -> Option<Rc<Declaration>> {
+        declarations
+            .iter()
+            .find(|declaration| {
+                let Declaration::Class { name, .. } = declaration.as_ref();
+                class_name == name
+            })
+            .cloned()
     }
 
     fn find_method(

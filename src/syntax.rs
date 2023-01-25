@@ -197,18 +197,23 @@ pub enum Statement {
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Invocation {
-    InvokeMethod {
+    InvokeMethod { // f.method(..), this.method(..), Foo.method(..);
         lhs: Identifier,
         rhs: Identifier,
         arguments: Vec<Expression>,
         resolved: Option<Vec<(Declaration, Rc<DeclarationMember>)>>, // What is this? -- potential case for Weak<..>
     },
-    InvokeConstructor {
+    InvokeSuperMethod { // super.method(..);
+        rhs: Identifier,
+        arguments: Vec<Expression>,
+        resolved: Option<Box<(Declaration, Rc<DeclarationMember>)>>,
+    },
+    InvokeConstructor { // new Foo(..)
         class_name: Identifier,
         arguments: Vec<Expression>,
         resolved: Option<Box<(Declaration, Rc<DeclarationMember>)>>, // What is this?
     },
-    InvokeSuperConstructor {
+    InvokeSuperConstructor { // super(..);
         arguments: Vec<Expression>,
         resolved: Option<Box<(Declaration, Rc<DeclarationMember>)>>,
     },
@@ -228,6 +233,7 @@ impl Invocation {
     pub fn arguments(&self) -> &Vec<Expression> {
         match &self {
             Invocation::InvokeMethod { arguments, .. } => arguments.as_ref(),
+            Invocation::InvokeSuperMethod { arguments, .. } => arguments.as_ref(),
             Invocation::InvokeConstructor { arguments, .. } => arguments.as_ref(),
             Invocation::InvokeSuperConstructor { arguments, .. } => arguments.as_ref(),
         }
@@ -237,6 +243,7 @@ impl Invocation {
         match &self {
             Invocation::InvokeMethod { rhs, .. } => rhs,
             Invocation::InvokeConstructor { class_name, .. } => class_name,
+            Invocation::InvokeSuperMethod { rhs, .. } => rhs,
             _ => panic!("Invocation of super(); - does not have an identifier"),
         }
     }
@@ -257,10 +264,20 @@ impl Debug for Invocation {
                 .field("arguments", arguments)
                 .field("resolved", &resolved.is_some())
                 .finish(),
-            Self::InvokeConstructor {
-                class_name,
+            Self::InvokeSuperMethod {
+                rhs,
                 arguments,
                 resolved,
+            } => f
+                .debug_struct("InvokeMethod")
+                .field("rhs", rhs)
+                .field("arguments", arguments)
+                .field("resolved", &resolved.is_some())
+                .finish(),
+            Self::InvokeConstructor {
+                class_name ,
+                arguments ,
+                resolved ,
             } => f
                 .debug_struct("InvokeConstructor")
                 .field("class_name", class_name)

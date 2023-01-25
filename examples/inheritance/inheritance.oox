@@ -17,7 +17,7 @@ class Foo {
 
         int xAfter := this.x;
         int yAfter := this.y;
-
+        
         assert xAfter == yBefore && yAfter == xBefore;
     }
 
@@ -39,10 +39,27 @@ class Bar extends Foo {
         int yBefore := this.y;
         int zBefore := this.z;
 
-        //super.shift();
+        super.shift();
         int temp := this.z;
         this.z := this.y;
         this.y := temp;
+
+        int xAfter := this.x;
+        int yAfter := this.y;
+        int zAfter := this.z;
+
+        assert xAfter == yBefore && yAfter == zBefore && zAfter == xBefore;
+    }
+
+    void invalid_shift() {
+        int xBefore := this.x;
+        int yBefore := this.y;
+        int zBefore := this.z;
+
+        super.shift();
+        int temp := this.z;
+        this.z := this.y;
+        //this.y := temp;
 
         int xAfter := this.x;
         int yAfter := this.y;
@@ -82,6 +99,12 @@ class Main {
         Foo foo := new Bar(x, y, z);
         
         foo.shift();
+    }
+
+    static void test2b_invalid(int x, int y, int z) {
+        Foo foo := new Bar(x, y, z);
+        
+        foo.invalid_shift();
     }
 
     static void test3(Foo foo) {

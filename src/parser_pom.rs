@@ -275,6 +275,15 @@ fn verification_expression<'a>() -> Parser<'a, Token<'a>, Expression> {
 }
 
 fn invocation<'a>() -> Parser<'a, Token<'a>, Invocation> {
+    let super_method_invocation = (keyword("super") * punct(".") * identifier() - punct("(")
+        + arguments()
+        - punct(")"))
+    .map(|(rhs, arguments)| Invocation::InvokeSuperMethod {
+        rhs,
+        arguments,
+        resolved: None,
+    });
+
     let method_invocation = (identifier() - punct(".") + identifier() - punct("(") + arguments()
         - punct(")"))
     .map(|((lhs, rhs), arguments)| Invocation::InvokeMethod {
@@ -298,7 +307,10 @@ fn invocation<'a>() -> Parser<'a, Token<'a>, Invocation> {
             resolved: None,
         });
 
-    method_invocation | rhs_constructor_call | super_constructor_invocation
+    super_method_invocation
+        | method_invocation
+        | rhs_constructor_call
+        | super_constructor_invocation
 }
 
 fn arguments<'a>() -> Parser<'a, Token<'a>, Vec<Expression>> {
@@ -825,29 +837,41 @@ fn exceptional_expression(expression: &Expression) -> HashSet<Expression> {
 fn exceptional_invocation(invocation: &Invocation, class_names: &[String]) -> HashSet<Expression> {
     match invocation {
         Invocation::InvokeMethod { lhs, arguments, .. } => {
-            let exceptional_args: HashSet<_> = arguments
-                .into_iter()
-                .flat_map(|arg| exceptional_expression(arg).into_iter())
-                .collect();
-
-            let is_static_method = class_names.contains(lhs);
-
-            if !is_static_method {
-                let exp = ors(std::iter::once(equal(
-                    Expression::Var {
-                        var: lhs.clone(),
-                        type_: RuntimeType::REFRuntimeType,
-                    },
-                    Expression::NULL,
-                ))
-                .chain(exceptional_args.into_iter()));
-                HashSet::from([exp])
-            } else {
-                exceptional_args
-            }
+            exceptional_invoke_method(lhs, arguments, class_names)
+        },
+        Invocation::InvokeSuperMethod { arguments, .. } => {
+            // "super" is not actually an object at runtime, but "this" is
+            exceptional_invoke_method("this", arguments, class_names)
         }
         Invocation::InvokeConstructor { .. } => HashSet::new(),
         Invocation::InvokeSuperConstructor { .. } => HashSet::new(),
+    }
+
+    
+}fn exceptional_invoke_method(
+    lhs: &str,
+    arguments: &Vec<Expression>,
+    class_names: &[String],
+) -> HashSet<Expression>  {
+    let exceptional_args: HashSet<_> = arguments
+        .into_iter()
+        .flat_map(|arg| exceptional_expression(arg).into_iter())
+        .collect();
+
+    let is_static_method = class_names.iter().any(|s| s.as_str() == lhs);
+
+    if !is_static_method {
+        let exp = ors(std::iter::once(equal(
+            Expression::Var {
+                var: lhs.to_owned(),
+                type_: RuntimeType::REFRuntimeType,
+            },
+            Expression::NULL,
+        ))
+        .chain(exceptional_args.into_iter()));
+        HashSet::from([exp])
+    } else {
+        exceptional_args
     }
 }
 
