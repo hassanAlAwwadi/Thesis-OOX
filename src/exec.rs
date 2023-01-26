@@ -14,7 +14,11 @@ use num::One;
 use ordered_float::NotNan;
 use slog::{debug, info, log, o, Drain, Level, Logger, Value};
 use slog::{Key, Record, Result, Serializer};
-use sloggers::{terminal::{TerminalLoggerBuilder, Destination}, types::Severity, Build};
+use sloggers::{
+    terminal::{Destination, TerminalLoggerBuilder},
+    types::Severity,
+    Build,
+};
 use z3::SatResult;
 
 mod invocation;
@@ -81,7 +85,38 @@ type PathConstraints = HashSet<Expression>;
 
 // refactor to Vec<Reference>? neins, since it can also be ITE and stuff, can it though?
 // nope it can't, refactor this!
-pub type AliasMap = HashMap<String, Vec<Rc<Expression>>>;
+pub type AliasMap = HashMap<String, AliasEntry>;
+
+#[derive(Debug, Clone)]
+struct AliasEntry {
+    pub aliases: Vec<Rc<Expression>>,
+    uniform_type: bool // whether all aliases have the same type, or subclasses appear.
+}
+
+impl AliasEntry {
+    // pub fn aliases(&self) -> impl Iterator<Item=&Rc<Expression>> + Clone {
+    //     self.aliases.iter()
+    // }
+
+    pub fn aliases(&self) -> &Vec<Rc<Expression>> {
+        &self.aliases
+    }
+
+    fn has_uniform_type(&self) -> bool {
+        self.uniform_type
+    }
+
+    fn remove_null(&mut self, var: &str) {
+        self
+        .aliases
+        .retain(|x| match x.as_ref() {
+            Expression::Lit {
+                lit: Lit::NullLit, ..
+            } => false,
+            _ => true,
+        });
+    }
+}
 
 enum Output {
     Valid,
@@ -376,6 +411,9 @@ fn sym_exec(
                 }
             }
         }
+        ActionResult::StateSplitObjectTypes {
+            symbolic_object_ref,
+        } => todo!(),
     };
     SymResult::Valid
 }
@@ -388,7 +426,10 @@ enum ActionResult {
     InfeasiblePath,
     Finish,
     ArrayInitialization(Identifier),
-    StateSplit((Rc<Expression>, Rc<Expression>, Rc<Expression>, Identifier)),
+    StateSplit((Rc<Expression>, Rc<Expression>, Rc<Expression>, Identifier)), // ?
+    StateSplitObjectTypes {
+        symbolic_object_ref: Identifier, // alias map entry
+    },
 }
 
 fn action(
@@ -400,11 +441,11 @@ fn action(
     let pc = state.pc;
     let action = &program[&pc];
 
-    // debug!(state.logger, "Action";
-    //  "action" => format!("{:?}", &action),
-    //  "stack" => ?state.stack.last().map(|s| &s.params),
-    //  "heap" => ?state.heap,
-    //  "alias_map" => ?state.alias_map);
+    debug!(state.logger, "Action";
+     "action" => #?action,
+     "stack" => ?state.stack.last().map(|s| &s.params),
+     "heap" => ?state.heap,
+     "alias_map" => ?state.alias_map);
     // dbg!(
     //     &action,
     //     state.stack.last().map(|s| &s.params),
@@ -721,7 +762,7 @@ fn exec_invocation(
 ) -> ActionResult {
     // dbg!(invocation);
 
-    info!(state.logger, "Invocation"; "invocation" => %invocation);
+    debug!(state.logger, "Invocation"; "invocation" => %invocation);
 
     state.exception_handler.increment_handler();
 
@@ -750,8 +791,17 @@ fn exec_invocation(
                 return ActionResult::FunctionCall(next_entry);
             } else {
                 dbg!(invocation_lhs);
-                
-                return invocation::multiple_method_invocation(state, invocation_lhs, invocation, potential_methods, return_point, lhs, program, st);
+
+                return invocation::multiple_method_invocation(
+                    state,
+                    invocation_lhs,
+                    invocation,
+                    potential_methods,
+                    return_point,
+                    lhs,
+                    program,
+                    st,
+                );
             }
         }
         // (Invocation::InvokeMethod { resolved: Some((DeclarationMember::Method {
@@ -892,7 +942,7 @@ fn exec_invocation(
             } else {
                 panic!()
             }
-        },
+        }
         Invocation::InvokeSuperMethod { resolved, .. } => {
             let potential_method = resolved.as_ref().unwrap();
 
@@ -1224,36 +1274,55 @@ pub fn init_symbolic_reference(
     st: &SymbolicTable,
 ) {
     if !state.alias_map.contains_key(sym_ref) {
+        debug!(state.logger, "Lazy initialisation of symbolic reference"; "ref" => #?sym_ref, "type" => #?type_ref);
+
+        // Symbolic objects are first ReferenceRuntimeType {type} (uninitialized)
+        // then if they are initialised by a single type they remain that
+        // if they become initialised by multiple types their type becomes REFRuntimeType (or a different one)
+        // Or aliasmap contains a flag whether all types are the same of the symbolic object or there are multipe types.
         let class_name = if let RuntimeType::ReferenceRuntimeType { type_ } = type_ref {
             type_
         } else {
             panic!("Cannot initialize any other atm");
         };
 
-        let fields = st
-            .get_all_fields(class_name)
-            .iter()
-            .map(|(field_name, type_)| {
-                (
-                    field_name.clone(),
-                    Rc::new(initialize_symbolic_var(
-                        &field_name,
-                        &type_.type_of(),
-                        state.next_reference_id(),
-                    )),
-                )
-            })
-            .collect();
+        // initialise new objects, one for each possible type (sub)class of class_name
+        let new_object_references = st
+            .get_all_instance_types(class_name)
+            .map(|class_name| {
+                let fields = st
+                    .get_all_fields(&class_name)
+                    .iter()
+                    .map(|(field_name, type_)| {
+                        (
+                            field_name.clone(),
+                            Rc::new(initialize_symbolic_var(
+                                &field_name,
+                                &type_.type_of(),
+                                state.next_reference_id(),
+                            )),
+                        )
+                    })
+                    .collect();
 
-        let object_ref = state.allocate_on_heap(
-            HeapValue::ObjectValue {
-                fields,
-                type_: type_ref.clone(),
-            }
-            .into(),
-        );
+                let reference = state.allocate_on_heap(
+                    HeapValue::ObjectValue {
+                        fields,
+                        type_: type_ref.clone(),
+                    }
+                    .into(),
+                );
+
+                reference
+            })
+            .collect_vec();
 
         // Find all other possible concrete references of the same type as sym_ref
+
+        if st.get_all_instance_types(class_name).len() > 1 {
+            // change type of symbolic object to runtimetype?
+
+        }
 
         let existing_aliases = state
             .alias_map
@@ -1452,7 +1521,7 @@ fn exec_rhs_field(
             // dbg!(&heap);
             read_field_symbolic_ref(
                 &mut state.heap,
-                concrete_refs,
+                &concrete_refs.aliases,
                 Rc::new(sym_ref.clone()),
                 field,
             )
@@ -1496,12 +1565,7 @@ fn remove_symbolic_null(alias_map: &mut AliasMap, var: &String) {
     alias_map
         .get_mut(var)
         .unwrap()
-        .retain(|x| match x.as_ref() {
-            Expression::Lit {
-                lit: Lit::NullLit, ..
-            } => false,
-            _ => true,
-        });
+        .remove_null(var)
 }
 
 fn create_symbolic_var(name: String, type_: impl Typeable) -> Expression {
@@ -1518,6 +1582,7 @@ fn create_symbolic_var(name: String, type_: impl Typeable) -> Expression {
     }
 }
 
+/// Create uninitialised variable (that can be initialized lazily)
 fn initialize_symbolic_var(name: &str, type_: &RuntimeType, ref_: i64) -> Expression {
     let sym_name = format!("{}{}", name, ref_);
     create_symbolic_var(sym_name, type_.clone())
@@ -1702,10 +1767,10 @@ fn verify(file_content: &str, class_name: &str, method_name: &str, k: u64) -> Sy
 
         let mut builder = TerminalLoggerBuilder::new();
         builder.level(Severity::Debug);
-        builder.destination(Destination::Stderr);
+        builder.destination(Destination::Stdout);
         builder.format(sloggers::types::Format::Full);
-        builder.source_location(sloggers::types::SourceLocation::None);
-    
+        builder.source_location(sloggers::types::SourceLocation::FileAndLine);
+
         let root_logger = builder.build().unwrap();
 
         let mut state = State {
@@ -1984,35 +2049,27 @@ fn sym_exec_array2() {
 #[test]
 fn sym_exec_inheritance() {
     let file_content = std::fs::read_to_string("./examples/inheritance/inheritance.oox").unwrap();
+    let k = 150;
 
-    // assert_eq!(verify(&file_content, "Main", "test1", 60), SymResult::Valid);
-    // assert_eq!(
-    //     verify(&file_content, "Main", "test1_invalid", 60),
-    //     SymResult::Invalid
-    // );
-    // assert_eq!(
-    //     verify(&file_content, "Main", "test2a", 60),
-    //     SymResult::Valid
-    // );
-
-    // assert_eq!(
-    //     verify(&file_content, "Main", "test2b", 60),
-    //     SymResult::Valid
-    // );
-
+    assert_eq!(verify(&file_content, "Main", "test1", k), SymResult::Valid);
     assert_eq!(
-        verify(&file_content, "Main", "test2b_invalid", 60),
+        verify(&file_content, "Main", "test1_invalid", k),
         SymResult::Invalid
     );
-    
-    // assert_eq!(
-    //     verify(&file_content, "Main", "test3", 60),
-    //     SymResult::Valid
-    // );
-    // assert_eq!(
-    //     verify(&file_content, "Main", "test4_valid", 60),
-    //     SymResult::Valid
-    // );
+    assert_eq!(verify(&file_content, "Main", "test2a", k), SymResult::Valid);
+
+    assert_eq!(verify(&file_content, "Main", "test2b", k), SymResult::Valid);
+
+    assert_eq!(
+        verify(&file_content, "Main", "test2b_invalid", k),
+        SymResult::Invalid
+    );
+
+    assert_eq!(verify(&file_content, "Main", "test3", 60), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "test4_valid", 60),
+        SymResult::Valid
+    );
     // assert_eq!(
     //     verify(&file_content, "Main", "test4_invalid", 60),
     //     SymResult::Invalid

@@ -69,6 +69,9 @@ pub(super) fn single_method_invocation(
 }
 
 /// Non-static case, multiple candidate methods that could be called
+/// 
+/// For example a method from a superclass or an overriden method from a subclass could be called, 
+/// depending on the type of the object.
 pub(super) fn multiple_method_invocation(
     state: &mut State,
     invocation_lhs: &String,
@@ -127,25 +130,14 @@ pub(super) fn multiple_method_invocation(
         Expression::SymbolicRef { var, type_ } => {
             let aliases = &state.alias_map[var];
 
-            let types = aliases
-                .iter()
-                .map(AsRef::as_ref)
-                .map(Typeable::type_of)
-                .unique()
-                .collect_vec();
             // if symbolicref contains only objects of one type
             // we can resolve which method to call
 
-            if types.len() == 1 {
+            if let RuntimeType::ReferenceRuntimeType {type_ } = type_ {
                 // we can resolve this
                 let method = potential_methods.iter().find(|(d, dm)| {
                     let Declaration::Class { name, .. } = d;
-                    if let RuntimeType::ReferenceRuntimeType { type_ } = &types[0] {
-                        if type_ == name {
-                            return true;
-                        }
-                    }
-                    return false;
+                    type_ == name
                 }).unwrap();
 
                 let (
@@ -172,16 +164,37 @@ pub(super) fn multiple_method_invocation(
                     panic!()
                 }
             } else {
-                // we need to split states
+                // we need to split states such that each resulting path has a single type for the object in the alias map.
+                return ActionResult::StateSplitObjectTypes { symbolic_object_ref: var.clone() }
             }
 
             // otherwise we need to split states for each type.
+
 
             todo!()
         }
         _ => unreachable!(),
     };
 }
+
+/// Checks the aliases whether their type is unique, if so return that type
+/// otherwise return None
+fn find_unique_type(aliases: &Vec<Rc<Expression>>) -> Option<RuntimeType> {
+    assert!(aliases.len() > 0);
+    
+    let all_have_same_type = aliases
+        .iter()
+        .map(AsRef::as_ref)
+        .map(Typeable::type_of)
+        .all_equal();
+
+    if all_have_same_type {
+        Some(aliases[0].type_of())
+    } else {
+        None
+    }
+}
+
 
 /// Sane things below
 

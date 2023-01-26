@@ -86,9 +86,9 @@ fn substitute(state: &mut State, expression: Rc<Expression>, st: &SymbolicTable)
                 Expression::SymbolicRef { var, type_ } => {
                     let value = match state.alias_map.get(var) {
                         None => o.clone(),
-                        Some(aliases) => {
-                            if aliases.len() == 1 {
-                                aliases[0].clone()
+                        Some(alias_entry) => {
+                            if alias_entry.aliases.len() == 1 {
+                                alias_entry.aliases[0].clone()
                             } else {
                                 o.clone()
                             }

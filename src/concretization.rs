@@ -15,12 +15,12 @@ pub fn concretizations<'a>(
     alias_map: &'a AliasMap,
 ) -> Vec<Rc<Expression>> {
     let mut replaced_expressions = Vec::new();
-    let n_combinations = alias_map.iter().fold(1, |a, (_, refs)| a * refs.len());
+    let n_combinations = alias_map.iter().fold(1, |a, (_, refs)| a * refs.aliases().len());
 
     let mut concretizations = alias_map
         .iter()
         .filter(|(id, _)| symbolic_refs.contains(*id))
-        .map(|(id, refs)| (id, refs.iter().cycle().take(n_combinations)))
+        .map(|(id, refs)| (id, refs.aliases().iter().cycle().take(n_combinations)))
         .collect::<HashMap<_, _>>();
 
     // let (combinations, id_to_idx) = alias_map

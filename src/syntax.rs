@@ -393,7 +393,7 @@ pub enum Expression {
     SymbolicRef {
         // symbolic references to arrays, objects
         var: Identifier,
-        type_: RuntimeType,
+        type_: RuntimeType, // If this is REFRuntimeType, this means that we have different types in the aliasmap and a state split may be necessary if we invoke a method
     },
     Conditional {
         guard: Rc<Expression>,
