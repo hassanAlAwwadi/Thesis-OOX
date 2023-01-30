@@ -6,7 +6,7 @@ use itertools::Itertools;
 
 use crate::syntax::{
     CompilationUnit, Declaration, DeclarationMember, Invocation, NonVoidType, Parameter, Rhs,
-    RuntimeType, Statement, UnresolvedDeclaration,
+    RuntimeType, Statement, UnresolvedDeclaration, Identifier,
 };
 
 pub fn set_resolvers(
@@ -235,7 +235,7 @@ fn helper<'a>(
 
         let extends = extends.clone().expect("expected at least one superclass");
 
-        let super_class_method = method_in_superclass(extends, method_name)
+        let (_super_class_name, super_class_method) = method_in_superclass(extends, method_name)
                 .expect("at least one superclass should have this method");
 
         *resolved = Some(Box::new(super_class_method));
@@ -248,7 +248,7 @@ fn helper<'a>(
     /// The result is added to resolved.
     #[inline(always)]
     fn method_call_helper(
-        resolved: &mut Option<Vec<(Declaration, Rc<DeclarationMember>)>>,
+        resolved: &mut Option<HashMap<Identifier, (Declaration, Rc<DeclarationMember>)>>,
         declarations: &Vec<Rc<Declaration>>,
         class_name: &String,
         method_name: &String,
@@ -265,21 +265,26 @@ fn helper<'a>(
 
         let class_contains_method = method.is_some();
 
-        let mut resolved_so_far = Vec::new();
+        let mut resolved_so_far = HashMap::new();
 
         // Find other potential methods in superclasses and subclasses
 
         // superclasses
-        if !class_contains_method {
+        let overridable = if !class_contains_method {
             if let Some(extends) = extends {
                 // The method is not overridden by this class, check superclasses for the method
-                let super_class_method = method_in_superclass(extends.clone(), method_name)
+                let (super_class_name, super_class_method) = method_in_superclass(extends.clone(), method_name)
                     .expect("at least one superclass should have this method");
-                resolved_so_far.push(super_class_method);
+                resolved_so_far.insert(class_name.clone(), super_class_method.clone());
+                super_class_method
+            } else {
+                panic!("Method {:?} is not found in class or any superclass for {:?}", method_name, class_name);
             }
-        }
+        } else {
+            (class.as_ref().clone(), method.unwrap())
+        };
 
-        resolved_so_far.extend(methods_in_subclasses(class.clone(), method_name).into_iter());
+        resolved_so_far.extend(methods_in_subclasses(class.clone(), method_name, overridable).into_iter());
 
         *resolved = Some(resolved_so_far);
     }
@@ -315,10 +320,11 @@ fn helper<'a>(
 
     /// Find the first method with the name method_name
     /// in the chain of superclasses, or return None
+    ///
     fn method_in_superclass(
         superclass: Rc<Declaration>,
         method_name: &str,
-    ) -> Option<(Declaration, Rc<DeclarationMember>)> {
+    ) -> Option<(Identifier, (Declaration, Rc<DeclarationMember>))> {
         // Find the first superclass (in the chain) with the method
         let Declaration::Class {
             name: other_class_name,
@@ -331,7 +337,7 @@ fn helper<'a>(
         let method = find_method(method_name, members);
         if let Some(method) = method {
             // Stop on the first overriden method in the chain.
-            Some((superclass.as_ref().clone(), method))
+            Some((other_class_name.to_string(), (superclass.as_ref().clone(), method)))
         } else if let Some(superclass) = superclass_extends {
             method_in_superclass(superclass.clone(), method_name)
         } else {
@@ -340,12 +346,15 @@ fn helper<'a>(
     }
 
     /// Finds all (declaration, method) pairs that match the method_name
-    /// in the subclasses of class
+    /// in the subclasses of class,
+    /// Returns for each subclass what method it resolves to
     fn methods_in_subclasses(
         class: Rc<Declaration>,
         method_name: &str,
-    ) -> Vec<(Declaration, Rc<DeclarationMember>)> {
+        overridable: (Declaration, Rc<DeclarationMember>)
+    ) -> HashMap<Identifier, (Declaration, Rc<DeclarationMember>)> {
         let Declaration::Class {
+            name,
             members,
             subclasses,
             ..
@@ -353,11 +362,14 @@ fn helper<'a>(
 
         let method = find_method(method_name, members);
         let mut methods =
-            method.map_or(Vec::new(), |method| vec![(class.as_ref().clone(), method)]);
+            method.clone().map_or_else(|| HashMap::from([(name.clone(), overridable.clone())]), |method| HashMap::from([(name.clone(), (class.as_ref().clone(), method))]));
+
+        // set new overridable to the method of this class if available, otherwise take the method from superclass.
+        let overridable = method.map(|method: Rc<DeclarationMember>| (class.as_ref().clone(), method)).unwrap_or(overridable);
 
         methods.extend(
             subclasses.borrow().iter().flat_map(|subclass| {
-                methods_in_subclasses(subclass.clone(), method_name).into_iter()
+                methods_in_subclasses(subclass.clone(), method_name, overridable.clone()).into_iter()
             }),
         );
         methods

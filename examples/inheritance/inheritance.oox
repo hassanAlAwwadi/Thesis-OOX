@@ -73,6 +73,16 @@ class Bar extends Foo {
     }
 }
 
+class Bar2 extends Bar {
+    Bar2(int x, int y, int z) {
+        super(x, y, z);
+    }
+
+    void something() {
+        super.something();
+    }
+}
+
 class Main {
     static void test1(int x, int y, int z) {
         Foo foo := new Bar(x, y, z);
@@ -102,9 +112,9 @@ class Main {
     }
 
     static void test2b_invalid(int x, int y, int z) {
-        Foo foo := new Bar(x, y, z);
+        Bar bar := new Bar(x, y, z);
         
-        foo.invalid_shift();
+        bar.invalid_shift();
     }
 
     static void test3(Foo foo) {
@@ -119,5 +129,9 @@ class Main {
     // Foo::something can be called here, which asserts false so this is invalid.
     static void test4_invalid(Foo foo) {
         foo.something();
+    }
+
+    static void test5(Bar bar) {
+        bar.something();
     }
 }

@@ -7,7 +7,7 @@ pub type Float = NotNan<f64>;
 use std::{
     cell::{Ref, RefCell},
     fmt::{Debug, Display},
-    rc::{Rc, Weak},
+    rc::{Rc, Weak}, collections::HashMap,
 };
 
 #[derive(Debug)]
@@ -44,6 +44,11 @@ impl CompilationUnit {
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Interface {
+
+}
+
 #[derive(Clone, Eq, PartialEq)]
 pub enum Declaration {
     Class {
@@ -53,6 +58,16 @@ pub enum Declaration {
         implements: Vec<Rc<Declaration>>,
         members: Vec<Rc<DeclarationMember>>,
     },
+    // Interface(Rc<Interface>)
+}
+
+impl Declaration {
+    pub fn name(&self) -> &Identifier {
+        if let Declaration::Class { name, .. } = self {
+            return name;
+        };
+        panic!()
+    }
 }
 
 impl Debug for Declaration {
@@ -130,6 +145,22 @@ impl DeclarationMember {
     pub fn exceptional(&self) -> Option<Rc<Expression>> {
         self.specification().and_then(|s| s.exceptional.clone())
     }
+
+    pub fn name(&self) -> &Identifier {
+        match &self {
+            DeclarationMember::Constructor { name, .. } => name,
+            DeclarationMember::Method { name, .. } => name,
+            DeclarationMember::Field { name, .. } => name,
+        }
+    }
+
+    pub fn params(&self) -> Option<&Vec<Parameter>> {
+        match &self {
+            DeclarationMember::Constructor { params, .. } => Some(params),
+            DeclarationMember::Method { params, .. } => Some(params),
+            DeclarationMember::Field {  .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,7 +232,7 @@ pub enum Invocation {
         lhs: Identifier,
         rhs: Identifier,
         arguments: Vec<Expression>,
-        resolved: Option<Vec<(Declaration, Rc<DeclarationMember>)>>, // What is this? -- potential case for Weak<..>
+        resolved: Option<HashMap<Identifier, (Declaration, Rc<DeclarationMember>)>>, // What is this? -- potential case for Weak<..>
     },
     InvokeSuperMethod { // super.method(..);
         rhs: Identifier,
@@ -269,7 +300,7 @@ impl Debug for Invocation {
                 arguments,
                 resolved,
             } => f
-                .debug_struct("InvokeMethod")
+                .debug_struct("InvokeSuperMethod")
                 .field("rhs", rhs)
                 .field("arguments", arguments)
                 .field("resolved", &resolved.is_some())
@@ -506,4 +537,14 @@ pub enum RuntimeType {
     NUMRuntimeType,
     REFRuntimeType, // is this symbolic or something? why not use ReferenceRuntimeType
     ARRAYRuntimeType,
+}
+
+impl RuntimeType {
+    /// Assumes this is a ReferenceRuntimeType and returns identifier of the reference class
+    pub fn as_reference_type(&self) -> Option<&Identifier> {
+        if let RuntimeType::ReferenceRuntimeType { type_ } = self {
+            return Some(type_);
+        }
+        None
+    }
 }

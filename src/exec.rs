@@ -88,9 +88,9 @@ type PathConstraints = HashSet<Expression>;
 pub type AliasMap = HashMap<String, AliasEntry>;
 
 #[derive(Debug, Clone)]
-struct AliasEntry {
+pub struct AliasEntry {
     pub aliases: Vec<Rc<Expression>>,
-    uniform_type: bool // whether all aliases have the same type, or subclasses appear.
+    uniform_type: bool, // whether all aliases have the same type, or subclasses appear.
 }
 
 impl AliasEntry {
@@ -98,18 +98,35 @@ impl AliasEntry {
     //     self.aliases.iter()
     // }
 
+    pub fn new(aliases: Vec<Rc<Expression>>) -> AliasEntry {
+        let uniform_type = aliases
+        .iter()
+        .map(AsRef::as_ref)
+        .filter(|e| **e != Expression::NULL)
+        .map(Typeable::type_of)
+        .all_equal();
+
+        AliasEntry { aliases, uniform_type: uniform_type }
+    }
+
     pub fn aliases(&self) -> &Vec<Rc<Expression>> {
         &self.aliases
     }
 
-    fn has_uniform_type(&self) -> bool {
-        self.uniform_type
+    /// Returns Some type if all alias types are equal, otherwise return None.
+    fn uniform_type(&self) -> Option<RuntimeType> {
+        if self.uniform_type {
+            self.aliases.iter()
+            .map(AsRef::as_ref)
+            .filter(|e| **e != Expression::NULL).next().map(Typeable::type_of)
+        } else {
+            None
+        }
+        
     }
 
     fn remove_null(&mut self, var: &str) {
-        self
-        .aliases
-        .retain(|x| match x.as_ref() {
+        self.aliases.retain(|x| match x.as_ref() {
             Expression::Lit {
                 lit: Lit::NullLit, ..
             } => false,
@@ -413,7 +430,43 @@ fn sym_exec(
         }
         ActionResult::StateSplitObjectTypes {
             symbolic_object_ref,
-        } => todo!(),
+            resulting_alias
+        } => {
+            let alias = &state.alias_map[&symbolic_object_ref];
+            // group on (class_name, method_name) 
+            // let alias = utils::group_by(alias.aliases.iter().map(|e| (e.type_of(), e.clone())));
+
+            assert!(resulting_alias.len() > 1);
+
+            debug!(state.logger, "Splitting up current path into {:?} paths due to polymorphic method invocation", resulting_alias.len();
+                "object" => #?symbolic_object_ref,
+                "resulting_split" => #?resulting_alias
+            );
+
+            let new_path_ids = std::iter::once(state.path_id)
+                .chain((1..resulting_alias.len()).map(|_| path_counter.borrow_mut().next_id()));
+            let new_states = resulting_alias.into_iter().zip(new_path_ids).map(|((_, objects), path_id)| {
+                let mut state = state.clone();
+                state.alias_map.insert(symbolic_object_ref.clone(), AliasEntry::new(objects));
+                state.path_id = path_id;
+                state
+            });
+
+            for mut state in new_states {
+                let result = sym_exec(
+                    &mut state,
+                    program,
+                    flows,
+                    k,
+                    st,
+                    root_logger.clone(),
+                    path_counter.clone(),
+                );
+                if result != SymResult::Valid {
+                    return result;
+                }
+            }
+        }
     };
     SymResult::Valid
 }
@@ -429,6 +482,7 @@ enum ActionResult {
     StateSplit((Rc<Expression>, Rc<Expression>, Rc<Expression>, Identifier)), // ?
     StateSplitObjectTypes {
         symbolic_object_ref: Identifier, // alias map entry
+        resulting_alias: HashMap<(Identifier, Identifier), Vec<Rc<Expression>>>, // (class_name, method) -> resulting objects.
     },
 }
 
@@ -766,6 +820,7 @@ fn exec_invocation(
 
     state.exception_handler.increment_handler();
 
+
     match invocation {
         Invocation::InvokeMethod {
             resolved,
@@ -776,8 +831,9 @@ fn exec_invocation(
             let potential_methods = resolved.as_ref().unwrap();
 
             if potential_methods.len() == 1 {
+                debug!(state.logger, "only one potential method, resolved");
                 // potentially a static method.
-                let potential_method = &potential_methods[0];
+                let (_, potential_method) = &potential_methods.iter().next().unwrap();
                 // A static method, or a method that is not overriden anywhere (non-polymorphic)
                 let next_entry = invocation::single_method_invocation(
                     state,
@@ -791,7 +847,7 @@ fn exec_invocation(
                 return ActionResult::FunctionCall(next_entry);
             } else {
                 dbg!(invocation_lhs);
-
+                
                 return invocation::multiple_method_invocation(
                     state,
                     invocation_lhs,
@@ -1161,9 +1217,9 @@ fn prepare_assert_expression(
     //         type_: RuntimeType::BoolRuntimeType,
     //     },
     // );
-    info!(state.logger, "Expression to evaluate: {:?}", expression);
+    debug!(state.logger, "Expression to evaluate: {:?}", expression);
     let z = evaluate(state, Rc::new(expression), st);
-    info!(state.logger, "Evaluated expression: {:?}", z);
+    debug!(state.logger, "Evaluated expression: {:?}", z);
     z
 }
 
@@ -1267,6 +1323,7 @@ fn null() -> Expression {
     }
 }
 
+/// Initialise a symbolic object reference.
 pub fn init_symbolic_reference(
     state: &mut State,
     sym_ref: &Identifier,
@@ -1289,6 +1346,7 @@ pub fn init_symbolic_reference(
         // initialise new objects, one for each possible type (sub)class of class_name
         let new_object_references = st
             .get_all_instance_types(class_name)
+            .iter()
             .map(|class_name| {
                 let fields = st
                     .get_all_fields(&class_name)
@@ -1308,7 +1366,7 @@ pub fn init_symbolic_reference(
                 let reference = state.allocate_on_heap(
                     HeapValue::ObjectValue {
                         fields,
-                        type_: type_ref.clone(),
+                        type_: RuntimeType::ReferenceRuntimeType { type_: class_name.clone() },
                     }
                     .into(),
                 );
@@ -1318,25 +1376,43 @@ pub fn init_symbolic_reference(
             .collect_vec();
 
         // Find all other possible concrete references of the same type as sym_ref
+        let instance_types = st.get_all_instance_types(class_name);
 
-        if st.get_all_instance_types(class_name).len() > 1 {
-            // change type of symbolic object to runtimetype?
-
-        }
+        let has_unique_type = instance_types.len() == 1;
 
         let existing_aliases = state
             .alias_map
             .values()
-            .filter(|x| x.iter().any(|x| x.type_of() == *type_ref))
-            .flat_map(|x| x.iter())
+            .filter_map(|x| {
+                if let Some(type_) = x.uniform_type() {
+                    if instance_types.contains(type_.as_reference_type().expect("expected reference type")) {
+                        Some(Either::Left(x.aliases.iter()))
+                    } else {
+                        None
+                    }
+                } else {
+                    Some(Either::Right(
+                        x.aliases.iter().filter(|x| x.type_of() == *type_ref),
+                    ))
+                }
+            })
+            .flat_map(|x| x.into_iter())
             .unique();
 
         let aliases = existing_aliases
             .cloned()
-            .chain([Rc::new(Expression::NULL), object_ref].into_iter())
+            .chain(std::iter::once(Expression::NULL.into()))
+            .chain(new_object_references.into_iter())
             .collect();
 
-        state.alias_map.insert(sym_ref.clone(), aliases);
+        state.alias_map.insert(
+            sym_ref.clone(),
+            AliasEntry {
+                aliases,
+                uniform_type: has_unique_type,
+            },
+        );
+        debug!(state.logger, "Updated aliasentry"; "alias_map" => #?state.alias_map);
     }
 }
 
@@ -1386,10 +1462,10 @@ fn execute_assign(
                     // Yes, we have if (x = null) { throw; } guards that ensure it cannot be null
                     remove_symbolic_null(&mut state.alias_map, var);
                     let concrete_refs = &state.alias_map[var];
-                    dbg!(&var, &concrete_refs);
+                    // dbg!(&var, &concrete_refs);
                     write_field_symbolic_ref(
                         &mut state.heap,
-                        concrete_refs,
+                        &concrete_refs.aliases,
                         field,
                         Rc::new(sym_ref.clone()),
                         e,
@@ -1561,11 +1637,9 @@ fn false_lit() -> Expression {
     }
 }
 
-fn remove_symbolic_null(alias_map: &mut AliasMap, var: &String) {
-    alias_map
-        .get_mut(var)
-        .unwrap()
-        .remove_null(var)
+fn remove_symbolic_null(alias_map: &mut AliasMap, var: &str) {
+    // dbg!(&alias_map, &var);
+    alias_map.get_mut(var).unwrap().remove_null(var)
 }
 
 fn create_symbolic_var(name: String, type_: impl Typeable) -> Expression {
@@ -2065,15 +2139,20 @@ fn sym_exec_inheritance() {
         SymResult::Invalid
     );
 
-    assert_eq!(verify(&file_content, "Main", "test3", 60), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "test3", k), SymResult::Valid);
+
     assert_eq!(
-        verify(&file_content, "Main", "test4_valid", 60),
+        verify(&file_content, "Main", "test4_valid", k),
         SymResult::Valid
     );
-    // assert_eq!(
-    //     verify(&file_content, "Main", "test4_invalid", 60),
-    //     SymResult::Invalid
-    // );
+    assert_eq!(
+        verify(&file_content, "Main", "test4_invalid", k),
+        SymResult::Invalid
+    );
+    assert_eq!(
+        verify(&file_content, "Main", "test5", k),
+        SymResult::Valid
+    );
 }
 
 #[test]
