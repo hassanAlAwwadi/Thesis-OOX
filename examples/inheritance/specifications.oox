@@ -1,0 +1,24 @@
+class Foo {
+    void method()
+        requires(false) {}
+}
+
+class Bar extends Foo {
+    void method()
+        requires(true) {}
+}
+
+
+class Main {
+
+    // Is valid because Bar can only be of type Bar which has method requires(true)
+    static void test_valid(Bar bar) {
+        bar.method();
+    }
+
+    // Is invalid because Foo can be of type Foo or Bar,
+    // and Foo.method has requires(false)
+    static void test_invalid(Foo foo) {
+        foo.method();
+    }
+}

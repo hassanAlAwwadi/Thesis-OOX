@@ -2156,6 +2156,14 @@ fn sym_exec_inheritance() {
 }
 
 #[test]
+fn sym_exec_inheritance_specifications() {
+    let file_content = std::fs::read_to_string("./examples/inheritance/specifications.oox").unwrap();
+    let k = 150;
+    assert_eq!(verify(&file_content, "Main", "test_valid", k), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "test_invalid", k), SymResult::Invalid);
+}
+
+#[test]
 fn sym_exec_interface() {
     let file_content = std::fs::read_to_string("./examples/inheritance/interface.oox").unwrap();
 
