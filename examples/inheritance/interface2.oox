@@ -1,0 +1,49 @@
+interface A {
+    void a() {
+        assert false;
+    }
+}
+
+interface B extends A {
+    void a() {
+        assert true;
+    }
+}
+
+class Foo implements A {
+    void a() {
+        assert true;
+    }
+
+    static void test_valid(Foo foo) {
+        foo.a();
+    }
+}
+
+class Foo1 implements A {
+    static void test_invalid(Foo foo) {
+        foo.a();
+    }
+}
+
+class Foo2 implements B {
+    static void test_valid(Foo foo) {
+        foo.a();
+    }
+}
+
+class Foo3 implements B {
+    void a() {
+        assert false;
+    }
+    static void test_invalid(Foo foo) {
+        foo.a();
+    }
+}
+
+// A bit of a strange case, where B is earlier in the hierarchy tree so B.a is resolved
+class Foo4 implements A, B {
+    static void test_valid(Foo foo) {
+        foo.a();
+    }
+}

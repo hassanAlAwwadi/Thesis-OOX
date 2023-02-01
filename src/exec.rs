@@ -911,12 +911,10 @@ fn exec_invocation(
         // }
         Invocation::InvokeConstructor { resolved, .. } => {
             let (
-                Declaration::Class {
-                    name: class_name, ..
-                },
+                declaration,
                 member,
             ) = resolved.as_ref().map(AsRef::as_ref).unwrap();
-
+            let class_name = declaration.name();
             if let DeclarationMember::Constructor {
                 name,
                 params,
@@ -931,6 +929,7 @@ fn exec_invocation(
                     .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
                     .collect::<Vec<_>>();
 
+                // Zis is problems with interfaces
                 let this_param = Parameter {
                     type_: NonVoidType::ReferenceType {
                         identifier: class_name.to_string(),
@@ -957,12 +956,10 @@ fn exec_invocation(
         }
         Invocation::InvokeSuperConstructor { resolved, .. } => {
             let (
-                Declaration::Class {
-                    name: class_name, ..
-                },
+                declaration,
                 member,
             ) = resolved.as_ref().map(AsRef::as_ref).unwrap();
-
+            let class_name = declaration.name();
             if let DeclarationMember::Constructor {
                 name,
                 params,
@@ -977,6 +974,7 @@ fn exec_invocation(
                     .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
                     .collect::<Vec<_>>();
 
+                // zis is trouble with interfaces
                 let this_param = Parameter {
                     type_: NonVoidType::ReferenceType {
                         identifier: class_name.to_string(),
@@ -1805,7 +1803,7 @@ fn verify(file_content: &str, class_name: &str, method_name: &str, k: u64) -> Sy
 
     // dbg!(&c);
 
-    let initial_function = c.find_declaration(method_name, class_name.into()).unwrap();
+    let initial_function = c.find_class_declaration_member(method_name, class_name.into()).unwrap();
 
     let mut i = 0;
     let symbolic_table = SymbolicTable::from_ast(&c);
@@ -2166,6 +2164,22 @@ fn sym_exec_inheritance_specifications() {
 #[test]
 fn sym_exec_interface() {
     let file_content = std::fs::read_to_string("./examples/inheritance/interface.oox").unwrap();
+    let k = 150;
 
-    assert_eq!(verify(&file_content, "Main", "main", 60), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "main", k), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "test1_valid", k), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Main", "test1_invalid", k), SymResult::Invalid);
 }
+
+#[test]
+fn sym_exec_interface2() {
+    let file_content = std::fs::read_to_string("./examples/inheritance/interface2.oox").unwrap();
+    let k = 150;
+
+    assert_eq!(verify(&file_content, "Foo", "test_valid", k), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Foo1", "test_invalid", k), SymResult::Invalid);
+    assert_eq!(verify(&file_content, "Foo2", "test_valid", k), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Foo3", "test_invalid", k), SymResult::Invalid);
+    assert_eq!(verify(&file_content, "Foo4", "test_valid", k), SymResult::Valid);
+}
+

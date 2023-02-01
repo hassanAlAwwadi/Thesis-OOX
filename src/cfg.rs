@@ -34,12 +34,16 @@ pub fn labelled_statements(
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
     let mut flow: Vec<(u64, u64)> = vec![];
 
-    for class in compilation_unit.members {
-        let Declaration::Class { name, members, .. } = class.as_ref();
-        for member in members {
-            let (mut member_statements, mut member_flow) = memberCFG(name.clone(), member, i);
-            labelled_statements.append(&mut member_statements);
-            flow.append(&mut member_flow);
+    for declaration in compilation_unit.members {
+        match declaration {
+            Declaration::Class(class) => {
+                for member in &class.members {
+                    let (mut member_statements, mut member_flow) = memberCFG(class.name.clone(), &member, i);
+                    labelled_statements.append(&mut member_statements);
+                    flow.append(&mut member_flow);
+                }
+            },
+            Declaration::Interface(interface) => todo!()
         }
     }
 

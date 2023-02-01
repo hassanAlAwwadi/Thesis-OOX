@@ -25,7 +25,7 @@ pub fn parse<'a>(tokens: &[Token<'a>]) -> Result<CompilationUnit, pom::Error> {
 
 fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit<UnresolvedDeclaration>> {
     class().repeat(0..).map(|members| CompilationUnit {
-        members: members.into_iter().map(Rc::new).collect(),
+        members: members.into_iter().collect(),
     })
 }
 
@@ -34,12 +34,12 @@ fn class<'a>() -> Parser<'a, Token<'a>, UnresolvedDeclaration> {
         + extends().opt()
         + (punct("{") * member().repeat(0..) - punct("}"));
     identifier_and_members.map(
-        |(((name, extends)), members)| UnresolvedDeclaration::Class {
+        |(((name, extends)), members)| UnresolvedDeclaration::Class(UnresolvedClass {
             name,
             members,
             extends,
             implements: vec![], // tdo
-        },
+        }),
     )
 }
 
@@ -906,24 +906,38 @@ pub fn insert_exceptional_clauses(
     mut compilation_unit: CompilationUnit<UnresolvedDeclaration>,
 ) -> CompilationUnit<UnresolvedDeclaration> {
     // used to check if an invocation is a static call.
-    let class_names = compilation_unit
+    let decl_names = compilation_unit
         .members
         .iter()
-        .map(AsRef::as_ref)
-        .map(|UnresolvedDeclaration::Class { name, .. }| name.clone())
+        .map(|declaration| match declaration {
+            UnresolvedDeclaration::Class(class) => class.name.clone(),
+            UnresolvedDeclaration::Interface(interface) => interface.name.clone(),
+        })
         .collect_vec();
 
-    for class in compilation_unit.members.iter_mut() {
-        let UnresolvedDeclaration::Class {
-            name,
-            mut members,
-            extends,
-            implements,
-        } = class.as_ref().clone();
+    for decl in compilation_unit.members.iter_mut() {
+        match decl {
+            UnresolvedDeclaration::Class(class) => {
+                class.members = insert_exceptional_clauses_class_members(&class.members, &decl_names);
+            },
+            UnresolvedDeclaration::Interface(interface) => todo!(),
+        }
+    }
 
-        let members = members
-            .iter()
-            .map(|dcl| match dcl.as_ref().clone() {
+
+    fn insert_exceptional_clauses_class_members(members: &Vec<Rc<DeclarationMember>>, decl_names: &[String]) -> Vec<Rc<DeclarationMember>> {
+        members
+        .iter()
+        .map(|dcl| match dcl.as_ref().clone() {
+            DeclarationMember::Method {
+                body,
+                is_static,
+                return_type,
+                name,
+                params,
+                specification,
+            } => {
+                let body = helper(body, &decl_names);
                 DeclarationMember::Method {
                     body,
                     is_static,
@@ -931,42 +945,26 @@ pub fn insert_exceptional_clauses(
                     name,
                     params,
                     specification,
-                } => {
-                    let body = helper(body, &class_names);
-                    DeclarationMember::Method {
-                        body,
-                        is_static,
-                        return_type,
-                        name,
-                        params,
-                        specification,
-                    }
                 }
+            }
+            DeclarationMember::Constructor {
+                body,
+                name,
+                params,
+                specification,
+            } => {
+                let body = helper(body, &decl_names);
                 DeclarationMember::Constructor {
-                    body,
                     name,
                     params,
                     specification,
-                } => {
-                    let body = helper(body, &class_names);
-                    DeclarationMember::Constructor {
-                        name,
-                        params,
-                        specification,
-                        body,
-                    }
+                    body,
                 }
-                field @ DeclarationMember::Field { .. } => field,
-            })
-            .map(Rc::new)
-            .collect_vec();
-
-        *class = Rc::new(UnresolvedDeclaration::Class {
-            name,
-            members,
-            extends,
-            implements,
-        });
+            }
+            field @ DeclarationMember::Field { .. } => field,
+        })
+        .map(Rc::new)
+        .collect_vec()
     }
 
     fn helper(statement: Statement, class_names: &[String]) -> Statement {

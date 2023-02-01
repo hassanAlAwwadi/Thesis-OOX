@@ -6,37 +6,44 @@ pub type Reference = i64;
 pub type Float = NotNan<f64>;
 use std::{
     cell::{Ref, RefCell},
+    collections::HashMap,
     fmt::{Debug, Display},
-    rc::{Rc, Weak}, collections::HashMap,
+    rc::{Rc, Weak},
 };
+
+use self::interfaces::InterfaceMembers;
+pub use self::{interfaces::Interface, classes::Class};
+
+mod interfaces;
+mod classes;
+
 
 #[derive(Debug)]
 pub struct CompilationUnit<D = Declaration> {
-    pub members: Vec<Rc<D>>,
+    pub members: Vec<D>,
 }
 
 impl CompilationUnit {
-    pub fn find_declaration(
+    pub fn find_class_declaration_member(
         &self,
         identifier: &str,
         class_name: Option<&str>,
     ) -> Option<Rc<DeclarationMember>> {
         for member in &self.members {
-            let Declaration::Class { members, name, .. } = member.as_ref();
-            if let Some(class_name) = class_name {
-                if name != class_name {
+            if let Declaration::Class(class)  = member {
+                if Some(class.name.as_str()) != class_name {
                     continue;
                 }
-            }
-            for declaration_member in members {
-                match declaration_member.as_ref() {
-                    DeclarationMember::Constructor { name, .. } if identifier == name => {
-                        return Some(declaration_member.clone());
+                for declaration_member in &class.members {
+                    match declaration_member.as_ref() {
+                        DeclarationMember::Constructor { name, .. } if identifier == name => {
+                            return Some(declaration_member.clone());
+                        }
+                        DeclarationMember::Method { name, .. } if identifier == name => {
+                            return Some(declaration_member.clone());
+                        }
+                        _ => (),
                     }
-                    DeclarationMember::Method { name, .. } if identifier == name => {
-                        return Some(declaration_member.clone());
-                    }
-                    _ => (),
                 }
             }
         }
@@ -44,49 +51,26 @@ impl CompilationUnit {
     }
 }
 
+
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Interface {
-
-}
-
-#[derive(Clone, Eq, PartialEq)]
 pub enum Declaration {
-    Class {
-        name: Identifier,
-        extends: Option<Rc<Declaration>>,
-        subclasses: RefCell<Vec<Rc<Declaration>>>, // classes that extend from this class.
-        implements: Vec<Rc<Declaration>>,
-        members: Vec<Rc<DeclarationMember>>,
-    },
-    // Interface(Rc<Interface>)
+    Class(Rc<Class>),
+    Interface(Rc<Interface>),
 }
 
 impl Declaration {
-    pub fn name(&self) -> &Identifier {
-        if let Declaration::Class { name, .. } = self {
-            return name;
-        };
-        panic!()
+    pub fn as_class(&self) -> Option<Rc<Class>> {
+        if let Declaration::Class(class) = self {
+            Some(class.clone())
+        } else {
+            None
+        }
     }
-}
 
-impl Debug for Declaration {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    pub fn name(&self) -> &Identifier {
         match self {
-            Self::Class {
-                name,
-                extends,
-                subclasses,
-                implements,
-                members,
-            } => f
-                .debug_struct("Class")
-                .field("name", name)
-                .field("extends",&extends.is_some())
-                .field("subclasses", &subclasses.borrow().len())
-                .field("implements", &implements.len())
-                .field("members", members)
-                .finish(),
+            Declaration::Class(class) => &class.name,
+            Declaration::Interface(interface) => &interface.name,
         }
     }
 }
@@ -95,12 +79,21 @@ impl Debug for Declaration {
 /// After resolving this will be replaced with a Declaration in the syntax tree.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum UnresolvedDeclaration {
-    Class {
-        name: Identifier,
-        extends: Option<Identifier>,
-        implements: Vec<Identifier>,
-        members: Vec<Rc<DeclarationMember>>,
-    },
+    Class(UnresolvedClass),
+    Interface(UnresolvedInterface)
+}
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct UnresolvedClass {
+    pub name: Identifier,
+    pub extends: Option<Identifier>,
+    pub implements: Vec<Identifier>,
+    pub members: Vec<Rc<DeclarationMember>>,
+}
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct UnresolvedInterface  {
+    pub name: Identifier,
+    pub extends: Vec<Identifier>,
+    pub members: Vec<Rc<InterfaceMembers>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,7 +151,7 @@ impl DeclarationMember {
         match &self {
             DeclarationMember::Constructor { params, .. } => Some(params),
             DeclarationMember::Method { params, .. } => Some(params),
-            DeclarationMember::Field {  .. } => None,
+            DeclarationMember::Field { .. } => None,
         }
     }
 }
@@ -228,23 +221,27 @@ pub enum Statement {
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Invocation {
-    InvokeMethod { // f.method(..), this.method(..), Foo.method(..);
+    InvokeMethod {
+        // f.method(..), this.method(..), Foo.method(..);
         lhs: Identifier,
         rhs: Identifier,
         arguments: Vec<Expression>,
         resolved: Option<HashMap<Identifier, (Declaration, Rc<DeclarationMember>)>>, // What is this? -- potential case for Weak<..>
     },
-    InvokeSuperMethod { // super.method(..);
+    InvokeSuperMethod {
+        // super.method(..);
         rhs: Identifier,
         arguments: Vec<Expression>,
         resolved: Option<Box<(Declaration, Rc<DeclarationMember>)>>,
     },
-    InvokeConstructor { // new Foo(..)
+    InvokeConstructor {
+        // new Foo(..)
         class_name: Identifier,
         arguments: Vec<Expression>,
         resolved: Option<Box<(Declaration, Rc<DeclarationMember>)>>, // What is this?
     },
-    InvokeSuperConstructor { // super(..);
+    InvokeSuperConstructor {
+        // super(..);
         arguments: Vec<Expression>,
         resolved: Option<Box<(Declaration, Rc<DeclarationMember>)>>,
     },
@@ -306,9 +303,9 @@ impl Debug for Invocation {
                 .field("resolved", &resolved.is_some())
                 .finish(),
             Self::InvokeConstructor {
-                class_name ,
-                arguments ,
-                resolved ,
+                class_name,
+                arguments,
+                resolved,
             } => f
                 .debug_struct("InvokeConstructor")
                 .field("class_name", class_name)
@@ -518,7 +515,6 @@ pub enum NonVoidType {
     ReferenceType { identifier: String },
     ArrayType { inner_type: Box<NonVoidType> },
 }
-
 
 // how is this used during parsing? or is it only used during execution
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

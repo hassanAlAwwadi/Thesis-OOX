@@ -26,11 +26,10 @@ pub(super) fn single_method_invocation(
     st: &SymbolicTable,
 ) -> u64 {
     let (
-        Declaration::Class {
-            name: class_name, ..
-        },
+        declaration,
         resolved_method,
     ) = resolved;
+    let class_name = &declaration.name();
     if let DeclarationMember::Method {
         is_static,
         return_type,
@@ -97,17 +96,17 @@ pub(super) fn multiple_method_invocation(
                 .unwrap();
 
             let (
-                Declaration::Class {
-                    name: class_name, ..
-                },
+                declaration,
                 member,
             ) = method; // i don't get this
+
+            let decl_name = declaration.name();
 
             if let DeclarationMember::Method { params, .. } = member.as_ref() {
                 let next_entry = non_static_resolved_method_invocation(
                     state,
                     invocation,
-                    class_name,
+                    decl_name,
                     member.clone(),
                     params,
                     return_point,
@@ -130,16 +129,16 @@ pub(super) fn multiple_method_invocation(
             if let Some(RuntimeType::ReferenceRuntimeType { type_ }) = alias_entry.uniform_type() {
                 // we can resolve this
                 let (
-                    Declaration::Class {
-                        name: class_name, ..
-                    },
+                    declaration,
                     member,
                 ) = potential_methods.get(&type_).unwrap();
-    
+
+                let decl_name = declaration.name();
+
                 let next_entry = non_static_resolved_method_invocation(
                     state,
                     invocation,
-                    class_name,
+                    decl_name,
                     member.clone(),
                     member.params().unwrap(),
                     return_point,
@@ -158,20 +157,20 @@ pub(super) fn multiple_method_invocation(
 
                 if resulting_alias.len() == 1 {
                     // not a uniform type, but classes resolve to the same method, we can continue with this path.
-                    let ((class_name, _method_name), _objects) = resulting_alias.iter().next().unwrap();
-                    debug!(state.logger, "Symbolic object contains types that resolve to the same method {:?}::{:?}", class_name, _method_name);
+                    let ((decl_name, _method_name), _objects) = resulting_alias.iter().next().unwrap();
+                    debug!(state.logger, "Symbolic object contains types that resolve to the same method {:?}::{:?}", decl_name, _method_name);
 
                     let (
-                        Declaration::Class {
-                            name: class_name, ..
-                        },
+                        declaration,
                         member,
-                    ) = potential_methods.get(class_name).unwrap();
+                    ) = potential_methods.get(decl_name).unwrap();
+
+                    let decl_name = declaration.name();
         
                     let next_entry = non_static_resolved_method_invocation(
                         state,
                         invocation,
-                        class_name,
+                        decl_name,
                         member.clone(),
                         member.params().unwrap(),
                         return_point,
@@ -242,6 +241,8 @@ pub(super) fn non_static_resolved_method_invocation(
         Invocation::InvokeSuperMethod { .. } => "this", // we pass "this" object to superclass methods aswell.
         _ => panic!("expected invoke method or invokeSuperMethod")
     };
+
+    // This is going to give problems, fix by looking up the type in stack?
     let this = (
         RuntimeType::ReferenceRuntimeType {
             type_: class_name.clone(),

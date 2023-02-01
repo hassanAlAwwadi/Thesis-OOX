@@ -2,13 +2,15 @@ use std::{cell::Ref, collections::HashMap, rc::Rc};
 
 use itertools::Itertools;
 
-use crate::syntax::{CompilationUnit, Declaration, DeclarationMember, Identifier, NonVoidType};
+use crate::syntax::{
+    self, Class, CompilationUnit, Declaration, DeclarationMember, Identifier, NonVoidType,
+};
 
 pub type Fields = Vec<(Identifier, NonVoidType)>;
 
 pub struct SymbolicTable {
     pub class_to_fields: HashMap<Identifier, Fields>,
-    pub classes: HashMap<Identifier, Rc<Declaration>>,
+    pub classes: HashMap<Identifier, Declaration>,
     pub class_to_instance_types: HashMap<Identifier, Vec<Identifier>>,
 }
 
@@ -17,10 +19,15 @@ impl SymbolicTable {
         let mut class_to_fields = HashMap::new();
         let mut classes = HashMap::new();
         for member in &compilation_unit.members {
-            let class_name = member.name();
-            let fields = Self::collect_fields(member);
-            class_to_fields.insert(class_name.clone(), fields);
-            classes.insert(class_name.clone(), member.clone());
+            match member.clone() {
+                Declaration::Class(class) => {
+                    let class_name = member.name();
+                    let fields = Self::collect_fields(class);
+                    class_to_fields.insert(class_name.clone(), fields);
+                    classes.insert(class_name.clone(), member.clone());
+                }
+                Declaration::Interface(_) => todo!(),
+            }
         }
 
         let mut class_to_instance_types = classes
@@ -29,10 +36,11 @@ impl SymbolicTable {
                 (
                     class_name.clone(),
                     std::iter::once(class_name.clone())
-                        .chain(Self::subclasses(&classes, class_name).into_iter().map(|d| {
-                            let Declaration::Class { name, .. } = d.as_ref();
-                            name.clone()
-                        }))
+                        .chain(
+                            Self::subclasses(&classes, class_name)
+                                .into_iter()
+                                .map(|class| class.name.clone()),
+                        )
                         .collect_vec(),
                 )
             })
@@ -41,7 +49,7 @@ impl SymbolicTable {
         SymbolicTable {
             class_to_fields,
             classes,
-            class_to_instance_types
+            class_to_instance_types,
         }
     }
 
@@ -56,53 +64,53 @@ impl SymbolicTable {
     }
     /// Get all subclasses of the class_name
     fn subclasses<'a>(
-        classes: &HashMap<String, Rc<Declaration>>,
+        classes: &HashMap<String, Declaration>,
         class_name: &str,
-    ) -> Vec<Rc<Declaration>> {
+    ) -> Vec<Rc<syntax::Class>> {
         let declaration = &classes[class_name];
-        let Declaration::Class { subclasses, .. } = declaration.as_ref();
+        let class = declaration.as_class().expect("expected class");
 
-        fn helper(subclass: Rc<Declaration>) -> Vec<Rc<Declaration>> {
-            let Declaration::Class { subclasses, .. } = subclass.as_ref();
-
+        fn helper(subclass: Rc<syntax::Class>) -> Vec<Rc<syntax::Class>> {
             std::iter::once(subclass.clone())
-                .chain(subclasses.borrow().iter().cloned().flat_map(helper))
+                .chain(
+                    subclass
+                        .subclasses
+                        .borrow()
+                        .iter()
+                        .cloned()
+                        .flat_map(helper),
+                )
                 .collect_vec()
         }
 
-        subclasses
+        let x = class
+            .subclasses
             .borrow()
             .iter()
             .cloned()
             .flat_map(helper)
-            .collect_vec()
+            .collect_vec();
+        x
     }
 
     /// Collects fields from declaration, by looking at the class and its superclasses
     /// The order of the fields is prioritised by class hierarchy.
-    fn collect_fields(
-        class: &Rc<Declaration>) -> Fields {
-            let mut fields = Vec::new();
+    fn collect_fields(class: Rc<syntax::Class>) -> Fields {
+        let mut fields = Vec::new();
 
-            let Declaration::Class {
-                members,
-                extends,
-                ..
-            } = class.as_ref();
-
-            for declaration_member in members {
-                match declaration_member.as_ref() {
-                    DeclarationMember::Field { type_, name } => {
-                        fields.push((name.to_owned(), type_.to_owned()))
-                    }
-                    _ => (),
-                };
-            }
-
-            if let Some(extends) = extends {
-                [Self::collect_fields(extends), fields].concat()
-            } else {
-                fields
-            }
+        for declaration_member in &class.members {
+            match declaration_member.as_ref() {
+                DeclarationMember::Field { type_, name } => {
+                    fields.push((name.to_owned(), type_.to_owned()))
+                }
+                _ => (),
+            };
         }
+
+        if let Some(extends) = class.extends.clone() {
+            [Self::collect_fields(extends), fields].concat()
+        } else {
+            fields
+        }
+    }
 }

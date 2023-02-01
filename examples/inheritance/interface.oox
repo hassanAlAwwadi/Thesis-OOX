@@ -1,4 +1,8 @@
-interface Animal {
+interface Eater {
+  void eat();
+}
+
+interface Animal extends Eater {
   void animalSound();
 }
 
@@ -6,16 +10,27 @@ interface Sleeper {
   void sleep();
 }
 
-class Pig implements Animal, Sleeper {
+class Pig implements Animal, Sleeper, Eater {
   bool hasMadeSound;
   bool hasSlept;
+  bool hasEaten;
 
   void animalSound() {
-    this.sound := true;
+    this.hasMadeSound := true;
   }
 
   void sleep() {
     this.hasSlept := true;
+  }
+
+  void eat() {
+    this.hasEaten := true;
+  }
+}
+
+class Dog extends Eater {
+  void eat() {
+    assert false;
   }
 }
 
@@ -23,14 +38,26 @@ class Main {
   static void main() {
     Pig myPig = new Pig();  // Create a Pig object
 
-    assert hasMadeSound == false && hasSlept == false;
+    assert hasMadeSound == false && hasSlept == false && hasEaten == false;
 
     myPig.animalSound();
+    myPig.eat();
     myPig.sleep();
 
     bool hasMadeSound := myPig.hasMadeSound;
     bool hasSlept := myPig.hasSlept;
+    bool hasEaten := myPig.hasEaten;
 
-    assert hasMadeSound == true && hasSlept == true;
+    assert hasMadeSound == true && hasSlept == true && hasEaten == true;
+  }
+
+  // only Pig implements sleeper
+  static void test1_valid(Sleeper sleeper) {
+    sleeper.sleep();
+  }
+
+  // Both Pig and Dog implement Eater, Dog.eat() asserts to false so we expect a fail.
+  static void test1_invalid(Animal animal) {
+    animal.eat();
   }
 }
