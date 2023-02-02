@@ -11,8 +11,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use self::interfaces::InterfaceMembers;
-pub use self::{interfaces::Interface, classes::Class};
+pub use self::{interfaces::Interface, classes::Class, interfaces::InterfaceMember, interfaces::InterfaceMethod, interfaces::find_interface_method};
 
 mod interfaces;
 mod classes;
@@ -93,7 +92,7 @@ pub struct UnresolvedClass {
 pub struct UnresolvedInterface  {
     pub name: Identifier,
     pub extends: Vec<Identifier>,
-    pub members: Vec<Rc<InterfaceMembers>>,
+    pub members: Vec<Rc<InterfaceMember>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,7 +161,7 @@ pub struct Parameter {
     pub name: Identifier,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Specification {
     pub requires: Option<Rc<Expression>>,
     pub ensures: Option<Rc<Expression>>,

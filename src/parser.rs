@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use nom::Slice;
 use ordered_float::NotNan;
 use pom::parser::*;
 
@@ -15,32 +14,42 @@ use crate::syntax::*;
 
 use crate::lexer::*;
 
+use self::interface::interface;
+
+mod interface;
+
 pub fn parse<'a>(tokens: &[Token<'a>]) -> Result<CompilationUnit, pom::Error> {
     (program() - end()).parse(tokens).map(|mut c| {
         let c = insert_exceptional_clauses(c);
+        dbg!("Setting resolvers");
         let c = resolver::set_resolvers(c); // set the resolvers in Invocations
+        dbg!("Resolvers set");
         c
     })
 }
 
 fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit<UnresolvedDeclaration>> {
-    class().repeat(0..).map(|members| CompilationUnit {
+    declaration().repeat(0..).map(|members| CompilationUnit {
         members: members.into_iter().collect(),
     })
 }
 
-fn class<'a>() -> Parser<'a, Token<'a>, UnresolvedDeclaration> {
-    let identifier_and_members = (keyword("class") * identifier())
-        + extends().opt()
-        + (punct("{") * member().repeat(0..) - punct("}"));
-    identifier_and_members.map(
-        |(((name, extends)), members)| UnresolvedDeclaration::Class(UnresolvedClass {
+fn declaration<'a>() -> Parser<'a, Token<'a>, UnresolvedDeclaration> {
+    let class = ((keyword("class") * identifier())
+        + extends1().opt()
+        + implements().opt()
+        + (punct("{") * member().repeat(0..) - punct("}"))).map(
+        |(((name, extends), implements), members)| UnresolvedDeclaration::Class(UnresolvedClass {
             name,
             members,
             extends,
-            implements: vec![], // tdo
-        }),
-    )
+            implements: implements.unwrap_or(Vec::new()),
+        }));
+
+    
+
+    class | interface().map(UnresolvedDeclaration::Interface)
+
 }
 
 fn member<'a>() -> Parser<'a, Token<'a>, Rc<DeclarationMember>> {
@@ -57,9 +66,7 @@ fn field<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
 fn method<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     let is_static = keyword("static").opt().map(|x| x.is_some());
 
-    let parameters = punct("(") * parameters() - punct(")");
-
-    (is_static + type_() + identifier() + parameters + specification() + body()).map(
+    (is_static + type_() + identifier() + parameters() + specification() + body()).map(
         |(((((is_static, return_type), name), params), specification), body)| {
             DeclarationMember::Method {
                 is_static,
@@ -76,7 +83,7 @@ fn method<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
 }
 
 fn constructor<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
-    let p = identifier() - punct("(") + parameters() - punct(")");
+    let p = identifier() + parameters();
     // let specification = todo!();
     let body = constructor_body();
 
@@ -595,7 +602,7 @@ fn parameters<'a>() -> Parser<'a, Token<'a>, Vec<Parameter>> {
     let parameter = (nonvoidtype() + identifier()).map(|(type_, name)| Parameter { name, type_ });
 
     // can it be empty?
-    list(parameter, punct(",")) | empty().map(|_| Vec::new())
+    punct("(") * (list(parameter, punct(",")) | empty().map(|_| Vec::new())) - punct(")")
 }
 
 fn type_<'a>() -> Parser<'a, Token<'a>, Type> {
@@ -667,7 +674,7 @@ fn literal<'a>() -> Parser<'a, Token<'a>, Expression> {
                         let char_value = s.chars().nth(1).unwrap();
                         Lit::CharLit { char_value }
                     } else if s.starts_with("\"") && s.ends_with("\"") {
-                        let string_value = s.slice(1..s.len() - 1);
+                        let string_value = &s[1..s.len() - 1];
                         Lit::StringLit {
                             string_value: string_value.to_string(),
                         }
@@ -700,8 +707,12 @@ fn identifier<'a>() -> Parser<'a, Token<'a>, Identifier> {
     })
 }
 
-fn extends<'a>() -> Parser<'a, Token<'a>, Identifier> {
+fn extends1<'a>() -> Parser<'a, Token<'a>, Identifier> {
     keyword("extends") * identifier()
+}
+
+fn extends_many<'a>() -> Parser<'a, Token<'a>, Vec<Identifier>> {
+    keyword("extends") * list(identifier(), punct(","))
 }
 
 fn implements<'a>() -> Parser<'a, Token<'a>, Vec<Identifier>> {
@@ -920,7 +931,7 @@ pub fn insert_exceptional_clauses(
             UnresolvedDeclaration::Class(class) => {
                 class.members = insert_exceptional_clauses_class_members(&class.members, &decl_names);
             },
-            UnresolvedDeclaration::Interface(interface) => todo!(),
+            UnresolvedDeclaration::Interface(interface) => interface.members = insert_exceptional_clauses_interface_members(&interface.members, &decl_names),
         }
     }
 
@@ -937,7 +948,7 @@ pub fn insert_exceptional_clauses(
                 params,
                 specification,
             } => {
-                let body = helper(body, &decl_names);
+                let body = insert_exceptional_in_body(body, &decl_names);
                 DeclarationMember::Method {
                     body,
                     is_static,
@@ -953,7 +964,7 @@ pub fn insert_exceptional_clauses(
                 params,
                 specification,
             } => {
-                let body = helper(body, &decl_names);
+                let body = insert_exceptional_in_body(body, &decl_names);
                 DeclarationMember::Constructor {
                     name,
                     params,
@@ -967,7 +978,19 @@ pub fn insert_exceptional_clauses(
         .collect_vec()
     }
 
-    fn helper(statement: Statement, class_names: &[String]) -> Statement {
+    fn insert_exceptional_clauses_interface_members(members: &Vec<Rc<InterfaceMember>>, decl_names: &[String]) -> Vec<Rc<InterfaceMember>> { 
+        members
+        .iter()
+        .map(|dcl| match dcl.as_ref().clone() {
+            InterfaceMember::Method(InterfaceMethod{  type_, name, parameters, body }) => {
+                InterfaceMember::Method (InterfaceMethod{  type_, name, parameters, body: body.map(|body| insert_exceptional_in_body(body, &decl_names)) })
+            },
+        })
+        .map(Rc::new)
+        .collect()
+    }
+
+    fn insert_exceptional_in_body(statement: Statement, class_names: &[String]) -> Statement {
         match statement {
             Statement::Assign { lhs, rhs } => {
                 let conditions = exceptional_assignment(&lhs, &rhs, class_names);
@@ -985,28 +1008,28 @@ pub fn insert_exceptional_clauses(
                 false_body,
             } => Statement::Ite {
                 guard,
-                true_body: Box::new(helper(*true_body, class_names)),
-                false_body: Box::new(helper(*false_body, class_names)),
+                true_body: Box::new(insert_exceptional_in_body(*true_body, class_names)),
+                false_body: Box::new(insert_exceptional_in_body(*false_body, class_names)),
             },
 
             Statement::Seq { stat1, stat2 } => Statement::Seq {
-                stat1: Box::new(helper(*stat1, class_names)),
-                stat2: Box::new(helper(*stat2, class_names)),
+                stat1: Box::new(insert_exceptional_in_body(*stat1, class_names)),
+                stat2: Box::new(insert_exceptional_in_body(*stat2, class_names)),
             },
             Statement::While { guard, body } => Statement::While {
                 guard,
-                body: Box::new(helper(*body, class_names)),
+                body: Box::new(insert_exceptional_in_body(*body, class_names)),
             },
             Statement::Try {
                 try_body,
                 catch_body,
             } => Statement::Try {
-                try_body: Box::new(helper(*try_body, class_names)),
-                catch_body: Box::new(helper(*catch_body, class_names)),
+                try_body: Box::new(insert_exceptional_in_body(*try_body, class_names)),
+                catch_body: Box::new(insert_exceptional_in_body(*catch_body, class_names)),
             },
 
             Statement::Block { body } => Statement::Block {
-                body: Box::new(helper(*body, class_names)),
+                body: Box::new(insert_exceptional_in_body(*body, class_names)),
             },
             Statement::Return { expression } => {
                 if let Some(e) = expression {

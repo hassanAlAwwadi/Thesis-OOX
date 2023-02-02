@@ -17,6 +17,7 @@ keyword = { "assert" | "catch" | "else"
 | "char"
 | "ensures"
 | "float"
+| "interface" // needs to precede 'int' due to shared prefix
 | "int"
 | "string"
 | "try"
@@ -37,7 +38,6 @@ keyword = { "assert" | "catch" | "else"
 | "void"
 | "extends"
 | "implements"
-| "interface"
 | "super"
 }
 

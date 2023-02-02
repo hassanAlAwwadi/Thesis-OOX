@@ -1,9 +1,7 @@
-use lib::playground;
+//use lib::playground;
 
 #[macro_use]
 extern crate slog;
-use slog::Drain;
-use std::sync::Mutex;
 
 /// # Examples
 ///

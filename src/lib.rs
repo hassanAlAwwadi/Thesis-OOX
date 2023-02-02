@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 mod lexer;
-mod parser_pom;
+mod parser;
 mod stack;
 pub mod syntax;
 

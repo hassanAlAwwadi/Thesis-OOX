@@ -14,7 +14,7 @@ name = "lib"
 path = "src/lib.rs"
 
 [dependencies]
-nom = "7"
+# nom = "7" old parser
 pom = "3.2.0"
 pest = "2.0"
 pest_derive = "2.0"

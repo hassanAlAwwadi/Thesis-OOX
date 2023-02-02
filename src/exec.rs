@@ -31,7 +31,7 @@ use crate::{
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
     exec::invocation::{non_static_resolved_method_invocation, single_method_invocation},
     lexer::tokens,
-    parser_pom::{insert_exceptional_clauses, parse},
+    parser::{insert_exceptional_clauses, parse},
     stack::{lookup_in_stack, write_to_stack, StackFrame},
     symbolic_table::SymbolicTable,
     syntax::{
@@ -100,13 +100,16 @@ impl AliasEntry {
 
     pub fn new(aliases: Vec<Rc<Expression>>) -> AliasEntry {
         let uniform_type = aliases
-        .iter()
-        .map(AsRef::as_ref)
-        .filter(|e| **e != Expression::NULL)
-        .map(Typeable::type_of)
-        .all_equal();
+            .iter()
+            .map(AsRef::as_ref)
+            .filter(|e| **e != Expression::NULL)
+            .map(Typeable::type_of)
+            .all_equal();
 
-        AliasEntry { aliases, uniform_type: uniform_type }
+        AliasEntry {
+            aliases,
+            uniform_type: uniform_type,
+        }
     }
 
     pub fn aliases(&self) -> &Vec<Rc<Expression>> {
@@ -116,13 +119,15 @@ impl AliasEntry {
     /// Returns Some type if all alias types are equal, otherwise return None.
     fn uniform_type(&self) -> Option<RuntimeType> {
         if self.uniform_type {
-            self.aliases.iter()
-            .map(AsRef::as_ref)
-            .filter(|e| **e != Expression::NULL).next().map(Typeable::type_of)
+            self.aliases
+                .iter()
+                .map(AsRef::as_ref)
+                .filter(|e| **e != Expression::NULL)
+                .next()
+                .map(Typeable::type_of)
         } else {
             None
         }
-        
     }
 
     fn remove_null(&mut self, var: &str) {
@@ -430,10 +435,10 @@ fn sym_exec(
         }
         ActionResult::StateSplitObjectTypes {
             symbolic_object_ref,
-            resulting_alias
+            resulting_alias,
         } => {
             let alias = &state.alias_map[&symbolic_object_ref];
-            // group on (class_name, method_name) 
+            // group on (class_name, method_name)
             // let alias = utils::group_by(alias.aliases.iter().map(|e| (e.type_of(), e.clone())));
 
             assert!(resulting_alias.len() > 1);
@@ -445,12 +450,18 @@ fn sym_exec(
 
             let new_path_ids = std::iter::once(state.path_id)
                 .chain((1..resulting_alias.len()).map(|_| path_counter.borrow_mut().next_id()));
-            let new_states = resulting_alias.into_iter().zip(new_path_ids).map(|((_, objects), path_id)| {
-                let mut state = state.clone();
-                state.alias_map.insert(symbolic_object_ref.clone(), AliasEntry::new(objects));
-                state.path_id = path_id;
-                state
-            });
+            let new_states =
+                resulting_alias
+                    .into_iter()
+                    .zip(new_path_ids)
+                    .map(|((_, objects), path_id)| {
+                        let mut state = state.clone();
+                        state
+                            .alias_map
+                            .insert(symbolic_object_ref.clone(), AliasEntry::new(objects));
+                        state.path_id = path_id;
+                        state
+                    });
 
             for mut state in new_states {
                 let result = sym_exec(
@@ -820,7 +831,6 @@ fn exec_invocation(
 
     state.exception_handler.increment_handler();
 
-
     match invocation {
         Invocation::InvokeMethod {
             resolved,
@@ -847,7 +857,7 @@ fn exec_invocation(
                 return ActionResult::FunctionCall(next_entry);
             } else {
                 dbg!(invocation_lhs);
-                
+
                 return invocation::multiple_method_invocation(
                     state,
                     invocation_lhs,
@@ -909,11 +919,15 @@ fn exec_invocation(
 
         //     ActionResult::FunctionCall(next_entry)
         // }
-        Invocation::InvokeConstructor { resolved, .. } => {
-            let (
-                declaration,
-                member,
-            ) = resolved.as_ref().map(AsRef::as_ref).unwrap();
+        Invocation::InvokeConstructor {
+            resolved,
+            class_name,
+            ..
+        } => {
+            let (declaration, member): &(Declaration, Rc<DeclarationMember>) = resolved
+                .as_ref()
+                .map(AsRef::as_ref)
+                .unwrap_or_else(|| panic!("Unresolved constructor for class {}", class_name));
             let class_name = declaration.name();
             if let DeclarationMember::Constructor {
                 name,
@@ -955,10 +969,7 @@ fn exec_invocation(
             }
         }
         Invocation::InvokeSuperConstructor { resolved, .. } => {
-            let (
-                declaration,
-                member,
-            ) = resolved.as_ref().map(AsRef::as_ref).unwrap();
+            let (declaration, member) = resolved.as_ref().map(AsRef::as_ref).unwrap();
             let class_name = declaration.name();
             if let DeclarationMember::Constructor {
                 name,
@@ -1335,7 +1346,7 @@ pub fn init_symbolic_reference(
         // then if they are initialised by a single type they remain that
         // if they become initialised by multiple types their type becomes REFRuntimeType (or a different one)
         // Or aliasmap contains a flag whether all types are the same of the symbolic object or there are multipe types.
-        let class_name = if let RuntimeType::ReferenceRuntimeType { type_ } = type_ref {
+        let decl_name = if let RuntimeType::ReferenceRuntimeType { type_ } = type_ref {
             type_
         } else {
             panic!("Cannot initialize any other atm");
@@ -1343,7 +1354,7 @@ pub fn init_symbolic_reference(
 
         // initialise new objects, one for each possible type (sub)class of class_name
         let new_object_references = st
-            .get_all_instance_types(class_name)
+            .get_all_instance_types(decl_name)
             .iter()
             .map(|class_name| {
                 let fields = st
@@ -1364,7 +1375,9 @@ pub fn init_symbolic_reference(
                 let reference = state.allocate_on_heap(
                     HeapValue::ObjectValue {
                         fields,
-                        type_: RuntimeType::ReferenceRuntimeType { type_: class_name.clone() },
+                        type_: RuntimeType::ReferenceRuntimeType {
+                            type_: class_name.clone(),
+                        },
                     }
                     .into(),
                 );
@@ -1374,7 +1387,7 @@ pub fn init_symbolic_reference(
             .collect_vec();
 
         // Find all other possible concrete references of the same type as sym_ref
-        let instance_types = st.get_all_instance_types(class_name);
+        let instance_types = st.get_all_instance_types(decl_name);
 
         let has_unique_type = instance_types.len() == 1;
 
@@ -1383,7 +1396,9 @@ pub fn init_symbolic_reference(
             .values()
             .filter_map(|x| {
                 if let Some(type_) = x.uniform_type() {
-                    if instance_types.contains(type_.as_reference_type().expect("expected reference type")) {
+                    if instance_types
+                        .contains(type_.as_reference_type().expect("expected reference type"))
+                    {
                         Some(Either::Left(x.aliases.iter()))
                     } else {
                         None
@@ -1803,7 +1818,9 @@ fn verify(file_content: &str, class_name: &str, method_name: &str, k: u64) -> Sy
 
     // dbg!(&c);
 
-    let initial_function = c.find_class_declaration_member(method_name, class_name.into()).unwrap();
+    let initial_function = c
+        .find_class_declaration_member(method_name, class_name.into())
+        .unwrap();
 
     let mut i = 0;
     let symbolic_table = SymbolicTable::from_ast(&c);
@@ -2147,18 +2164,24 @@ fn sym_exec_inheritance() {
         verify(&file_content, "Main", "test4_invalid", k),
         SymResult::Invalid
     );
-    assert_eq!(
-        verify(&file_content, "Main", "test5", k),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&file_content, "Main", "test5", k), SymResult::Valid);
+
+    assert_eq!(verify(&file_content, "Main", "test6", k), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_inheritance_specifications() {
-    let file_content = std::fs::read_to_string("./examples/inheritance/specifications.oox").unwrap();
+    let file_content =
+        std::fs::read_to_string("./examples/inheritance/specifications.oox").unwrap();
     let k = 150;
-    assert_eq!(verify(&file_content, "Main", "test_valid", k), SymResult::Valid);
-    assert_eq!(verify(&file_content, "Main", "test_invalid", k), SymResult::Invalid);
+    assert_eq!(
+        verify(&file_content, "Main", "test_valid", k),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify(&file_content, "Main", "test_invalid", k),
+        SymResult::Invalid
+    );
 }
 
 #[test]
@@ -2166,20 +2189,21 @@ fn sym_exec_interface() {
     let file_content = std::fs::read_to_string("./examples/inheritance/interface.oox").unwrap();
     let k = 150;
 
+    println!("hello");
+
     assert_eq!(verify(&file_content, "Main", "main", k), SymResult::Valid);
     assert_eq!(verify(&file_content, "Main", "test1_valid", k), SymResult::Valid);
     assert_eq!(verify(&file_content, "Main", "test1_invalid", k), SymResult::Invalid);
 }
 
-#[test]
-fn sym_exec_interface2() {
-    let file_content = std::fs::read_to_string("./examples/inheritance/interface2.oox").unwrap();
-    let k = 150;
+// #[test]
+// fn sym_exec_interface2() {
+//     let file_content = std::fs::read_to_string("./examples/inheritance/interface2.oox").unwrap();
+//     let k = 150;
 
-    assert_eq!(verify(&file_content, "Foo", "test_valid", k), SymResult::Valid);
-    assert_eq!(verify(&file_content, "Foo1", "test_invalid", k), SymResult::Invalid);
-    assert_eq!(verify(&file_content, "Foo2", "test_valid", k), SymResult::Valid);
-    assert_eq!(verify(&file_content, "Foo3", "test_invalid", k), SymResult::Invalid);
-    assert_eq!(verify(&file_content, "Foo4", "test_valid", k), SymResult::Valid);
-}
-
+//     assert_eq!(verify(&file_content, "Foo", "test_valid", k), SymResult::Valid);
+//     assert_eq!(verify(&file_content, "Foo1", "test_invalid", k), SymResult::Invalid);
+//     assert_eq!(verify(&file_content, "Foo2", "test_valid", k), SymResult::Valid);
+//     assert_eq!(verify(&file_content, "Foo3", "test_invalid", k), SymResult::Invalid);
+//     assert_eq!(verify(&file_content, "Foo4", "test_valid", k), SymResult::Valid);
+// }

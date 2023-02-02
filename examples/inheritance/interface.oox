@@ -3,17 +3,19 @@ interface Eater {
 }
 
 interface Animal extends Eater {
-  void animalSound();
+  void animalSound() { assert false; }
 }
 
 interface Sleeper {
-  void sleep();
+  void sleep() { assert false; }
 }
 
 class Pig implements Animal, Sleeper, Eater {
   bool hasMadeSound;
   bool hasSlept;
   bool hasEaten;
+
+  Pig() {}
 
   void animalSound() {
     this.hasMadeSound := true;
@@ -28,7 +30,7 @@ class Pig implements Animal, Sleeper, Eater {
   }
 }
 
-class Dog extends Eater {
+class Dog implements Eater {
   void eat() {
     assert false;
   }
@@ -36,7 +38,11 @@ class Dog extends Eater {
 
 class Main {
   static void main() {
-    Pig myPig = new Pig();  // Create a Pig object
+    Pig myPig := new Pig();  // Create a Pig object
+
+    bool hasMadeSound := myPig.hasMadeSound;
+    bool hasSlept := myPig.hasSlept;
+    bool hasEaten := myPig.hasEaten;
 
     assert hasMadeSound == false && hasSlept == false && hasEaten == false;
 

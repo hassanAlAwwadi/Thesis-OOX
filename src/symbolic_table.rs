@@ -10,46 +10,64 @@ pub type Fields = Vec<(Identifier, NonVoidType)>;
 
 pub struct SymbolicTable {
     pub class_to_fields: HashMap<Identifier, Fields>,
-    pub classes: HashMap<Identifier, Declaration>,
-    pub class_to_instance_types: HashMap<Identifier, Vec<Identifier>>,
+    pub declarations: HashMap<Identifier, Declaration>,
+    pub decl_to_instance_types: HashMap<Identifier, Vec<Identifier>>,
 }
 
 impl SymbolicTable {
     pub fn from_ast(compilation_unit: &CompilationUnit) -> SymbolicTable {
         let mut class_to_fields = HashMap::new();
-        let mut classes = HashMap::new();
+        let mut declarations = HashMap::new();
         for member in &compilation_unit.members {
             match member.clone() {
                 Declaration::Class(class) => {
                     let class_name = member.name();
                     let fields = Self::collect_fields(class);
                     class_to_fields.insert(class_name.clone(), fields);
-                    classes.insert(class_name.clone(), member.clone());
+                    declarations.insert(class_name.clone(), member.clone());
                 }
-                Declaration::Interface(_) => todo!(),
+                Declaration::Interface(interface) => {
+                    declarations.insert(interface.name.clone(), member.clone());
+                }
             }
         }
-
-        let mut class_to_instance_types = classes
-            .keys()
-            .map(|class_name| {
-                (
-                    class_name.clone(),
-                    std::iter::once(class_name.clone())
-                        .chain(
-                            Self::subclasses(&classes, class_name)
-                                .into_iter()
-                                .map(|class| class.name.clone()),
-                        )
-                        .collect_vec(),
-                )
-            })
+        // For each declaration, all possible types that can be represented at runtime,
+        // considering inheritance and interfaces.
+        let decl_to_instance_types = declarations
+            .iter()
+            .map(
+                |(name, decl)| {
+                    let derived_classes = Self::derived_classes(decl.clone())
+                        .into_iter()
+                        .map(|class| class.name.clone())
+                        .collect_vec();
+                    (name.clone(), derived_classes)
+                }, // match decl {
+                   //     Declaration::Class(_) => (
+                   //         name.clone(),
+                   //         std::iter::once(name.clone())
+                   //             .chain(
+                   //                 Self::derived_classes(decl.clone())
+                   //                     .into_iter()
+                   //                     .map(|class| class.name.clone()),
+                   //             )
+                   //             .collect(),
+                   //     ),
+                   //     Declaration::Interface(_) => (
+                   //         name.clone(),
+                   //         Self::derived_classes(decl.clone())
+                   //             .into_iter()
+                   //             .map(|class| class.name.clone())
+                   //             .collect(),
+                   //     ),
+                   // }
+            )
             .collect::<HashMap<_, _>>();
 
         SymbolicTable {
             class_to_fields,
-            classes,
-            class_to_instance_types,
+            declarations,
+            decl_to_instance_types,
         }
     }
 
@@ -60,17 +78,18 @@ impl SymbolicTable {
     /// Returns class_name and all subclasses of class_name,
     /// in other words all possible instance types for this class.
     pub fn get_all_instance_types(&self, class_name: &str) -> &Vec<Identifier> {
-        &self.class_to_instance_types[class_name]
+        &self.decl_to_instance_types[class_name]
     }
-    /// Get all subclasses of the class_name
-    fn subclasses<'a>(
-        classes: &HashMap<String, Declaration>,
-        class_name: &str,
-    ) -> Vec<Rc<syntax::Class>> {
-        let declaration = &classes[class_name];
-        let class = declaration.as_class().expect("expected class");
 
-        fn helper(subclass: Rc<syntax::Class>) -> Vec<Rc<syntax::Class>> {
+    /// Get all derived classes of the declaration
+    /// This includes childs of child etc.
+    fn derived_classes<'a>(declaration: Declaration) -> Vec<Rc<syntax::Class>> {
+        let derived_classes = match declaration {
+            Declaration::Class(class) => class_helper(class),
+            Declaration::Interface(interface) => interface_helper(interface),
+        };
+
+        fn class_helper(subclass: Rc<syntax::Class>) -> Vec<Rc<syntax::Class>> {
             std::iter::once(subclass.clone())
                 .chain(
                     subclass
@@ -78,19 +97,25 @@ impl SymbolicTable {
                         .borrow()
                         .iter()
                         .cloned()
-                        .flat_map(helper),
+                        .flat_map(class_helper),
                 )
                 .collect_vec()
         }
 
-        let x = class
-            .subclasses
-            .borrow()
-            .iter()
-            .cloned()
-            .flat_map(helper)
-            .collect_vec();
-        x
+        fn interface_helper(subinterface: Rc<syntax::Interface>) -> Vec<Rc<syntax::Class>> {
+            let implemented = subinterface.implemented.borrow();
+            let subinterfaces = subinterface.subinterfaces.borrow();
+
+            let subclasses_from_subclasses = implemented.iter().cloned().flat_map(class_helper);
+            let subclasses_from_interfaces = subinterfaces
+                .iter().cloned().flat_map(interface_helper).into_iter();
+                
+            subclasses_from_subclasses
+                .chain(subclasses_from_interfaces)
+                .collect()
+        }
+
+        derived_classes
     }
 
     /// Collects fields from declaration, by looking at the class and its superclasses

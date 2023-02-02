@@ -134,4 +134,9 @@ class Main {
     static void test5(Bar bar) {
         bar.something();
     }
+    
+    // Method of Bar::shift should be resolved
+    static void test6(Bar2 bar) {
+        bar.shift();
+    }
 }

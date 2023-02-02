@@ -1,23 +1,61 @@
-use std::{rc::Rc, cell::RefCell};
+use std::{cell::RefCell, rc::Rc};
 
-use super::{Identifier, NonVoidType, Parameter, Statement, classes::Class};
+use itertools::Itertools;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+use super::{classes::Class, Identifier, NonVoidType, Parameter, Statement, Type};
+use std::fmt::Debug;
+
+#[derive(Clone, Eq, PartialEq)]
 pub struct Interface {
     pub name: Identifier,
     pub extends: Vec<Rc<Interface>>, // interfaces that this interface extends
     pub subinterfaces: RefCell<Vec<Rc<Interface>>>, // interfaces that extend this interface
     pub implemented: RefCell<Vec<Rc<Class>>>, // classes that implement this interface
-    pub members: Vec<Rc<InterfaceMembers>>
+    pub members: Vec<Rc<InterfaceMember>>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum InterfaceMember {
+    Method(InterfaceMethod),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct InterfaceMethod {
+    pub type_: Type,
+    pub name: Identifier,
+    pub parameters: Vec<Parameter>,
+    pub body: Option<Statement>,
+
+}
+
+/// Searches for interface method with default implementation, that can be resolved to in method invocation.
+/// Suboptimal return of InterfaceMethods -- wrap in Rc
+pub fn find_interface_method<'a>(
+    method_name: &'a str,
+    members: &'a Vec<Rc<InterfaceMember>>,
+) -> Option<InterfaceMethod> {
+    members
+        .iter()
+        .find_map(|member| {
+            let InterfaceMember::Method(interface@InterfaceMethod{ name, body, .. }) = member.as_ref();
+            if name == method_name && body.is_some() {
+                return Some(interface);
+            }
+            
+            None
+        })
+        .cloned()
 }
 
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum InterfaceMembers {
-    Method {
-        type_: Option<NonVoidType>,
-        identifier: Identifier,
-        parameters: Vec<Parameter>,
-        body: Option<Statement>,
+impl Debug for Interface {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Interface")
+            .field("name", &self.name)
+            .field("extends", &self.extends.iter().map(|interface| &interface.name).collect_vec())
+            .field("subinterfaces", &self.subinterfaces.borrow().iter().map(|interface| &interface.name).collect_vec())
+            .field("implemented", &self.implemented.borrow().iter().map(|interface| &interface.name).collect_vec())
+            .field("members", &self.members)
+            .finish()
     }
 }
