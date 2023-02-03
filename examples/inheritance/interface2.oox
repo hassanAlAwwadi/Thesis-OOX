@@ -21,13 +21,13 @@ class Foo implements A {
 }
 
 class Foo1 implements A {
-    static void test_invalid(Foo foo) {
+    static void test_invalid(Foo1 foo) {
         foo.a();
     }
 }
 
 class Foo2 implements B {
-    static void test_valid(Foo foo) {
+    static void test_valid(Foo2 foo) {
         foo.a();
     }
 }
@@ -36,14 +36,14 @@ class Foo3 implements B {
     void a() {
         assert false;
     }
-    static void test_invalid(Foo foo) {
+    static void test_invalid(Foo3 foo) {
         foo.a();
     }
 }
 
 // A bit of a strange case, where B is earlier in the hierarchy tree so B.a is resolved
 class Foo4 implements A, B {
-    static void test_valid(Foo foo) {
+    static void test_valid(Foo4 foo) {
         foo.a();
     }
 }

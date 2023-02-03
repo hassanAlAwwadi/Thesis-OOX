@@ -647,7 +647,7 @@ fn action(
             ActionResult::Continue
         }
         CFGStatement::FunctionExit {
-            class_name,
+            decl_name,
             method_name,
         } => {
             state.exception_handler.decrement_handler();
@@ -1037,11 +1037,11 @@ fn find_entry_for_static_invocation(
         .iter()
         .find(|(k, v)| {
             if let CFGStatement::FunctionEntry {
-                class_name: other_class_name,
+                decl_name: other_decl_name,
                 method_name: other_method_name,
             } = *v
             {
-                other_class_name == class_name && other_method_name == method_name
+                other_decl_name == class_name && other_method_name == method_name
             } else {
                 false
             }
@@ -2196,14 +2196,14 @@ fn sym_exec_interface() {
     assert_eq!(verify(&file_content, "Main", "test1_invalid", k), SymResult::Invalid);
 }
 
-// #[test]
-// fn sym_exec_interface2() {
-//     let file_content = std::fs::read_to_string("./examples/inheritance/interface2.oox").unwrap();
-//     let k = 150;
+#[test]
+fn sym_exec_interface2() {
+    let file_content = std::fs::read_to_string("./examples/inheritance/interface2.oox").unwrap();
+    let k = 150;
 
-//     assert_eq!(verify(&file_content, "Foo", "test_valid", k), SymResult::Valid);
-//     assert_eq!(verify(&file_content, "Foo1", "test_invalid", k), SymResult::Invalid);
-//     assert_eq!(verify(&file_content, "Foo2", "test_valid", k), SymResult::Valid);
-//     assert_eq!(verify(&file_content, "Foo3", "test_invalid", k), SymResult::Invalid);
-//     assert_eq!(verify(&file_content, "Foo4", "test_valid", k), SymResult::Valid);
-// }
+    assert_eq!(verify(&file_content, "Foo", "test_valid", k), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Foo1", "test_invalid", k), SymResult::Invalid);
+    assert_eq!(verify(&file_content, "Foo2", "test_valid", k), SymResult::Valid);
+    assert_eq!(verify(&file_content, "Foo3", "test_invalid", k), SymResult::Invalid);
+    assert_eq!(verify(&file_content, "Foo4", "test_valid", k), SymResult::Valid);
+}

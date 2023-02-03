@@ -18,11 +18,11 @@ pub enum CFGStatement {
     CatchExit,
     Seq(u64, u64),
     FunctionEntry{
-        class_name: String, 
+        decl_name: String, 
         method_name: String
     },
     FunctionExit {
-        class_name: String, 
+        decl_name: String, 
         method_name: String
     },
 }
@@ -76,7 +76,7 @@ fn memberCFG(
         } => {
             let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
             let mut v = Vec::new();
-            v.push((*i, CFGStatement::FunctionEntry { class_name: class_name.clone(), method_name: name.clone() }));
+            v.push((*i, CFGStatement::FunctionEntry { decl_name: class_name.clone(), method_name: name.clone() }));
             let entry_label = *i;
             *i += 1;
             v.append(&mut statementCFG(&body, i));
@@ -84,7 +84,7 @@ fn memberCFG(
             v.push((*i, CFGStatement::Statement(Statement::Return { expression: Expression::Var { var: "this".to_string(), type_: member.type_of() }.into() })));
             let return_this_label = *i;
             *i += 1;
-            v.push((*i, CFGStatement::FunctionExit{ class_name, method_name: name.clone() }));
+            v.push((*i, CFGStatement::FunctionExit{ decl_name: class_name, method_name: name.clone() }));
             let exit_label = *i;
             *i += 1;
 
@@ -130,11 +130,11 @@ fn interface_member_cfg(class_name: String,
 fn label_method(class_name: String, name: &String,  body: &Statement, i: &mut u64) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
     let mut v = Vec::new();
-    v.push((*i, CFGStatement::FunctionEntry { class_name: class_name.clone(), method_name: name.clone() }));
+    v.push((*i, CFGStatement::FunctionEntry { decl_name: class_name.clone(), method_name: name.clone() }));
     let entry_label = *i;
     *i += 1;
     v.append(&mut statementCFG(&body, i));
-    v.push((*i, CFGStatement::FunctionExit { class_name, method_name: name.clone() }));
+    v.push((*i, CFGStatement::FunctionExit { decl_name: class_name, method_name: name.clone() }));
     let exit_label = *i;
     *i += 1;
 

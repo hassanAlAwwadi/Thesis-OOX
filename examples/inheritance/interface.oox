@@ -63,7 +63,7 @@ class Main {
   }
 
   // Both Pig and Dog implement Eater, Dog.eat() asserts to false so we expect a fail.
-  static void test1_invalid(Animal animal) {
+  static void test1_invalid(Eater animal) {
     animal.eat();
   }
 }

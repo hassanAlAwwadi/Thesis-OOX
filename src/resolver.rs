@@ -15,7 +15,7 @@ pub fn set_resolvers(
 ) -> CompilationUnit<Declaration> {
     let members = resolve_inheritance(compilation_unit.members);
 
-    dbg!(&members);
+    // dbg!(&members);
 
     let mut compilation_unit = CompilationUnit { members };
 
@@ -589,7 +589,7 @@ fn resolve_inheritance(unresolved: Vec<UnresolvedDeclaration>) -> Vec<Declaratio
 
     let resolved_interfaces = resolve_interfaces(&unresolved);
 
-    dbg!(&resolved_interfaces);
+    // dbg!(&resolved_interfaces);
 
     let classes_that_dont_extend = unresolved
         .iter()
@@ -618,14 +618,22 @@ fn resolve_inheritance(unresolved: Vec<UnresolvedDeclaration>) -> Vec<Declaratio
         .iter()
         .copied()
         .map(|u| {
-            let UnresolvedClass { name, members, .. } = u.clone();
-            Rc::new(syntax::Class {
+            let UnresolvedClass { name, members, implements, .. } = u.clone();
+
+            let implements = find_interfaces(&implements, &resolved_interfaces)
+            .expect("unresolved interface");
+
+            let class = Rc::new(syntax::Class {
                 name,
                 extends: None,
                 subclasses: RefCell::new(Vec::new()),
-                implements: vec![],
+                implements: implements.clone(),
                 members,
-            })
+            });
+            for interface in implements {
+                interface.implemented.borrow_mut().push(class.clone());
+            }
+            class
         })
         .collect_vec();
 
@@ -645,15 +653,7 @@ fn resolve_inheritance(unresolved: Vec<UnresolvedDeclaration>) -> Vec<Declaratio
 
             if let Some(class_it_extends) = class_it_extends {
                 // Resolve implements
-                let implements = implements
-                    .iter()
-                    .map(|interface_name| {
-                        resolved_interfaces
-                            .iter()
-                            .cloned()
-                            .find(|i| i.name == *interface_name)
-                    })
-                    .collect::<Option<Vec<_>>>()
+                let implements = find_interfaces(&implements, &resolved_interfaces)
                     .expect("unresolved interface");
 
                 let resolved_class = Rc::new(syntax::Class {
@@ -694,6 +694,20 @@ fn resolve_inheritance(unresolved: Vec<UnresolvedDeclaration>) -> Vec<Declaratio
         }
     }
 }
+
+/// Returns Some if all interfaces are found, otherwise returns None
+fn find_interfaces(interface_names: &[String], interfaces: &Vec<Rc<Interface>>) -> Option<Vec<Rc<Interface>>> {
+    interface_names
+        .iter()
+        .map(|interface_name| {
+            interfaces
+                .iter()
+                .cloned()
+                .find(|i| i.name == *interface_name)
+        })
+        .collect::<Option<Vec<_>>>()
+}
+
 /// Assumes no cyclic inheritance between interfaces
 fn resolve_interfaces(unresolved: &Vec<UnresolvedDeclaration>) -> Vec<Rc<Interface>> {
     let interfaces_that_dont_extend = unresolved
