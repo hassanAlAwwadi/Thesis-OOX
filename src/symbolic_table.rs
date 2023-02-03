@@ -40,27 +40,10 @@ impl SymbolicTable {
                     let derived_classes = Self::derived_classes(decl.clone())
                         .into_iter()
                         .map(|class| class.name.clone())
+                        .unique()
                         .collect_vec();
                     (name.clone(), derived_classes)
-                }, // match decl {
-                   //     Declaration::Class(_) => (
-                   //         name.clone(),
-                   //         std::iter::once(name.clone())
-                   //             .chain(
-                   //                 Self::derived_classes(decl.clone())
-                   //                     .into_iter()
-                   //                     .map(|class| class.name.clone()),
-                   //             )
-                   //             .collect(),
-                   //     ),
-                   //     Declaration::Interface(_) => (
-                   //         name.clone(),
-                   //         Self::derived_classes(decl.clone())
-                   //             .into_iter()
-                   //             .map(|class| class.name.clone())
-                   //             .collect(),
-                   //     ),
-                   // }
+                },
             )
             .collect::<HashMap<_, _>>();
 

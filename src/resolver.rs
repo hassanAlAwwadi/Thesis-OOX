@@ -690,7 +690,7 @@ fn resolve_inheritance(unresolved: Vec<UnresolvedDeclaration>) -> Vec<Declaratio
 
         i += 1;
         if i == max_iterations {
-            panic!("max iterations reached");
+            panic!("max iterations reached, likely due to cyclic inheritance");
         }
     }
 }
@@ -746,7 +746,8 @@ fn resolve_interfaces(unresolved: &Vec<UnresolvedDeclaration>) -> Vec<Rc<Interfa
         .collect_vec();
 
     let mut resolved = interfaces_that_dont_extend;
-
+    let max_iterations = 1000;
+    let mut i = 0;
     loop {
         interfaces_that_extend.retain(|declaration| {
             let UnresolvedInterface {
@@ -791,6 +792,10 @@ fn resolve_interfaces(unresolved: &Vec<UnresolvedDeclaration>) -> Vec<Rc<Interfa
         });
         if interfaces_that_extend.len() == 0 {
             return resolved.into_iter().collect_vec();
+        }
+        i += 1;
+        if i == max_iterations {
+            panic!("max iterations reached, likely due to cyclic inheritance");
         }
     }
 }

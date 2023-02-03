@@ -1,0 +1,22 @@
+
+interface A {
+
+}
+
+interface B extends A {
+
+}
+
+class Foo implements A, B {
+
+}
+
+class Foo2 extends Foo {
+
+}
+
+class Main {
+    static void main() {
+        
+    }
+}
