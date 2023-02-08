@@ -588,7 +588,7 @@ fn rhs<'a>() -> Parser<'a, Token<'a>, Rhs> {
             type_: RuntimeType::UnknownRuntimeType,
         });
     let rhs_array = (keyword("new") * (classtype() | primitivetype())
-        + (punct("[") * integer() - punct("]")).repeat(1..))
+        + (punct("[") * (integer() | expression())  - punct("]")).repeat(1..))
     .map(|(array_type, sizes)| Rhs::RhsArray {
         array_type,
         sizes,

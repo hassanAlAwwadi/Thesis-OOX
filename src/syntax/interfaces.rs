@@ -28,7 +28,7 @@ pub struct InterfaceMethod {
 
 }
 
-/// Searches for interface method with default implementation, that can be resolved to in method invocation.
+/// Searches for interface methods, with the name method_name.
 /// Suboptimal return of InterfaceMethods -- wrap in Rc
 pub fn find_interface_method<'a>(
     method_name: &'a str,
@@ -38,7 +38,7 @@ pub fn find_interface_method<'a>(
         .iter()
         .find_map(|member| {
             let InterfaceMember::Method(interface@InterfaceMethod{ name, body, .. }) = member.as_ref();
-            if name == method_name && body.is_some() {
+            if name == method_name {
                 return Some(interface);
             }
             

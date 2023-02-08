@@ -1,0 +1,374 @@
+interface Iterator {
+    bool hasNext();
+
+    int next();
+}
+
+interface Comparator {
+
+    int compare(int o1, int o2);
+}
+
+class IteratorList {
+    Iterator[] elements;
+    Iterator capacity;
+    Iterator size;
+
+    IteratorList(Iterator capacity) 
+    {
+        this.elements := new Iterator[capacity];
+        this.capacity := capacity;
+        this.size := 0;
+    }
+
+    void add(Iterator element) {
+        int i := this.size;
+        int oldSize := this.size;
+        this.size := oldSize + 1;
+        int[] elements := this.elements;
+        int[] a := elements;
+        a[i] := element;
+    }
+
+    Iterator get(int index) {
+        int[] elements := this.elements;
+        Iterator element := elements[index];
+        return element;
+    }
+}
+
+class IntList {
+    int[] elements;
+    int capacity;
+    int size;
+
+    IntList(int capacity) {
+        this.elements := new int[capacity];
+        this.capacity := capacity;
+        this.size := 0;
+    }
+
+    void add(int element) {
+        int i := this.size;
+        int oldSize := this.size;
+        this.size := oldSize + 1;
+        int[] elements := this.elements;
+        int[] a := elements;
+        a[i] := element;
+    }
+
+    int get(int index) {
+        int[] elements := this.elements;
+        int element := elements[index];
+        return element;
+    }
+
+    void set(int index, int element) {
+        int[] elements := this.elements;
+        elements[index] := element;
+    }
+
+    Iterator iterator() {
+        int[] elements := this.elements;
+        Iterator iter := new ListIteratorOfInt(elements, #elements);
+        return iter;
+    }
+}
+
+
+class CollatingIterator implements Iterator {
+    Comparator comp;
+    IteratorList iterators;
+    IntList values;
+    BitSet valueSet;
+
+
+    void constructorHelper(Comparator comp, int initIterCapacity) {
+        this.setComparator(comp);
+        this.iterators := new IteratorList(2);
+    }
+
+    CollatingIterator(Comparator comp, Iterator a, Iterator b) {
+        this.constructorHelper(comp, 2);
+        this.addIterator(a);
+        this.addIterator(b);
+    }
+
+    void setComparator(Comparator comp) {
+        this.checkNotStarted();
+        this.comparator := comp;
+    }
+
+    void checkNotStarted() {
+        IntList values := this.values;
+        if (values != null) {
+            throw "Can't do that after next or hasNext has been called.";
+        }
+    }
+
+    void addIterator(Iterator iterator) {
+        this.checkNotStarted();
+        if (iterator == null) {
+            throw "Iterator must not be null";
+        }
+        IteratorList iterators := this.iterators;
+        iterators.add(iterator);
+    }
+
+    bool hasNext() {
+        this.start();
+        IteratorList iterators := this.iterators;
+        BitSet valueSet := this.valueSet;
+        bool anyValueSet := this.anyValueSet(valueSet);
+        bool anyHasNext := this.anyHasNext(iterators);
+        return anyValueSet || anyHasNext;
+    }
+
+    void start() {
+        IntList values := this.values;
+        BitSet valueSet := this.valueSet;
+        IteratorList iterators := this.iterators;
+        if (values == null) {
+            int iteratorSize := iterators.size;
+            values := new IntList(iteratorSize);
+            valueSet := new BitSet(iteratorSize);
+            int i := 0;
+            while (i < iteratorSize) {
+                values.add(-1);
+                valueSet.clear(i);
+                i := i + 1;
+            }
+            this.values := values;
+            this.valueSet := valueSet;
+        }
+    }
+
+    int next() {
+        bool hasNext := this.hasNext();
+        if (hasNext == false) {
+            throw "NoSuchElementException()";
+        }
+        int leastIndex := this.least();
+        if (leastIndex == -1) {
+            throw "new NoSuchElementException()";
+        }
+        IntList values := this.values;
+        int val := values.get(leastIndex);
+        this.clear(leastIndex);
+        //lastReturned := leastIndex;
+        return val;
+    }
+
+    void clear(int i) {
+        IntList values := this.values;
+        values.set(i, null);
+        BitSet valueSet := this.valueSet;
+        valueSet.clear(i);
+    }
+
+
+    bool anyHasNext(IteratorList iters) {
+        int i := 0;
+        int size := iters.size;
+        while (i < size) {
+            Iterator iterator := iters.get(i);
+            bool hasNext := iterator.hasNext();
+            if (hasNext) {
+                return true;
+            }
+            i := i + 1;
+        }
+        return false;
+    }
+
+    bool anyValueSet(BitSet set) {
+        int i := 0; 
+        int size := set.size;
+
+        while (i < size) {
+            bool setI := set.get(i);
+            if (setI) {
+                return true;
+            }
+            i := i + 1;
+        }
+        return false;
+    }
+
+    int least() {
+        int leastIndex := -1;
+        int leastObject;
+        int i := 0; 
+        IntList values := this.values;
+        int valueSize := values.size;
+        while (i < valueSize) {
+            BitSet valueSet := this.valueSet;
+            bool valueSetI := valueSet.get(i);
+            if (valueSetI == false) {
+                this.set(i);
+            }
+            bool valueSetI := valueSet.get(i);
+            if (valueSetI) {
+                if (leastIndex == -1) {
+                    leastIndex := i;
+                    leastObject := values.get(i);
+                } else {
+                    int curObject := values.get(i);
+                    Comparator comparator := this.comparator;
+                    if (comparator == null) {
+                        throw "new NullPointerException(You must invoke setComparator() to set a comparator first.";
+                    }
+                    int compare := comparator.compare(curObject, leastObject);
+                    
+                    if (compare < 0) {
+                        leastObject := curObject;
+                        leastIndex := i;
+                    }
+                }
+            }
+            i := i + 1;
+        }
+    }
+
+    bool set(int i) {
+        IntList values := this.values;
+        BitSet valueSet := this.valueSet;
+        IteratorList iterators := this.iterators;
+        Iterator it := iterators.get(i);
+
+        bool hasNext := it.hasNext();
+        if (hasNext) {
+            int itNext := it.next();
+            values.set(i, itNext);
+            valueSet.set(i);
+            return true;
+        }
+        values.set(i, null);
+        valueSet.clear(i);
+        return false;
+    }
+}
+
+
+// mock implementation of Java BitSet, since we don't support bit operations.
+class BitSet {
+    bool[] elements;
+    int size;
+
+    BitSet(int size) {
+        this.elements := new bool[size];
+        this.size := size;
+    }
+
+    void clear(int index) {
+        bool[] elements := this.elements;
+        elements[index] := false;
+    }
+    
+    bool get(int index) {
+        bool[] elements := this.elements;
+        bool el := elements[index];
+        return el;
+    }
+
+    void set(int index) {
+        int[] elements := this.elements;
+        elements[index] := true;
+    }
+}
+
+class IteratorUtils {
+
+    static Iterator collatedIterator(Comparator comparator, 
+                                     Iterator iterator1, 
+                                     Iterator iterator2) {
+        CollatingIterator i := new CollatingIterator(comparator, iterator1, iterator2);
+        return i;
+    }
+
+    static IntList toList(Iterator iterator) {
+        IntList retVal := IteratorUtils.toList1(iterator, 10); // this 10 might be problematic, less than required in the test so it will have to rewrite
+        return retVal;
+    }
+
+    static IntList toList1(Iterator iterator, int estimatedSize) {
+        //assert iterator == null;
+        if (iterator == null) {
+            throw "Iterator must not be null";
+        }
+        if (estimatedSize < 1) {
+            throw "Estimated size must be greater than 0";
+        }
+        IntList list := new IntList(estimatedSize);
+
+        bool hasNext := iterator.hasNext();
+        while (hasNext) {
+            int next := iterator.next();
+            list.add(next);
+        }
+        return list;
+    }
+}
+
+// Simplified version of 
+// Java's Itr implements Iterator<int>
+class ListIteratorOfInt implements Iterator {
+    int cursor;
+    int[] elements;
+    int size;
+
+    ListIteratorOfInt(int[] elements, int size) {
+        this.elements := elements;
+        this.size := size;
+    }
+
+    bool hasNext() {
+        int size := this.size;
+        int cursor := this.cursor;
+        return cursor != size;
+    }
+
+    int next() {
+        int size := this.size;
+        int cursor := this.cursor;
+        int[] elements := this.elements;
+        if (cursor >= size) {
+            throw "NoSuchElementException";
+        }
+        int element := elements[cursor];
+        cursor := cursor + 1;
+        return element;
+    }
+}
+
+
+class Test {
+    static void test(int x)
+        exceptional(false) {
+
+        IntList collectionEven := new IntList(6); 
+        collectionEven.add(2);
+        collectionEven.add(4);
+        collectionEven.add(6);
+        collectionEven.add(8);
+        collectionEven.add(10);
+        collectionEven.add(12);
+        
+        IntList collectionOdd := new IntList(6);
+        collectionOdd.add(1);
+        collectionOdd.add(3);
+        collectionOdd.add(5);
+        collectionOdd.add(7);
+        collectionOdd.add(9);
+        collectionOdd.add(1);
+
+        Iterator evenIterator := collectionEven.iterator();
+        Iterator oddIterator := collectionOdd.iterator();
+               
+        Iterator it := IteratorUtils.collatedIterator(null, evenIterator, oddIterator);
+
+        assert it != null;
+
+        IntList list := IteratorUtils.toList(it); // throws exception because comparator is null
+    }
+}

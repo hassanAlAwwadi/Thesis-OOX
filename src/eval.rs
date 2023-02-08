@@ -177,6 +177,7 @@ fn eval_locally(
             let o = params
                 .get(var)
                 .unwrap_or_else(|| panic!("infeasible, object does not exist: {:?}", var));
+            //dbg!("var", var);
             let exp = eval_locally(state, o.clone(), st);
 
             exp.clone()

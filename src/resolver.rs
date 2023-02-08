@@ -2,7 +2,7 @@
 
 use std::{borrow::BorrowMut, cell::RefCell, collections::HashMap, ops::Deref, rc::Rc};
 
-use itertools::Itertools;
+use itertools::{Itertools, Either};
 
 use crate::syntax::{
     self, Class, CompilationUnit, Declaration, DeclarationMember, Identifier, Interface,
@@ -196,7 +196,9 @@ fn helper<'a>(
                     arguments,
                     resolved,
                 } => {
-                    if let Some(NonVoidType::ReferenceType { identifier }) =
+                    if lhs == "this" {
+                        method_call_helper(resolved, declarations, class_name, &rhs);
+                    } else if let Some(NonVoidType::ReferenceType { identifier }) =
                         &local_variables.get(lhs)
                     {
                         // This is a normal method call
@@ -325,8 +327,11 @@ fn helper<'a>(
         class_name: &String,
         method_name: &String,
     ) {
-        // dbg!(declarations, class_name, method_name);
-        let decl = find_declaration(class_name, declarations).unwrap();
+        if (method_name == "compare") {
+            dbg!( class_name, method_name);
+        }
+        
+        let decl = find_declaration(class_name, declarations).unwrap_or_else(|| panic!("could not find declaration {:?}", class_name));
 
         // Check if class itself contains the method in question
         match decl {
@@ -350,15 +355,16 @@ fn helper<'a>(
                         super_class_method
                     } else {
                         // Method not found in superclass, but perhaps in interfaces there is a default implementation.
-                        if let Some((interface_name, interface_method)) =
-                            method_in_interfaces(&class.implements, method_name)
-                        {
-                            interface_method
-                        } else {
-                            panic!(
-                                "Method {:?} is not found in class or any superclass, or interfaces for {:?}",
-                                method_name, class_name
-                            )
+                        match method_in_interfaces(&class.implements, method_name) {
+                            Either::Left(Some((interface_name, interface_method))) => {
+                                interface_method
+                            },
+                            _ => {
+                                panic!(
+                                    "Method {:?} is not found in class or any superclass, or interfaces for {:?}",
+                                    method_name, class_name
+                                )
+                            }
                         }
                     }
                 } else {
@@ -374,7 +380,8 @@ fn helper<'a>(
             Declaration::Interface(interface) => {
                 // IFoo foo;
                 // foo.method();
-                let overridable_method = method_in_interface(interface.clone(), method_name);
+
+                let overridable_method = method_in_interface(interface.clone(), method_name).expect_left(&format!("Method {:?} not declared in interface {:?} or any of its parents", method_name, interface.name));
 
                 let resolved_so_far = interface
                     .implemented
@@ -472,7 +479,7 @@ fn helper<'a>(
                 // this class does not contain the method, assign it to the overridable
                 HashMap::from([(class.name.clone(), overridable.clone())]) // MUST class.name NOT BE OF OVERRIDABLE TYPE?
             } else {
-                panic!("this class does not contain the method, but there is no method to inherit");
+                panic!("this class {:?} does not contain the method {:?}, and there is also no method to inherit", class.name, method_name);
             }
         };
 
@@ -490,11 +497,19 @@ fn helper<'a>(
     fn method_in_interfaces(
         interfaces: &Vec<Rc<Interface>>,
         method_name: &str,
-    ) -> Option<(Identifier, (Declaration, Rc<DeclarationMember>))> {
-        interfaces
+    ) -> Either<Option<(Identifier, (Declaration, Rc<DeclarationMember>))>, ()> {
+        let method_declarations = interfaces
             .iter()
             .map(|superinterface| method_in_interface(superinterface.clone(), method_name))
-            .find_map(|result| result)
+            .filter_map(|result| if let Either::Left(result) = result {
+                Some(result)
+            } else { None }).collect_vec();
+
+            if method_declarations.len() == 0 {
+                return Either::Right(());
+            }
+            Either::Left(method_declarations.into_iter().find_map(|x| x))
+        
     }
 
     /// Try to find the method in the interface, or any of its extended interfaces.
@@ -502,15 +517,17 @@ fn helper<'a>(
     /// we return None since this means that the classes/interfaces below must override it.
     ///
     /// We choose the first default implementation we find, but note that this may not be semantically correct.
+    /// Returns Left if the method is found, with or without implementation
+    /// Returns Right when the method is not found at all (= static semantic error)
     fn method_in_interface(
         interface: Rc<Interface>,
         method_name: &str,
-    ) -> Option<(Identifier, (Declaration, Rc<DeclarationMember>))> {
+    ) -> Either<Option<(Identifier, (Declaration, Rc<DeclarationMember>))>, ()> {
         let method = syntax::find_interface_method(&method_name, &interface.members);
 
         if let Some(method) = method {
             if let Some(body) = method.body.clone() {
-                Some((
+                Either::Left(Some((
                     interface.name.clone(),
                     (
                         Declaration::Interface(interface.clone()),
@@ -525,13 +542,16 @@ fn helper<'a>(
                         }
                         .into(),
                     ),
-                ))
+                )))
             } else {
                 // Abstract method defined in this interface, no need to look in superinterfaces, but cannot provide overridable.
-                None
+                Either::Left(None)
             }
         } else {
             // find first non-default method in superinterfaces, or none.
+            if interface.extends.len() == 0 {
+                return Either::Right(());
+            }
             method_in_interfaces(&interface.extends, method_name)
         }
     }
