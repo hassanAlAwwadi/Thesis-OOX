@@ -228,6 +228,7 @@ class CollatingIterator implements Iterator {
             }
             i := i + 1;
         }
+        return leastIndex;
     }
 
     bool set(int i) {
@@ -261,8 +262,7 @@ class BitSet {
     }
 
     void clear(int index) {
-        bool[] elements := this.elements;
-        elements[index] := false;
+        bool[] elements := this.elements;Collections
     }
     
     bool get(int index) {
@@ -343,7 +343,8 @@ class ListIteratorOfInt implements Iterator {
 
 
 class Test {
-    static void test(int x)
+    // original test in Java, converted to OOX
+    static void test()
         exceptional(false) {
 
         IntList collectionEven := new IntList(6); 
@@ -370,5 +371,52 @@ class Test {
         assert it != null;
 
         IntList list := IteratorUtils.toList(it); // throws exception because comparator is null
+    }
+
+    static IntList helper_IntList(int[] elements) {
+        IntList list := new IntList(#elements);
+        int i := 0;
+        while (i < #elements) {
+            int e_i := elements[i];
+            list.add(e_i);
+            i := i + 1;
+        }
+        return list;
+    }
+
+    static void test_symbolic(int[] elements)
+        requires(elements != null && #elements == 3)
+        exceptional(false) {
+
+
+        IntList collectionEven := Test.helper_IntList(elements);
+        
+        IntList collectionOdd := new IntList(6);
+        collectionOdd.add(1);
+        collectionOdd.add(3);
+        collectionOdd.add(5);
+        collectionOdd.add(7);
+        collectionOdd.add(9);
+        collectionOdd.add(1);
+
+        Iterator evenIterator := collectionEven.iterator();
+        Iterator oddIterator := collectionOdd.iterator();
+               
+        Iterator it := IteratorUtils.collatedIterator(null, evenIterator, oddIterator);
+
+        assert it != null;
+
+        IntList list := IteratorUtils.toList(it); // throws exception because comparator is null
+    }
+
+    static void test3(int[] elements)
+        requires(elements != null && #elements == 0)
+        exceptional(false) {
+        IntList collectionEven := Test.helper_IntList(elements);
+
+        int expected := elements[0];
+        int actual := collectionEven.get(0);
+
+        assert expected == actual;
     }
 }

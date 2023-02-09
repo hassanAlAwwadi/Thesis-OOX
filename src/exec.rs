@@ -12,7 +12,7 @@ use std::{
 use itertools::{Either, Itertools};
 use num::One;
 use ordered_float::NotNan;
-use slog::{debug, info, log, o, Drain, Level, Logger, Value, error};
+use slog::{debug, error, info, log, o, Drain, Level, Logger, Value};
 use slog::{Key, Record, Result, Serializer};
 use sloggers::{
     terminal::{Destination, TerminalLoggerBuilder},
@@ -231,7 +231,6 @@ fn sym_exec(
     root_logger: Logger,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
 ) -> SymResult {
-
     let mut remaining_states: Vec<State> = vec![];
     let mut state = state;
 
@@ -252,7 +251,7 @@ fn sym_exec(
             ActionResult::FunctionCall(next) => {
                 // function call or return
                 state.pc = next;
-            },
+            }
             ActionResult::Return(return_pc) => {
                 if let Some(neighbours) = flows.get(&return_pc) {
                     let mut neighbours = neighbours.iter();
@@ -262,13 +261,13 @@ fn sym_exec(
                     for neighbour_pc in neighbours {
                         let mut new_state = state.clone();
                         new_state.pc = *neighbour_pc;
-    
+
                         remaining_states.push(new_state);
                     }
                 } else {
                     panic!("function pc does not exist");
                 }
-            },
+            }
             ActionResult::Continue => {
                 if let Some(neighbours) = flows.get(&state.pc) {
                     //dbg!(&neighbours);
@@ -278,9 +277,8 @@ fn sym_exec(
                     state.pc = *first_neighbour;
                     state.path_length += 1;
 
-    
                     let new_path_ids = (1..).map(|_| path_counter.borrow_mut().next_id());
-    
+
                     for (neighbour_pc, path_id) in neighbours.zip(new_path_ids) {
                         let mut new_state = state.clone();
                         new_state.path_id = path_id;
@@ -302,7 +300,7 @@ fn sym_exec(
                         return SymResult::Invalid;
                     }
                 }
-            },
+            }
             ActionResult::InvalidAssertion => {
                 return SymResult::Invalid;
             }
@@ -322,8 +320,8 @@ fn sym_exec(
                     // Finished
                     return SymResult::Valid;
                 }
-            },
-                    
+            }
+
             ActionResult::ArrayInitialization(array_name) => {
                 const N: u64 = 3;
                 let StackFrame { params, .. } = state.stack.last_mut().unwrap();
@@ -340,14 +338,17 @@ fn sym_exec(
 
                 let new_path_ids = (1..N).map(|_| path_counter.borrow_mut().next_id());
 
-                // initialise array on the current state, with size 0
-                array_initialisation(&mut state, &array_name, 0, array_type.clone(), *inner_type.clone());
-
                 // initialise new states with arrays 1..N
-                for (array_size, path_id) in (1..N).zip(new_path_ids) {
+                for (array_size, path_id) in (1..=N).zip(new_path_ids) {
                     let mut new_state = state.clone();
                     new_state.path_id = path_id;
-                    array_initialisation(&mut new_state, &array_name, array_size, array_type.clone(), *inner_type.clone());
+                    array_initialisation(
+                        &mut new_state,
+                        &array_name,
+                        array_size,
+                        array_type.clone(),
+                        *inner_type.clone(),
+                    );
 
                     // note path_length does not decrease, we stay at the same statement containing array access
                     remaining_states.push(new_state);
@@ -358,7 +359,16 @@ fn sym_exec(
                 let StackFrame { params, .. } = null_state.stack.last_mut().unwrap();
                 params.insert(array_name.clone(), Expression::NULL.into());
                 remaining_states.push(null_state);
-            },
+
+                // initialise array on the current state, with size 0
+                array_initialisation(
+                    &mut state,
+                    &array_name,
+                    0,
+                    array_type.clone(),
+                    *inner_type.clone(),
+                );
+            }
             ActionResult::StateSplit((guard, true_lhs, false_lhs, lhs_name)) => {
                 // split up the paths into two, one where guard == true and one where guard == false.
                 // Do not increase path_length
@@ -375,7 +385,7 @@ fn sym_exec(
                 if feasible_path {
                     write_to_stack(lhs_name, false_lhs, &mut false_state.stack);
                 }
-            },
+            }
             ActionResult::StateSplitObjectTypes {
                 symbolic_object_ref,
                 resulting_alias,
@@ -417,7 +427,13 @@ fn sym_exec(
     }
 }
 
-fn array_initialisation(state: &mut State, array_name: &String, array_size: u64, array_type: RuntimeType, inner_type: RuntimeType) {
+fn array_initialisation(
+    state: &mut State,
+    array_name: &String,
+    array_size: u64,
+    array_type: RuntimeType,
+    inner_type: RuntimeType,
+) {
     let r = state.next_reference_id();
     let StackFrame { params, .. } = state.stack.last_mut().unwrap();
     params.insert(
@@ -429,13 +445,10 @@ fn array_initialisation(state: &mut State, array_name: &String, array_size: u64,
     );
 
     let array_elements = (0..array_size)
-        .map(|i| {
-            create_symbolic_var(format!("{}{}", array_name, i), inner_type.clone())
-                .into()
-        })
+        .map(|i| create_symbolic_var(format!("{}{}", array_name, i), inner_type.clone()).into())
         .collect();
 
-        state.heap.insert(
+    state.heap.insert(
         r,
         HeapValue::ArrayValue {
             elements: array_elements,
@@ -444,12 +457,7 @@ fn array_initialisation(state: &mut State, array_name: &String, array_size: u64,
         .into(),
     );
 
-    dbg!(
-        "after array initialization",
-        &state.heap,
-        &state.alias_map
-    );
-
+    dbg!("after array initialization", &state.heap, &state.alias_map);
 }
 
 enum ActionResult {
@@ -476,16 +484,15 @@ fn action(
     let pc = state.pc;
     let action = &program[&pc];
 
-    // debug!(state.logger, "Action";
-    //  "action" => #?action,
+    debug!(state.logger, "Action"; 
+     "action" => #?action,
+    );
     //  "stack" => ?state.stack.last().map(|s| &s.params),
     //  "heap" => ?state.heap,
     //  "alias_map" => ?state.alias_map);
 
     // if (state.path_id == 58) {
     //     dbg!("Holup");
-
-
 
     // }
 
@@ -1332,7 +1339,7 @@ pub fn init_symbolic_reference(
         let decl_name = if let RuntimeType::ReferenceRuntimeType { type_ } = type_ref {
             type_
         } else {
-            panic!("Cannot initialize any other atm");
+            panic!("Cannot initialize type {:?}", type_ref);
         };
 
         // initialise new objects, one for each possible type (sub)class of class_name
@@ -1514,7 +1521,14 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolicTable) -> Rc<Expressio
     match rhs {
         Rhs::RhsExpression { value, type_ } => {
             match value {
-                Expression::Var { var, type_ } => lookup_in_stack(var, &state.stack).unwrap_or_else(|| panic!("Could not find {:?} on the stack {:?}", var, &state.stack.last().unwrap().params)),
+                Expression::Var { var, type_ } => lookup_in_stack(var, &state.stack)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Could not find {:?} on the stack {:?}",
+                            var,
+                            &state.stack.last().unwrap().params
+                        )
+                    }),
                 _ => Rc::new(value.clone()), // might have to expand on this when dealing with complex quantifying expressions and array
             }
         }
@@ -2175,8 +2189,14 @@ fn sym_exec_interface() {
     println!("hello");
 
     assert_eq!(verify(&file_content, "Main", "main", k), SymResult::Valid);
-    assert_eq!(verify(&file_content, "Main", "test1_valid", k), SymResult::Valid);
-    assert_eq!(verify(&file_content, "Main", "test1_invalid", k), SymResult::Invalid);
+    assert_eq!(
+        verify(&file_content, "Main", "test1_valid", k),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify(&file_content, "Main", "test1_invalid", k),
+        SymResult::Invalid
+    );
 }
 
 #[test]
@@ -2184,33 +2204,59 @@ fn sym_exec_interface2() {
     let file_content = std::fs::read_to_string("./examples/inheritance/interface2.oox").unwrap();
     let k = 150;
 
-    assert_eq!(verify(&file_content, "Foo", "test_valid", k), SymResult::Valid);
-    assert_eq!(verify(&file_content, "Foo1", "test_invalid", k), SymResult::Invalid);
-    assert_eq!(verify(&file_content, "Foo2", "test_valid", k), SymResult::Valid);
-    assert_eq!(verify(&file_content, "Foo3", "test_invalid", k), SymResult::Invalid);
+    assert_eq!(
+        verify(&file_content, "Foo", "test_valid", k),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify(&file_content, "Foo1", "test_invalid", k),
+        SymResult::Invalid
+    );
+    assert_eq!(
+        verify(&file_content, "Foo2", "test_valid", k),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify(&file_content, "Foo3", "test_invalid", k),
+        SymResult::Invalid
+    );
     //assert_eq!(verify(&file_content, "Foo4", "test_valid", k), SymResult::Valid);
 }
-
 
 #[test]
 fn sym_exec_polymorphic() {
     let file_content =
         std::fs::read_to_string("./examples/inheritance/sym_exec_polymorphic.oox").unwrap();
     let k = 150;
-    assert_eq!(
-        verify(&file_content, "Main", "main", k),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&file_content, "Main", "main", k), SymResult::Valid);
 }
-
 
 #[test]
 fn benchmark_col_25() {
     let file_content =
         std::fs::read_to_string("./benchmarks/defects4j/collections_25.oox").unwrap();
     let k = 15000;
+    assert_eq!(verify(&file_content, "Test", "test", k), SymResult::Invalid);
+}
+
+#[test]
+fn benchmark_col_25_symbolic() {
+    let file_content =
+        std::fs::read_to_string("./benchmarks/defects4j/collections_25.oox").unwrap();
+    let k = 15000;
     assert_eq!(
-        verify(&file_content, "Test", "test", k),
+        verify(&file_content, "Test", "test_symbolic", k),
+        SymResult::Invalid
+    );
+}
+
+#[test]
+fn benchmark_col_25_test3() {
+    let file_content =
+        std::fs::read_to_string("./benchmarks/defects4j/collections_25.oox").unwrap();
+    let k = 15000;
+    assert_eq!(
+        verify(&file_content, "Test", "test3", k),
         SymResult::Invalid
     );
 }
