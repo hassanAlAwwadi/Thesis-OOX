@@ -7,7 +7,7 @@ use crate::{
     cfg::CFGStatement,
     eval::evaluate,
     exec::State,
-    symbolic_table::SymbolicTable,
+    symbol_table::SymbolTable,
     syntax::{Declaration, DeclarationMember, Invocation, Lhs, RuntimeType, Parameter, Expression, Identifier}, stack::lookup_in_stack, typeable::Typeable, utils,
 };
 
@@ -23,7 +23,7 @@ pub(super) fn single_method_invocation(
     return_point: u64,
     lhs: Option<Lhs>,
     program: &HashMap<u64, CFGStatement>,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> u64 {
     let (
         declaration,
@@ -80,7 +80,7 @@ pub(super) fn multiple_method_invocation(
     return_point: u64,
     lhs: Option<Lhs>,
     program: &HashMap<u64, CFGStatement>,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> ActionResult {
     let object = lookup_in_stack(invocation_lhs, &state.stack).unwrap();
     // object can be either a concrete reference to a heap object, or a symbolic object
@@ -225,7 +225,7 @@ pub(super) fn non_static_resolved_method_invocation(
     return_point: u64,
     lhs: Option<Lhs>,
     program: &HashMap<u64, CFGStatement>,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> u64 {
     debug!(state.logger, "non-static method invocation");
 

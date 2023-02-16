@@ -8,7 +8,7 @@ use crate::{
     dsl::{and, equal, ite, negate, negative, or, ors, toIntExpr, ands},
     exec::{get_element, init_symbolic_reference, AliasMap, Heap, HeapValue, State},
     stack::{remove_from_stack, write_to_stack, StackFrame},
-    symbolic_table::SymbolicTable,
+    symbol_table::SymbolTable,
     syntax::{BinOp, Expression, Lit, RuntimeType, UnOp},
 };
 
@@ -17,7 +17,7 @@ pub type EvaluationResult<T> = Either<Rc<Expression>, T>;
 pub fn evaluateAsInt(
     state: &mut State,
     expression: Rc<Expression>,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> EvaluationResult<i64> {
     let expression = evaluate(state, expression, st);
     if let Expression::Lit {
@@ -34,7 +34,7 @@ pub fn evaluateAsInt(
 pub fn evaluate(
     state: &mut State,
     expression: Rc<Expression>,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> Rc<Expression> {
     // if substitute
 
@@ -46,7 +46,7 @@ pub fn evaluate(
     return expression;
 }
 
-fn substitute(state: &mut State, expression: Rc<Expression>, st: &SymbolicTable) -> Rc<Expression> {
+fn substitute(state: &mut State, expression: Rc<Expression>, st: &SymbolTable) -> Rc<Expression> {
     match expression.as_ref() {
         Expression::BinOp {
             bin_op,
@@ -151,7 +151,7 @@ fn substitute(state: &mut State, expression: Rc<Expression>, st: &SymbolicTable)
 fn eval_locally(
     state: &mut State,
     expression: Rc<Expression>,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> Rc<Expression> {
     match expression.as_ref() {
         Expression::BinOp {
@@ -508,7 +508,7 @@ fn evaluate_quantifier<'a, F>(
     domain: &'a String,
     formula: &'a Expression,
     state: &'a mut State,
-    st: &'a SymbolicTable,
+    st: &'a SymbolTable,
 ) -> Rc<Expression>
 where
     F: Fn(Vec<Rc<Expression>>) -> Expression,

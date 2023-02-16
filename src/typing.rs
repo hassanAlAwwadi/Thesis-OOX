@@ -7,7 +7,7 @@ use std::{collections::HashMap, rc::Rc};
 
 use crate::{
     error::{self, unification_error},
-    symbolic_table::SymbolicTable,
+    symbol_table::SymbolTable,
     syntax::*,
     typeable::Typeable,
 };
@@ -47,7 +47,7 @@ impl TypeEnvironment {
 fn type_compilation_unit(
     compilation_unit: CompilationUnit,
     env: TypeEnvironment,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> Result<CompilationUnit, TypeError> {
     let members = compilation_unit
         .members
@@ -60,7 +60,7 @@ fn type_compilation_unit(
 
 fn type_declaration(
     declaration: Declaration,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> Result<Declaration, TypeError> {
     match &declaration {
         Declaration::Class(class) => {
@@ -86,7 +86,7 @@ fn type_member(
     declaration: Declaration,
     declaration_member: DeclarationMember,
     env: &mut TypeEnvironment,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> Result<DeclarationMember, TypeError> {
     use DeclarationMember as DM;
     match &declaration_member {
@@ -179,7 +179,7 @@ fn type_statement(
     statement: Statement,
     current_method: &DeclarationMember,
     env: &mut TypeEnvironment,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> Result<Statement, TypeError> {
     match statement {
         Statement::Declare { type_, var } => {
@@ -295,7 +295,7 @@ fn type_statement(
     }
 }
 
-fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolicTable) -> Result<Lhs, TypeError> {
+fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Lhs, TypeError> {
     match lhs {
         Lhs::LhsVar { var, type_ } => {
             let type_ = env.get_var_type(&var)?;
@@ -340,7 +340,7 @@ fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolicTable) -> Result<L
     }
 }
 
-fn type_rhs(rhs: Rhs, env: &mut TypeEnvironment, st: &SymbolicTable) -> Result<Rhs, TypeError> {
+fn type_rhs(rhs: Rhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Rhs, TypeError> {
     match rhs {
         Rhs::RhsExpression { value, .. } => {
             let expr = type_expression(value.into(), env)?;
@@ -414,7 +414,7 @@ fn type_rhs(rhs: Rhs, env: &mut TypeEnvironment, st: &SymbolicTable) -> Result<R
 fn type_invocation(
     invocation: Invocation,
     env: &mut TypeEnvironment,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> Result<Invocation, TypeError> {
     match invocation {
         Invocation::InvokeMethod {

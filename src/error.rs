@@ -24,3 +24,17 @@ pub fn unexpected_return_value(expression: &Expression) -> String {
 pub fn expected_return_value_error(expected_type: RuntimeType) -> String {
     format!("Expected a return statement with an expression of type '{}', instead no expression was given", expected_type)
 }
+
+
+// Symbol table
+pub fn extended_class_does_not_exist(expected_class: &str) -> String {
+    format!("Cannot find class {}", expected_class)
+}
+
+pub fn expected_class_found_interface(expected_class: &str) -> String {
+    format!("Expected declaration {} to be a class, but found an interface.", expected_class)
+}
+
+pub fn expected_interface_found_class(expected_interface: &str) -> String {
+    format!("Expected declaration {} to be an interface, but found a class.", expected_interface)
+}

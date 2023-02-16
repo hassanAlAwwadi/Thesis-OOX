@@ -21,7 +21,7 @@ mod pretty_print;
 mod utils;
 
 mod concretization;
-mod symbolic_table;
+mod symbol_table;
 mod fold;
 mod exception_handler;
 mod typing;

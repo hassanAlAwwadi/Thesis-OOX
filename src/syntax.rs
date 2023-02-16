@@ -247,8 +247,8 @@ pub enum Invocation {
         arguments: Vec<Expression>,
         resolved: Option<Box<(Declaration, Rc<DeclarationMember>)>>, // What is this?
     },
+    /// invocation of the constructor of the superclass. i.e. `super(..);`
     InvokeSuperConstructor {
-        // super(..);
         arguments: Vec<Expression>,
         resolved: Option<Box<(Declaration, Rc<DeclarationMember>)>>,
     },

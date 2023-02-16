@@ -27,9 +27,11 @@ pub fn set_resolvers(
                 let syntax::Class {
                     name,
                     members,
+                    extends_old,
+                    implements_old,
+                    subclasses_old,
                     extends,
                     implements,
-                    subclasses,
                 } = class.as_ref().clone();
                 let members = members
                     .into_iter()
@@ -52,8 +54,8 @@ pub fn set_resolvers(
                                 &old_members,
                                 &name,
                                 &mut local_variables,
-                                extends.clone(),
-                                &implements
+                                extends_old.clone(),
+                                &implements_old
                             );
 
                             DeclarationMember::Method {
@@ -81,8 +83,8 @@ pub fn set_resolvers(
                                 &old_members,
                                 &name,
                                 &mut local_variables,
-                                extends.clone(),
-                                &implements
+                                extends_old.clone(),
+                                &implements_old
                             );
 
                             DeclarationMember::Constructor {
@@ -101,9 +103,11 @@ pub fn set_resolvers(
                     syntax::Class {
                         name,
                         members,
+                        extends_old,
+                        implements_old,
+                        subclasses_old,
                         extends,
                         implements,
-                        subclasses,
                     }
                     .into(),
                 );
@@ -125,7 +129,7 @@ pub fn set_resolvers(
                                 &interface.name,
                                 &mut local_variables,
                                 None,
-                                &interface.extends
+                                &interface.extends_old
                             );
                             
                             Rc::new(syntax::InterfaceMember::Method(syntax::InterfaceMethod { body: Some(new_body), ..method }))
@@ -299,7 +303,7 @@ fn helper<'a>(
             .expect("cannot call super.method() for interface methods");
 
         let extends = class
-            .extends
+            .extends_old
             .as_ref()
             .expect("expected at least one superclass")
             .clone();
@@ -346,7 +350,7 @@ fn helper<'a>(
 
                 // superclasses
                 let overridable = if !class_contains_method {
-                    if let Some(extends) = &class.extends {
+                    if let Some(extends) = &class.extends_old {
                         // The method is not overridden by this class, check superclasses for the method
                         let (super_class_name, super_class_method) =
                             method_in_superclass(extends.clone(), method_name)
@@ -355,7 +359,7 @@ fn helper<'a>(
                         super_class_method
                     } else {
                         // Method not found in superclass, but perhaps in interfaces there is a default implementation.
-                        match method_in_interfaces(&class.implements, method_name) {
+                        match method_in_interfaces(&class.implements_old, method_name) {
                             Either::Left(Some((interface_name, interface_method))) => {
                                 interface_method
                             },
@@ -452,7 +456,7 @@ fn helper<'a>(
                 superclass.name.to_string(),
                 (Declaration::Class(superclass), method),
             ))
-        } else if let Some(superclass) = superclass.extends.clone() {
+        } else if let Some(superclass) = superclass.extends_old.clone() {
             method_in_superclass(superclass, method_name)
         } else {
             None
@@ -488,7 +492,7 @@ fn helper<'a>(
             .map(|method: Rc<DeclarationMember>| (Declaration::Class(class.clone()), method))
             .or(overridable);
 
-        methods.extend(class.subclasses.borrow().iter().flat_map(|subclass| {
+        methods.extend(class.subclasses_old.borrow().iter().flat_map(|subclass| {
             methods_in_subclasses(subclass.clone(), method_name, overridable.clone()).into_iter()
         }));
         methods
@@ -549,10 +553,10 @@ fn helper<'a>(
             }
         } else {
             // find first non-default method in superinterfaces, or none.
-            if interface.extends.len() == 0 {
+            if interface.extends_old.len() == 0 {
                 return Either::Right(());
             }
-            method_in_interfaces(&interface.extends, method_name)
+            method_in_interfaces(&interface.extends_old, method_name)
         }
     }
 
@@ -638,19 +642,21 @@ fn resolve_inheritance(unresolved: Vec<UnresolvedDeclaration>) -> Vec<Declaratio
         .iter()
         .copied()
         .map(|u| {
-            let UnresolvedClass { name, members, implements, .. } = u.clone();
+            let UnresolvedClass { name, members, implements, extends } = u.clone();
 
-            let implements = find_interfaces(&implements, &resolved_interfaces)
+            let implements_old = find_interfaces(&implements, &resolved_interfaces)
             .expect("unresolved interface");
 
             let class = Rc::new(syntax::Class {
                 name,
-                extends: None,
-                subclasses: RefCell::new(Vec::new()),
-                implements: implements.clone(),
+                extends_old: None,
+                subclasses_old: RefCell::new(Vec::new()),
+                implements_old: implements_old.clone(),
                 members,
+                extends,
+                implements: implements.clone(),
             });
-            for interface in implements {
+            for interface in implements_old {
                 interface.implemented.borrow_mut().push(class.clone());
             }
             class
@@ -673,22 +679,24 @@ fn resolve_inheritance(unresolved: Vec<UnresolvedDeclaration>) -> Vec<Declaratio
 
             if let Some(class_it_extends) = class_it_extends {
                 // Resolve implements
-                let implements = find_interfaces(&implements, &resolved_interfaces)
+                let implements_old = find_interfaces(&implements, &resolved_interfaces)
                     .expect("unresolved interface");
 
                 let resolved_class = Rc::new(syntax::Class {
                     name: name.clone(),
-                    extends: Some(class_it_extends.clone()),
-                    subclasses: RefCell::new(Vec::new()),
+                    extends_old: Some(class_it_extends.clone()),
+                    subclasses_old: RefCell::new(Vec::new()),
                     members: members.clone(),
+                    implements_old: implements_old.clone(),
+                    extends: Some(extends),
                     implements: implements.clone(),
                 });
                 resolved.push(resolved_class.clone());
                 // Also add this class to the list of extended classes of the superclass.
-                let syntax::Class { subclasses, .. } = class_it_extends.as_ref();
+                let syntax::Class { subclasses_old: subclasses, .. } = class_it_extends.as_ref();
                 subclasses.borrow_mut().push(resolved_class.clone());
 
-                for interface in implements {
+                for interface in implements_old {
                     interface
                         .implemented
                         .borrow_mut()
@@ -742,10 +750,11 @@ fn resolve_interfaces(unresolved: &Vec<UnresolvedDeclaration>) -> Vec<Rc<Interfa
                 if extends.is_empty() {
                     return Some(Rc::new(Interface {
                         name,
-                        extends: Vec::new(),
+                        extends_old: Vec::new(),
                         subinterfaces: Default::default(),
                         implemented: Default::default(),
                         members,
+                        extends,
                     }));
                 }
             }
@@ -790,10 +799,11 @@ fn resolve_interfaces(unresolved: &Vec<UnresolvedDeclaration>) -> Vec<Rc<Interfa
                 // All its parent interfaces are already resolved so we can resolve this one
                 let resolved_interface = Rc::new(syntax::Interface {
                     name: name.clone(),
-                    extends: resolved_extends.clone(),
+                    extends_old: resolved_extends.clone(),
                     subinterfaces: RefCell::new(Vec::new()),
                     implemented: RefCell::new(Vec::new()),
                     members: members.clone(),
+                    extends: extends.clone(),
                 });
                 resolved.push(resolved_interface.clone());
 

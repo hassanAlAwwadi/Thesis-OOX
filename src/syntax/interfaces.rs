@@ -8,10 +8,12 @@ use std::fmt::Debug;
 #[derive(Clone, Eq, PartialEq)]
 pub struct Interface {
     pub name: Identifier,
-    pub extends: Vec<Rc<Interface>>, // interfaces that this interface extends
+    pub extends_old: Vec<Rc<Interface>>, // interfaces that this interface extends
     pub subinterfaces: RefCell<Vec<Rc<Interface>>>, // interfaces that extend this interface
     pub implemented: RefCell<Vec<Rc<Class>>>, // classes that implement this interface
     pub members: Vec<Rc<InterfaceMember>>,
+    
+    pub extends: Vec<Identifier>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -52,7 +54,7 @@ impl Debug for Interface {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Interface")
             .field("name", &self.name)
-            .field("extends", &self.extends.iter().map(|interface| &interface.name).collect_vec())
+            .field("extends", &self.extends_old.iter().map(|interface| &interface.name).collect_vec())
             .field("subinterfaces", &self.subinterfaces.borrow().iter().map(|interface| &interface.name).collect_vec())
             .field("implemented", &self.implemented.borrow().iter().map(|interface| &interface.name).collect_vec())
             .field("members", &self.members)
