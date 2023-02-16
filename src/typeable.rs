@@ -4,7 +4,7 @@ use ordered_float::NotNan;
 
 use crate::{
     exec::HeapValue,
-    syntax::{DeclarationMember, Expression, Lit, NonVoidType, RuntimeType, Type},
+    syntax::{DeclarationMember, Expression, Invocation, Lit, NonVoidType, RuntimeType, Type, Rhs, Lhs},
 };
 
 pub trait Typeable {
@@ -107,6 +107,26 @@ impl Typeable for Expression {
     }
 }
 
+impl Typeable for &Expression {
+    fn type_of(&self) -> RuntimeType {
+        use Expression::*;
+        match &self {
+            Forall { type_, .. } => type_,
+            Exists { type_, .. } => type_,
+            BinOp { type_, .. } => type_,
+            UnOp { type_, .. } => type_,
+            Var { type_, .. } => type_,
+            SymbolicVar { type_, .. } => type_,
+            Lit { type_, .. } => type_,
+            SizeOf { type_, .. } => type_,
+            Ref { type_, .. } => type_,
+            SymbolicRef { type_, .. } => type_,
+            Conditional { type_, .. } => type_,
+        }
+        .clone()
+    }
+}
+
 impl Typeable for RuntimeType {
     fn type_of(&self) -> RuntimeType {
         self.clone()
@@ -158,5 +178,81 @@ pub fn runtime_to_nonvoidtype(type_: RuntimeType) -> Option<NonVoidType> {
             inner_type: runtime_to_nonvoidtype(*inner_type).map(Box::new)?,
         }),
         _ => None,
+    }
+}
+
+impl Typeable for Lit {
+    fn type_of(&self) -> RuntimeType {
+        match self {
+            Lit::BoolLit { .. } => RuntimeType::BoolRuntimeType,
+            Lit::UIntLit { .. } => RuntimeType::UIntRuntimeType,
+            Lit::IntLit { .. } => RuntimeType::IntRuntimeType,
+            Lit::FloatLit { .. } => RuntimeType::FloatRuntimeType,
+            Lit::StringLit { .. } => RuntimeType::StringRuntimeType,
+            Lit::CharLit { .. } => RuntimeType::CharRuntimeType,
+            Lit::NullLit => RuntimeType::REFRuntimeType,
+        }
+    }
+}
+
+impl Typeable for Invocation {
+    fn type_of(&self) -> RuntimeType {
+        match self {
+            Invocation::InvokeMethod {
+                resolved: Some(resolved),
+                ..
+            } => {
+                let (_, (_, method)) = resolved
+                    .iter()
+                    .next()
+                    .expect("Expected at least one resolved method");
+                method.type_of()
+            }
+            Invocation::InvokeSuperMethod {
+                resolved: Some(resolved),
+                ..
+            } => resolved.1.type_of(),
+            Invocation::InvokeConstructor {
+                resolved: Some(resolved),
+                ..
+            } => resolved.1.type_of(),
+            Invocation::InvokeSuperConstructor {
+                resolved: Some(resolved),
+                ..
+            } => resolved.1.type_of(),
+            _ => panic!("type_of on unresolved invocation"),
+        }
+    }
+}
+
+impl Typeable for Lhs {
+    fn type_of(&self) -> RuntimeType {
+        match self {
+            Lhs::LhsVar { type_, .. } => type_,
+            Lhs::LhsField {  type_, .. } => type_,
+            Lhs::LhsElem { type_, .. } => type_,
+        }.clone()
+    }
+}
+
+impl Typeable for &Lhs {
+    fn type_of(&self) -> RuntimeType {
+        match self {
+            Lhs::LhsVar { type_, .. } => type_,
+            Lhs::LhsField {  type_, .. } => type_,
+            Lhs::LhsElem { type_, .. } => type_,
+        }.clone()
+    }
+}
+
+impl Typeable for Rhs {
+    fn type_of(&self) -> RuntimeType {
+        match self {
+            Rhs::RhsExpression { type_, .. } => type_,
+            Rhs::RhsField { type_, .. } => type_,
+            Rhs::RhsElem { type_, .. } => type_,
+            Rhs::RhsCall { type_, .. } => type_,
+            Rhs::RhsArray { type_, .. } => type_,
+        }.clone()
     }
 }

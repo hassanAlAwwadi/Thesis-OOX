@@ -8,6 +8,8 @@ use crate::syntax::{
 
 pub type Fields = Vec<(Identifier, NonVoidType)>;
 
+pub type Field = (Identifier, NonVoidType);
+
 pub struct SymbolicTable {
     pub class_to_fields: HashMap<Identifier, Fields>,
     pub declarations: HashMap<Identifier, Declaration>,
@@ -64,6 +66,9 @@ impl SymbolicTable {
         &self.decl_to_instance_types[class_name]
     }
 
+    pub fn lookup_field(&self, class_name: &str, field: &str) -> Option<&Field> {
+        self.class_to_fields[class_name].iter().find(|(f, _)| f == field)
+    }
     /// Get all derived classes of the declaration
     /// This includes childs of child etc.
     fn derived_classes<'a>(declaration: Declaration) -> Vec<Rc<syntax::Class>> {

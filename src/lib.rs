@@ -24,7 +24,8 @@ mod concretization;
 mod symbolic_table;
 mod fold;
 mod exception_handler;
-
+mod typing;
+mod error;
 
 #[macro_use]
 extern crate pest_derive;

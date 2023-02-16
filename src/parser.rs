@@ -651,7 +651,7 @@ fn integer<'a>() -> Parser<'a, Token<'a>, Expression> {
         .convert(i64::from_str)
         .map(|int_value| Expression::Lit {
             lit: Lit::IntLit { int_value },
-            type_: RuntimeType::ANYRuntimeType,
+            type_: RuntimeType::IntRuntimeType,
         })
 }
 

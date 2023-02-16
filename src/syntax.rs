@@ -8,7 +8,7 @@ use std::{
     cell::{Ref, RefCell},
     collections::HashMap,
     fmt::{Debug, Display},
-    rc::{Rc, Weak},
+    rc::{Rc, Weak}, ops::Deref,
 };
 
 pub use self::{interfaces::Interface, classes::Class, interfaces::InterfaceMember, interfaces::InterfaceMethod, interfaces::find_interface_method};
@@ -151,6 +151,14 @@ impl DeclarationMember {
             DeclarationMember::Constructor { params, .. } => Some(params),
             DeclarationMember::Method { params, .. } => Some(params),
             DeclarationMember::Field { .. } => None,
+        }
+    }
+
+    pub fn set_body(&mut self, new_body: Statement) {
+        match self {
+            DeclarationMember::Constructor {  body, .. } => *body = new_body,
+            DeclarationMember::Method { body, .. } => *body = new_body,
+            DeclarationMember::Field { .. } => panic!("Expected method or constructor"),
         }
     }
 }
@@ -461,7 +469,7 @@ impl Expression {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinOp {
     Implies,
     And,
@@ -542,4 +550,17 @@ impl RuntimeType {
         }
         None
     }
+
+    pub fn get_reference_type(&self) -> Option<Identifier> {
+        self.as_reference_type().cloned()
+    }
+
+    pub fn get_inner_array_type(&self) -> Option<RuntimeType> {
+        if let RuntimeType::ArrayRuntimeType { inner_type } = self {
+            return Some(inner_type.deref().clone())
+        }
+        None
+    }
+
+    
 }
