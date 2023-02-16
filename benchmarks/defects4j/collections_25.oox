@@ -262,7 +262,8 @@ class BitSet {
     }
 
     void clear(int index) {
-        bool[] elements := this.elements;Collections
+        bool[] elements := this.elements;
+        elements[index] := false;
     }
     
     bool get(int index) {
@@ -384,6 +385,8 @@ class Test {
         return list;
     }
 
+    // infinite loop if #elements == 0,
+    // doesn't work if #elements > 3, because there won't be any branches since minimum array length is 3.
     static void test_symbolic(int[] elements)
         requires(elements != null && #elements == 3)
         exceptional(false) {
@@ -410,7 +413,7 @@ class Test {
     }
 
     static void test3(int[] elements)
-        requires(elements != null && #elements == 0)
+        requires(elements != null && #elements == 3)
         exceptional(false) {
         IntList collectionEven := Test.helper_IntList(elements);
 
