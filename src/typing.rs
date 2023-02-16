@@ -7,6 +7,7 @@ use std::{collections::HashMap, rc::Rc};
 
 use crate::{
     error::{self, unification_error},
+    resolver,
     symbol_table::SymbolTable,
     syntax::*,
     typeable::Typeable,
@@ -58,10 +59,7 @@ fn type_compilation_unit(
     Ok(CompilationUnit { members })
 }
 
-fn type_declaration(
-    declaration: Declaration,
-    st: &SymbolTable,
-) -> Result<Declaration, TypeError> {
+fn type_declaration(declaration: Declaration, st: &SymbolTable) -> Result<Declaration, TypeError> {
     match &declaration {
         Declaration::Class(class) => {
             let mut class = class.as_ref().clone(); // bad clone
@@ -72,7 +70,8 @@ fn type_declaration(
                 .members
                 .into_iter()
                 .map(move |member| {
-                    type_member(declaration.clone(), member.as_ref().clone(), &mut env, st).map(Rc::new)
+                    type_member(declaration.clone(), member.as_ref().clone(), &mut env, st)
+                        .map(Rc::new)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             class.members = members;
@@ -421,13 +420,13 @@ fn type_invocation(
             lhs,
             rhs,
             arguments,
-            resolved,
+            ..
         } => {
             let arguments = arguments
                 .into_iter()
                 .map(|arg| type_expression(arg.into(), env))
                 .collect::<Result<Vec<_>, _>>()?;
-            // lhs could also be a static class name
+            // if lhs is not found as a variable, assume this is a static invocation.
             let lhs_type = env.get_var_type(&lhs).ok();
             // if lhs is non-static, add the class type to the argument list, due to the implicit 'this' argument.
             let argument_types = {
@@ -436,18 +435,20 @@ fn type_invocation(
                     .map_or(Vec::new(), |lhs_type| vec![lhs_type.clone()]);
                 arg_types.extend(arguments.iter().map(Typeable::type_of));
                 arg_types
-            };
+            }; // argument types can be used when we support multiple methods with the same name
 
             let class_name = lhs_type
                 .as_ref()
                 .and_then(|t| t.as_reference_type())
                 .unwrap_or(&lhs);
 
+            let resolved = resolver::resolve_method(class_name, &rhs, st);
+
             Ok(Invocation::InvokeMethod {
                 lhs,
                 rhs,
                 arguments,
-                resolved,
+                resolved: Some(resolved),
             })
         }
         Invocation::InvokeSuperMethod {

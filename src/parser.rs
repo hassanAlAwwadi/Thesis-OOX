@@ -22,34 +22,34 @@ pub fn parse<'a>(tokens: &[Token<'a>]) -> Result<CompilationUnit, pom::Error> {
     (program() - end()).parse(tokens).map(|mut c| {
         let c = insert_exceptional_clauses(c);
         dbg!("Setting resolvers");
-        let c = resolver::set_resolvers(c); // set the resolvers in Invocations
-        dbg!("Resolvers set");
         c
     })
 }
 
-fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit<UnresolvedDeclaration>> {
+fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit> {
     declaration().repeat(0..).map(|members| CompilationUnit {
         members: members.into_iter().collect(),
     })
 }
 
-fn declaration<'a>() -> Parser<'a, Token<'a>, UnresolvedDeclaration> {
+fn declaration<'a>() -> Parser<'a, Token<'a>, Declaration> {
     let class = ((keyword("class") * identifier())
         + extends1().opt()
         + implements().opt()
-        + (punct("{") * member().repeat(0..) - punct("}"))).map(
-        |(((name, extends), implements), members)| UnresolvedDeclaration::Class(UnresolvedClass {
-            name,
-            members,
-            extends,
-            implements: implements.unwrap_or(Vec::new()),
-        }));
+        + (punct("{") * member().repeat(0..) - punct("}")))
+    .map(|(((name, extends), implements), members)| {
+        Declaration::Class(
+            Class {
+                name,
+                members,
+                extends,
+                implements: implements.unwrap_or(Vec::new()),
+            }
+            .into(),
+        )
+    });
 
-    
-
-    class | interface().map(UnresolvedDeclaration::Interface)
-
+    class | interface().map(Rc::new).map(Declaration::Interface)
 }
 
 fn member<'a>() -> Parser<'a, Token<'a>, Rc<DeclarationMember>> {
@@ -588,7 +588,7 @@ fn rhs<'a>() -> Parser<'a, Token<'a>, Rhs> {
             type_: RuntimeType::UnknownRuntimeType,
         });
     let rhs_array = (keyword("new") * (classtype() | primitivetype())
-        + (punct("[") * (integer() | expression())  - punct("]")).repeat(1..))
+        + (punct("[") * (integer() | expression()) - punct("]")).repeat(1..))
     .map(|(array_type, sizes)| Rhs::RhsArray {
         array_type,
         sizes,
@@ -849,7 +849,7 @@ fn exceptional_invocation(invocation: &Invocation, class_names: &[String]) -> Ha
     match invocation {
         Invocation::InvokeMethod { lhs, arguments, .. } => {
             exceptional_invoke_method(lhs, arguments, class_names)
-        },
+        }
         Invocation::InvokeSuperMethod { arguments, .. } => {
             // "super" is not actually an object at runtime, but "this" is
             exceptional_invoke_method("this", arguments, class_names)
@@ -857,13 +857,12 @@ fn exceptional_invocation(invocation: &Invocation, class_names: &[String]) -> Ha
         Invocation::InvokeConstructor { .. } => HashSet::new(),
         Invocation::InvokeSuperConstructor { .. } => HashSet::new(),
     }
-
-    
-}fn exceptional_invoke_method(
+}
+fn exceptional_invoke_method(
     lhs: &str,
     arguments: &Vec<Expression>,
     class_names: &[String],
-) -> HashSet<Expression>  {
+) -> HashSet<Expression> {
     let exceptional_args: HashSet<_> = arguments
         .into_iter()
         .flat_map(|arg| exceptional_expression(arg).into_iter())
@@ -913,42 +912,43 @@ fn create_exceptional_ites(conditions: HashSet<Expression>, body: Statement) -> 
 // } else {
 //  int x := o.y;
 // }`
-pub fn insert_exceptional_clauses(
-    mut compilation_unit: CompilationUnit<UnresolvedDeclaration>,
-) -> CompilationUnit<UnresolvedDeclaration> {
+pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> CompilationUnit {
     // used to check if an invocation is a static call.
     let decl_names = compilation_unit
         .members
         .iter()
         .map(|declaration| match declaration {
-            UnresolvedDeclaration::Class(class) => class.name.clone(),
-            UnresolvedDeclaration::Interface(interface) => interface.name.clone(),
+            Declaration::Class(class) => class.name.clone(),
+            Declaration::Interface(interface) => interface.name.clone(),
         })
         .collect_vec();
 
     for decl in compilation_unit.members.iter_mut() {
         match decl {
-            UnresolvedDeclaration::Class(class) => {
-                class.members = insert_exceptional_clauses_class_members(&class.members, &decl_names);
-            },
-            UnresolvedDeclaration::Interface(interface) => interface.members = insert_exceptional_clauses_interface_members(&interface.members, &decl_names),
+            Declaration::Class(class) => {
+                let class = Rc::get_mut(class).expect(
+                    "Rc<Class> are not referred to yet when exception clauses are inserted",
+                );
+                class.members =
+                    insert_exceptional_clauses_class_members(&class.members, &decl_names);
+            }
+            Declaration::Interface(interface) => {
+                let interface = Rc::get_mut(interface).expect(
+                    "Rc<Interface> are not referred to yet when exception clauses are inserted",
+                );
+                interface.members =
+                    insert_exceptional_clauses_interface_members(&interface.members, &decl_names);
+            }
         }
     }
 
-
-    fn insert_exceptional_clauses_class_members(members: &Vec<Rc<DeclarationMember>>, decl_names: &[String]) -> Vec<Rc<DeclarationMember>> {
+    fn insert_exceptional_clauses_class_members(
+        members: &Vec<Rc<DeclarationMember>>,
+        decl_names: &[String],
+    ) -> Vec<Rc<DeclarationMember>> {
         members
-        .iter()
-        .map(|dcl| match dcl.as_ref().clone() {
-            DeclarationMember::Method {
-                body,
-                is_static,
-                return_type,
-                name,
-                params,
-                specification,
-            } => {
-                let body = insert_exceptional_in_body(body, &decl_names);
+            .iter()
+            .map(|dcl| match dcl.as_ref().clone() {
                 DeclarationMember::Method {
                     body,
                     is_static,
@@ -956,38 +956,58 @@ pub fn insert_exceptional_clauses(
                     name,
                     params,
                     specification,
+                } => {
+                    let body = insert_exceptional_in_body(body, &decl_names);
+                    DeclarationMember::Method {
+                        body,
+                        is_static,
+                        return_type,
+                        name,
+                        params,
+                        specification,
+                    }
                 }
-            }
-            DeclarationMember::Constructor {
-                body,
-                name,
-                params,
-                specification,
-            } => {
-                let body = insert_exceptional_in_body(body, &decl_names);
                 DeclarationMember::Constructor {
+                    body,
                     name,
                     params,
                     specification,
-                    body,
+                } => {
+                    let body = insert_exceptional_in_body(body, &decl_names);
+                    DeclarationMember::Constructor {
+                        name,
+                        params,
+                        specification,
+                        body,
+                    }
                 }
-            }
-            field @ DeclarationMember::Field { .. } => field,
-        })
-        .map(Rc::new)
-        .collect_vec()
+                field @ DeclarationMember::Field { .. } => field,
+            })
+            .map(Rc::new)
+            .collect_vec()
     }
 
-    fn insert_exceptional_clauses_interface_members(members: &Vec<Rc<InterfaceMember>>, decl_names: &[String]) -> Vec<Rc<InterfaceMember>> { 
+    fn insert_exceptional_clauses_interface_members(
+        members: &Vec<Rc<InterfaceMember>>,
+        decl_names: &[String],
+    ) -> Vec<Rc<InterfaceMember>> {
         members
-        .iter()
-        .map(|dcl| match dcl.as_ref().clone() {
-            InterfaceMember::Method(InterfaceMethod{  type_, name, parameters, body }) => {
-                InterfaceMember::Method (InterfaceMethod{  type_, name, parameters, body: body.map(|body| insert_exceptional_in_body(body, &decl_names)) })
-            },
-        })
-        .map(Rc::new)
-        .collect()
+            .iter()
+            .map(|dcl| match dcl.as_ref().clone() {
+                InterfaceMember::Method(InterfaceMethod {
+                    type_,
+                    name,
+                    parameters,
+                    body,
+                }) => InterfaceMember::Method(InterfaceMethod {
+                    type_,
+                    name,
+                    parameters,
+                    body: body.map(|body| insert_exceptional_in_body(body, &decl_names)),
+                }),
+            })
+            .map(Rc::new)
+            .collect()
     }
 
     fn insert_exceptional_in_body(statement: Statement, class_names: &[String]) -> Statement {

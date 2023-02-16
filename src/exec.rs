@@ -32,6 +32,7 @@ use crate::{
     exec::invocation::{non_static_resolved_method_invocation, single_method_invocation},
     lexer::tokens,
     parser::{insert_exceptional_clauses, parse},
+    resolver,
     stack::{lookup_in_stack, write_to_stack, StackFrame},
     symbol_table::SymbolTable,
     syntax::{
@@ -218,7 +219,7 @@ impl State {
 #[derive(Debug, PartialEq, Eq)]
 enum SymResult {
     Valid,
-    Invalid
+    Invalid,
 }
 
 /// The main function for the symbolic execution, any path splitting due to the control flow graph or array initialization happens here.
@@ -484,7 +485,7 @@ fn action(
     let pc = state.pc;
     let action = &program[&pc];
 
-    debug!(state.logger, "Action"; 
+    debug!(state.logger, "Action";
      "action" => #?action,
     );
     //  "stack" => ?state.stack.last().map(|s| &s.params),
@@ -1808,7 +1809,12 @@ fn exec_assume(state: &mut State, assumption: Rc<Expression>, st: &SymbolTable) 
 
 pub type Error = String;
 
-fn verify(file_content: &str, class_name: &str, method_name: &str, k: u64) -> std::result::Result<SymResult, Error> {
+fn verify(
+    file_content: &str,
+    class_name: &str,
+    method_name: &str,
+    k: u64,
+) -> std::result::Result<SymResult, Error> {
     let tokens = tokens(file_content);
     let as_ref = tokens.as_slice();
     // dbg!(as_ref);
@@ -1883,14 +1889,14 @@ fn verify(file_content: &str, class_name: &str, method_name: &str, k: u64) -> st
         let path_counter = Rc::new(RefCell::new(IdCounter::new(0)));
 
         return Ok(sym_exec(
-                    state,
-                    &program,
-                    &flows,
-                    k,
-                    &symbol_table,
-                    root_logger,
-                    path_counter,
-                ));
+            state,
+            &program,
+            &flows,
+            k,
+            &symbol_table,
+            root_logger,
+            path_counter,
+        ));
     } else {
         panic!()
     }
@@ -1899,19 +1905,28 @@ fn verify(file_content: &str, class_name: &str, method_name: &str, k: u64) -> st
 #[test]
 fn sym_exec_of_absolute_simplest() {
     let file_content = include_str!("../examples/absolute_simplest.oox");
-    assert_eq!(verify(file_content, "Foo", "f", 20).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(file_content, "Foo", "f", 20).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_min() {
     let file_content = include_str!("../examples/psv/min.oox");
-    assert_eq!(verify(file_content, "Foo", "min", 20).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(file_content, "Foo", "min", 20).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_method() {
     let file_content = include_str!("../examples/psv/method.oox");
-    assert_eq!(verify(file_content, "Main", "min", 20).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(file_content, "Main", "min", 20).unwrap(),
+        SymResult::Valid
+    );
 }
 
 // #[test]
@@ -1942,19 +1957,28 @@ fn sym_exec_div_by_n() {
 #[test]
 fn sym_exec_nonstatic_function() {
     let file_content = std::fs::read_to_string("./examples/nonstatic_function.oox").unwrap();
-    assert_eq!(verify(&file_content, "Main", "f", 20).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "f", 20).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_this_method() {
     let file_content = std::fs::read_to_string("./examples/this_method.oox").unwrap();
-    assert_eq!(verify(&file_content, "Main", "main", 30).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "main", 30).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_linked_list1() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
-    assert_eq!(verify(&file_content, "Node", "test2", 90).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Node", "test2", 90).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
@@ -1979,7 +2003,10 @@ fn sym_exec_linked_list3_invalid() {
 #[test]
 fn sym_exec_linked_list4() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
-    assert_eq!(verify(&file_content, "Node", "test4", 90).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Node", "test4", 90).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
@@ -2004,19 +2031,28 @@ fn sym_exec_linked_list4_if_problem() {
 fn sym_exec_exceptions1() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
-    assert_eq!(verify(&file_content, "Main", "test1", 20).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "test1", 20).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&file_content, "Main", "test1_invalid", 20).unwrap(),
         SymResult::Invalid
     );
-    assert_eq!(verify(&file_content, "Main", "div", 30).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "div", 30).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_exceptions_m0() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
-    assert_eq!(verify(&file_content, "Main", "m0", 20).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "m0", 20).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&file_content, "Main", "m0_invalid", 20).unwrap(),
         SymResult::Invalid
@@ -2027,7 +2063,10 @@ fn sym_exec_exceptions_m0() {
 fn sym_exec_exceptions_m1() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
-    assert_eq!(verify(&file_content, "Main", "m1", 20).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "m1", 20).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&file_content, "Main", "m1_invalid", 20).unwrap(),
         SymResult::Invalid
@@ -2038,14 +2077,20 @@ fn sym_exec_exceptions_m1() {
 fn sym_exec_exceptions_m2() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
-    assert_eq!(verify(&file_content, "Main", "m2", 20).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "m2", 20).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_exceptions_m3() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
-    assert_eq!(verify(&file_content, "Main", "m3", 30).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "m3", 30).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&file_content, "Main", "m3_invalid1", 30).unwrap(),
         SymResult::Invalid
@@ -2076,17 +2121,26 @@ fn sym_exec_exceptions_null() {
 fn sym_exec_array1() {
     let file_content = std::fs::read_to_string("./examples/array/array1.oox").unwrap();
 
-    assert_eq!(verify(&file_content, "Main", "foo", 50).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "foo", 50).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&file_content, "Main", "foo_invalid", 50).unwrap(),
         SymResult::Invalid
     );
-    assert_eq!(verify(&file_content, "Main", "sort", 300).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "sort", 300).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&file_content, "Main", "sort_invalid1", 50).unwrap(),
         SymResult::Invalid
     );
-    assert_eq!(verify(&file_content, "Main", "max", 50).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "max", 50).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&file_content, "Main", "max_invalid1", 50).unwrap(),
         SymResult::Invalid
@@ -2122,7 +2176,10 @@ fn sym_exec_array1() {
 fn sym_exec_array2() {
     let file_content = std::fs::read_to_string("./examples/array/array2.oox").unwrap();
 
-    assert_eq!(verify(&file_content, "Main", "foo1", 50).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "foo1", 50).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&file_content, "Main", "foo1_invalid", 50).unwrap(),
         SymResult::Invalid
@@ -2131,7 +2188,10 @@ fn sym_exec_array2() {
         verify(&file_content, "Main", "foo2_invalid", 50).unwrap(),
         SymResult::Invalid
     );
-    assert_eq!(verify(&file_content, "Main", "sort", 100).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "sort", 100).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
@@ -2139,21 +2199,33 @@ fn sym_exec_inheritance() {
     let file_content = std::fs::read_to_string("./examples/inheritance/inheritance.oox").unwrap();
     let k = 150;
 
-    assert_eq!(verify(&file_content, "Main", "test1", k).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "test1", k).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&file_content, "Main", "test1_invalid", k).unwrap(),
         SymResult::Invalid
     );
-    assert_eq!(verify(&file_content, "Main", "test2a", k).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "test2a", k).unwrap(),
+        SymResult::Valid
+    );
 
-    assert_eq!(verify(&file_content, "Main", "test2b", k).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "test2b", k).unwrap(),
+        SymResult::Valid
+    );
 
     assert_eq!(
         verify(&file_content, "Main", "test2b_invalid", k).unwrap(),
         SymResult::Invalid
     );
 
-    assert_eq!(verify(&file_content, "Main", "test3", k).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "test3", k).unwrap(),
+        SymResult::Valid
+    );
 
     assert_eq!(
         verify(&file_content, "Main", "test4_valid", k).unwrap(),
@@ -2163,9 +2235,15 @@ fn sym_exec_inheritance() {
         verify(&file_content, "Main", "test4_invalid", k).unwrap(),
         SymResult::Invalid
     );
-    assert_eq!(verify(&file_content, "Main", "test5", k).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "test5", k).unwrap(),
+        SymResult::Valid
+    );
 
-    assert_eq!(verify(&file_content, "Main", "test6", k).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "test6", k).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
@@ -2190,7 +2268,10 @@ fn sym_exec_interface() {
 
     println!("hello");
 
-    assert_eq!(verify(&file_content, "Main", "main", k).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "main", k).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&file_content, "Main", "test1_valid", k).unwrap(),
         SymResult::Valid
@@ -2230,7 +2311,10 @@ fn sym_exec_polymorphic() {
     let file_content =
         std::fs::read_to_string("./examples/inheritance/sym_exec_polymorphic.oox").unwrap();
     let k = 150;
-    assert_eq!(verify(&file_content, "Main", "main", k).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&file_content, "Main", "main", k).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
@@ -2238,7 +2322,10 @@ fn benchmark_col_25() {
     let file_content =
         std::fs::read_to_string("./benchmarks/defects4j/collections_25.oox").unwrap();
     let k = 15000;
-    assert_eq!(verify(&file_content, "Test", "test", k).unwrap(),  SymResult::Invalid);
+    assert_eq!(
+        verify(&file_content, "Test", "test", k).unwrap(),
+        SymResult::Invalid
+    );
 }
 
 #[test]

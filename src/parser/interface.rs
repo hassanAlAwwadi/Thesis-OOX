@@ -2,12 +2,12 @@ use pom::parser::*;
 
 use super::*;
 
-pub(super) fn interface<'a>() -> Parser<'a, Token<'a>, UnresolvedInterface> {
+pub(super) fn interface<'a>() -> Parser<'a, Token<'a>, Interface> {
     ((keyword("interface") * identifier())
         + extends_many().opt().map(|x| x.unwrap_or(Vec::new()))
         + punct("{") * interface_member().repeat(0..)
         - punct("}"))
-    .map(|((name, extends), members)| UnresolvedInterface {
+    .map(|((name, extends), members)| Interface {
         name,
         extends,
         members,

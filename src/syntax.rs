@@ -8,18 +8,21 @@ use std::{
     cell::{Ref, RefCell},
     collections::HashMap,
     fmt::{Debug, Display},
-    rc::{Rc, Weak}, ops::Deref,
+    ops::Deref,
+    rc::{Rc, Weak},
 };
 
-pub use self::{interfaces::Interface, classes::Class, interfaces::InterfaceMember, interfaces::InterfaceMethod, interfaces::find_interface_method};
+pub use self::{
+    classes::Class, interfaces::find_interface_method, interfaces::Interface,
+    interfaces::InterfaceMember, interfaces::InterfaceMethod,
+};
 
-mod interfaces;
 mod classes;
-
+mod interfaces;
 
 #[derive(Debug)]
-pub struct CompilationUnit<D = Declaration> {
-    pub members: Vec<D>,
+pub struct CompilationUnit {
+    pub members: Vec<Declaration>,
 }
 
 impl CompilationUnit {
@@ -29,7 +32,7 @@ impl CompilationUnit {
         class_name: Option<&str>,
     ) -> Option<Rc<DeclarationMember>> {
         for member in &self.members {
-            if let Declaration::Class(class)  = member {
+            if let Declaration::Class(class) = member {
                 if Some(class.name.as_str()) != class_name {
                     continue;
                 }
@@ -49,7 +52,6 @@ impl CompilationUnit {
         None
     }
 }
-
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Declaration {
@@ -72,27 +74,6 @@ impl Declaration {
             Declaration::Interface(interface) => &interface.name,
         }
     }
-}
-
-/// Intermediate state, where the Declaration does not know the declarations of its extends and implements
-/// After resolving this will be replaced with a Declaration in the syntax tree.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum UnresolvedDeclaration {
-    Class(UnresolvedClass),
-    Interface(UnresolvedInterface)
-}
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct UnresolvedClass {
-    pub name: Identifier,
-    pub extends: Option<Identifier>,
-    pub implements: Vec<Identifier>,
-    pub members: Vec<Rc<DeclarationMember>>,
-}
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct UnresolvedInterface  {
-    pub name: Identifier,
-    pub extends: Vec<Identifier>,
-    pub members: Vec<Rc<InterfaceMember>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,7 +137,7 @@ impl DeclarationMember {
 
     pub fn set_body(&mut self, new_body: Statement) {
         match self {
-            DeclarationMember::Constructor {  body, .. } => *body = new_body,
+            DeclarationMember::Constructor { body, .. } => *body = new_body,
             DeclarationMember::Method { body, .. } => *body = new_body,
             DeclarationMember::Field { .. } => panic!("Expected method or constructor"),
         }
@@ -557,10 +538,8 @@ impl RuntimeType {
 
     pub fn get_inner_array_type(&self) -> Option<RuntimeType> {
         if let RuntimeType::ArrayRuntimeType { inner_type } = self {
-            return Some(inner_type.deref().clone())
+            return Some(inner_type.deref().clone());
         }
         None
     }
-
-    
 }

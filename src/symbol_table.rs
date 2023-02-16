@@ -16,15 +16,19 @@ pub type Field = (Identifier, NonVoidType);
 
 type SymbolError = String;
 
-pub struct SymbolTable {
-    pub class_to_fields: HashMap<Identifier, Fields>,
-    // pub declaration_to_methods: HashMap<Identifier, DeclarationMember>,
-    pub class_extends: HashMap<Identifier, Rc<Class>>, // class to class it extends
+struct InheritanceTable {
+    pub class_extends: HashMap<Identifier, Option<Rc<Class>>>, // class to class it extends (or None if not)
     pub interface_extends: HashMap<Identifier, Vec<Rc<Interface>>>, // interface to interface it extends
-    pub implements: HashMap<Identifier, Vec<Rc<Interface>>>, // class_name -> implements
+    pub implements: HashMap<Identifier, Vec<Rc<Interface>>>,        // class_name -> implements
     pub subclasses: HashMap<Identifier, Vec<Rc<Class>>>, // class_name -> direct subclasses
     pub implemented: HashMap<Identifier, Vec<Rc<Class>>>, // interface_name -> direct classes that implement this interface
     pub subinterfaces: HashMap<Identifier, Vec<Rc<Interface>>>, // interface_name -> direct interfaces that extend this interface
+}
+
+pub struct SymbolTable {
+    pub class_to_fields: HashMap<Identifier, Fields>,
+    // pub declaration_to_methods: HashMap<Identifier, DeclarationMember>,
+    inheritance_table: InheritanceTable,
 
     pub declarations: HashMap<Identifier, Declaration>,
     pub decl_to_instance_types: HashMap<Identifier, Vec<Identifier>>,
@@ -52,39 +56,57 @@ impl SymbolTable {
             match member.clone() {
                 Declaration::Class(class) => {
                     if let Some(extends_name) = &class.extends {
-                        let extend_class = Self::get_class(&declarations, &extends_name)?;
+                        let extend_class =
+                            Self::get_class_from_declarations(&declarations, &extends_name)?;
 
-                        class_extends.insert(decl_name.clone(), extend_class);
+                        class_extends.insert(decl_name.clone(), Some(extend_class));
                         subclasses
                             .entry(extends_name.clone())
                             .or_default()
                             .push(class.clone());
+                    } else {
+                        class_extends.insert(decl_name.clone(), None);
                     }
                     for interface_name in class.implements.iter() {
                         let interface = Self::get_interface(&declarations, &interface_name)?;
-                        implements.entry(decl_name.clone()).or_default().push(interface);
+                        implements
+                            .entry(decl_name.clone())
+                            .or_default()
+                            .push(interface);
                         implemented
-                        .entry(interface_name.clone())
-                        .or_default()
-                        .push(class.clone());
+                            .entry(interface_name.clone())
+                            .or_default()
+                            .push(class.clone());
                     }
                 }
                 Declaration::Interface(interface) => {
                     for interface_name in &interface.extends {
                         let extend_interface = Self::get_interface(&declarations, &interface_name)?;
-                        interface_extends.entry(decl_name.clone()).or_default().push(extend_interface);
+                        interface_extends
+                            .entry(decl_name.clone())
+                            .or_default()
+                            .push(extend_interface);
                         subinterfaces
-                        .entry(interface_name.clone())
-                        .or_default()
-                        .push(interface.clone());
+                            .entry(interface_name.clone())
+                            .or_default()
+                            .push(interface.clone());
                     }
-                },
+                }
             }
         }
 
+        let inheritance_table = InheritanceTable {
+            class_extends,
+            interface_extends,
+            implements,
+            subclasses,
+            implemented,
+            subinterfaces,
+        };
+
         for (decl_name, member) in &declarations {
             if let Declaration::Class(class) = member.clone() {
-                let fields = Self::collect_fields(class);
+                let fields = Self::collect_fields(class, &inheritance_table);
                 // let methods = Self::collect_methods(class);
                 class_to_fields.insert(decl_name.clone(), fields);
             }
@@ -95,7 +117,7 @@ impl SymbolTable {
         let decl_to_instance_types = declarations
             .iter()
             .map(|(name, decl)| {
-                let derived_classes = Self::derived_classes(decl.clone())
+                let derived_classes = Self::derived_classes(decl.clone(), &inheritance_table)
                     .into_iter()
                     .map(|class| class.name.clone())
                     .unique()
@@ -107,12 +129,7 @@ impl SymbolTable {
         Ok(SymbolTable {
             class_to_fields,
             declarations,
-            class_extends,
-            interface_extends,
-            implements,
-            subclasses,
-            implemented,
-            subinterfaces,
+            inheritance_table,
             decl_to_instance_types,
         })
     }
@@ -133,16 +150,41 @@ impl SymbolTable {
             .find(|(f, _)| f == field)
     }
 
-    fn get_class(
+    pub fn get_class(&self, class_name: &str) -> Result<Rc<Class>, SymbolError> {
+        Self::get_class_from_declarations(&self.declarations, class_name)
+    }
+
+    pub fn class_extends(&self, class_name: &str) -> Option<Rc<Class>> {
+        self.inheritance_table.class_extends[class_name].clone()
+    }
+
+    pub fn class_implements(&self, class_name: &str) -> &Vec<Rc<Interface>> {
+        &self.inheritance_table.implements[class_name]
+    }
+
+    pub fn interface_implemented(&self, interface_name: &str) -> &Vec<Rc<Class>> {
+        &self.inheritance_table.implemented[interface_name]
+    }
+
+    pub fn subclasses(&self, class_name: &str) -> &Vec<Rc<Class>> {
+        &self.inheritance_table.subclasses[class_name]
+    }
+
+    pub fn interface_extends(&self, interface_name: &str) -> &Vec<Rc<Interface>> {
+        &self.inheritance_table.interface_extends[interface_name]
+    }
+
+    fn get_class_from_declarations(
         declarations: &HashMap<Identifier, Declaration>,
         class_name: &str,
     ) -> Result<Rc<Class>, SymbolError> {
         match declarations.get(class_name) {
             Some(Declaration::Class(class)) => Ok(class.clone()),
-            Some(Declaration::Interface(_)) => 
-                Err(error::expected_class_found_interface(class_name)),
-            
-            None => Err(error::extended_class_does_not_exist(class_name)),
+            Some(Declaration::Interface(_)) => {
+                Err(error::expected_class_found_interface(class_name))
+            }
+
+            None => Err(error::class_does_not_exist(class_name)),
         }
     }
 
@@ -152,10 +194,11 @@ impl SymbolTable {
     ) -> Result<Rc<Interface>, SymbolError> {
         match declarations.get(interface_name) {
             Some(Declaration::Interface(interface)) => Ok(interface.clone()),
-            Some(Declaration::Class(_)) => 
-            Err(error::expected_interface_found_class(interface_name)),
-            
-            None => Err(error::extended_class_does_not_exist(interface_name)),
+            Some(Declaration::Class(_)) => {
+                Err(error::expected_interface_found_class(interface_name))
+            }
+
+            None => Err(error::class_does_not_exist(interface_name)),
         }
     }
 
@@ -167,34 +210,45 @@ impl SymbolTable {
 
     /// Get all derived classes of the declaration
     /// This includes childs of child etc.
-    fn derived_classes<'a>(declaration: Declaration) -> Vec<Rc<syntax::Class>> {
+    fn derived_classes<'a>(
+        declaration: Declaration,
+        it: &InheritanceTable,
+    ) -> Vec<Rc<syntax::Class>> {
         let derived_classes = match declaration {
-            Declaration::Class(class) => class_helper(class),
-            Declaration::Interface(interface) => interface_helper(interface),
+            Declaration::Class(class) => class_helper(class, it),
+            Declaration::Interface(interface) => interface_helper(interface, it),
         };
 
-        fn class_helper(subclass: Rc<syntax::Class>) -> Vec<Rc<syntax::Class>> {
+        fn class_helper(
+            subclass: Rc<syntax::Class>,
+            it: &InheritanceTable,
+        ) -> Vec<Rc<syntax::Class>> {
+            let subclasses = it.subclasses.get(&subclass.name).unwrap();
             std::iter::once(subclass.clone())
                 .chain(
-                    subclass
-                        .subclasses_old
-                        .borrow()
+                    subclasses
                         .iter()
                         .cloned()
-                        .flat_map(class_helper),
+                        .flat_map(|subclass| class_helper(subclass, it)),
                 )
                 .collect_vec()
         }
 
-        fn interface_helper(subinterface: Rc<syntax::Interface>) -> Vec<Rc<syntax::Class>> {
-            let implemented = subinterface.implemented.borrow();
-            let subinterfaces = subinterface.subinterfaces.borrow();
+        fn interface_helper(
+            subinterface: Rc<syntax::Interface>,
+            it: &InheritanceTable,
+        ) -> Vec<Rc<syntax::Class>> {
+            let implemented = &it.implemented[&subinterface.name];
+            let subinterfaces = &it.subinterfaces[&subinterface.name];
 
-            let subclasses_from_subclasses = implemented.iter().cloned().flat_map(class_helper);
+            let subclasses_from_subclasses = implemented
+                .iter()
+                .cloned()
+                .flat_map(|implemented| class_helper(implemented, it));
             let subclasses_from_interfaces = subinterfaces
                 .iter()
                 .cloned()
-                .flat_map(interface_helper)
+                .flat_map(|subinterface| interface_helper(subinterface, it))
                 .into_iter();
 
             subclasses_from_subclasses
@@ -207,7 +261,7 @@ impl SymbolTable {
 
     /// Collects fields from declaration, by looking at the class and its superclasses
     /// The order of the fields is prioritised by class hierarchy.
-    fn collect_fields(class: Rc<syntax::Class>) -> Fields {
+    fn collect_fields(class: Rc<syntax::Class>, it: &InheritanceTable) -> Fields {
         let mut fields = Vec::new();
 
         for declaration_member in &class.members {
@@ -219,8 +273,8 @@ impl SymbolTable {
             };
         }
 
-        if let Some(extends) = class.extends_old.clone() {
-            [Self::collect_fields(extends), fields].concat()
+        if let Some(extends) = it.class_extends[&class.name].clone() {
+            [Self::collect_fields(extends, it), fields].concat()
         } else {
             fields
         }
