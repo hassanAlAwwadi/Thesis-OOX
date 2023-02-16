@@ -336,7 +336,7 @@ fn sym_exec(
                     ),
                 };
 
-                let new_path_ids = (1..N).map(|_| path_counter.borrow_mut().next_id());
+                let new_path_ids = (1..=N).map(|_| path_counter.borrow_mut().next_id());
 
                 // initialise new states with arrays 1..N
                 for (array_size, path_id) in (1..=N).zip(new_path_ids) {
@@ -2257,6 +2257,6 @@ fn benchmark_col_25_test3() {
     let k = 15000;
     assert_eq!(
         verify(&file_content, "Test", "test3", k),
-        SymResult::Invalid
+        SymResult::Valid
     );
 }
