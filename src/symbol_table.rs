@@ -55,6 +55,7 @@ impl SymbolTable {
         for (decl_name, member) in &declarations {
             match member.clone() {
                 Declaration::Class(class) => {
+                    subclasses.insert(class.name.clone(), Vec::new());
                     if let Some(extends_name) = &class.extends {
                         let extend_class =
                             Self::get_class_from_declarations(&declarations, &extends_name)?;

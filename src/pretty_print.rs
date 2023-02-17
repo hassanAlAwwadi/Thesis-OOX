@@ -182,7 +182,7 @@ impl Display for RuntimeType {
             RuntimeType::UnknownRuntimeType => write!(f, "unknown"),
             RuntimeType::VoidRuntimeType => write!(f, "void"),
             RuntimeType::UIntRuntimeType => write!(f, "unsigned int"),
-            RuntimeType::IntRuntimeType => write!(f, "unsigned int"),
+            RuntimeType::IntRuntimeType => write!(f, "int"),
             RuntimeType::FloatRuntimeType => write!(f, "float"),
             RuntimeType::BoolRuntimeType => write!(f, "bool"),
             RuntimeType::StringRuntimeType => write!(f, "string"),

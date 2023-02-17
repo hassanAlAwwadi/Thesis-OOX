@@ -304,17 +304,15 @@ use crate::{
 
 // super.method()
 fn super_method_call_helper(
-    resolved: &mut Option<Box<(Declaration, Rc<DeclarationMember>)>>,
-    declarations: &Vec<Declaration>,
     class_name: &String,
     method_name: &String,
     st: &SymbolTable,
-) {
-    let declaration = find_declaration(class_name, declarations).unwrap();
+) -> Box<(Declaration, Rc<DeclarationMember>)> {
+    let decl = &st.declarations[class_name];
 
-    let class = declaration
+    let class = decl
         .as_class()
-        .expect("cannot call super.method() for interface methods");
+        .expect("cannot call super.method() for interface methods"); // TODO: turn this into an error
 
     let extends = st
         .class_extends(&class.name)
@@ -325,7 +323,7 @@ fn super_method_call_helper(
     let (_super_class_name, super_class_method) = method_in_superclass(extends, method_name, st)
         .expect("at least one superclass should have this method");
 
-    *resolved = Some(Box::new(super_class_method));
+    Box::new(super_class_method)
 }
 
 /// This method resolves the invocation by finding the declaration corresponding to the class type.
@@ -578,49 +576,44 @@ fn method_in_interface(
 }
 
 fn constructor_call_helper(
-    resolved: &mut Option<Box<(Declaration, Rc<DeclarationMember>)>>,
-    declarations: &Vec<Declaration>,
     called_constructor: &String,
-) {
-    for declaration in declarations {
-        if let Declaration::Class(class) = declaration {
-            for member in &class.members {
-                if let DeclarationMember::Constructor {
-                    name: constructor_name,
-                    ..
-                } = member.as_ref()
-                {
-                    //dbg!("{:?}, {:?}, {:?}, {:?}", lhs, rhs, class_name, member_name);
-                    if called_constructor == constructor_name {
-                        *resolved = Some(Box::new((
-                            Declaration::Class(class.clone()),
-                            member.clone(),
-                        )));
-                        // very bad
-                    }
-                }
+    st: &SymbolTable
+) -> Box<(Declaration, Rc<DeclarationMember>)> {
+    let class = st.get_class(called_constructor).unwrap();
+
+    for member in &class.members {
+        if let DeclarationMember::Constructor {
+            name: constructor_name,
+            ..
+        } = member.as_ref()
+        {
+            //dbg!("{:?}, {:?}, {:?}, {:?}", lhs, rhs, class_name, member_name);
+            if called_constructor == constructor_name {
+                return Box::new((
+                    Declaration::Class(class.clone()),
+                    member.clone(),
+                ));
             }
         }
     }
+    panic!("Constructor not found"); // replace with proper error
 }
 
 fn constructor_super_call_helper(
     class_name: &String,
-    resolved: &mut Option<Box<(Declaration, Rc<DeclarationMember>)>>,
-    extends: Option<Rc<syntax::Class>>,
-) {
-    let extends =
-        extends.expect("super() found in constructor but class does not extend other class");
+    st: &SymbolTable,
+) -> Box<(Declaration, Rc<DeclarationMember>)> {
+    let extends = st.class_extends(class_name).expect("super() found in constructor but class does not extend other class");
 
     for member in &extends.members {
         if let DeclarationMember::Constructor { .. } = member.as_ref() {
-            *resolved = Some(Box::new((
+            return Box::new((
                 Declaration::Class(extends.clone()),
                 member.clone(),
-            )));
-            // very bad
+            ));
         }
     }
+    panic!("No constructor found in superclass");
 }
 
 pub(crate) fn resolve_method(
@@ -630,6 +623,23 @@ pub(crate) fn resolve_method(
 ) -> HashMap<Identifier, (Declaration, Rc<DeclarationMember>)> {
     method_call_helper(class_name, method_name, st)
 }
+
+pub fn resolve_super_method(
+    class_name: &String,
+    method_name: &String,
+    st: &SymbolTable
+) -> Box<(Declaration, Rc<DeclarationMember>)> {
+    super_method_call_helper(class_name, method_name, st)
+}
+
+pub fn resolve_constructor(class_name: &String, st: &SymbolTable) -> Box<(syntax::Declaration, std::rc::Rc<syntax::DeclarationMember>)> {
+    constructor_call_helper(class_name, st)
+}
+
+pub fn resolve_super_constructor(class_name: &String, st: &SymbolTable) -> Box<(syntax::Declaration, std::rc::Rc<syntax::DeclarationMember>)> {
+    constructor_super_call_helper(class_name, st)
+}
+
 
 // /// A function that resolves declarations
 // fn resolve_inheritance(unresolved: Vec<UnresolvedDeclaration>) -> Vec<Declaration> {

@@ -23,7 +23,7 @@ where
     B: Typeable,
 {
     if !type1.is_of_type(type2.type_of()) {
-        return Err(error::unification_error(type1.type_of(), type2.type_of()));
+        return Err(error::unification_error(type2.type_of(), type1.type_of()));
     }
     Ok(())
 }
@@ -33,21 +33,25 @@ struct TypeEnvironment {
     env: HashMap<Identifier, RuntimeType>,
 }
 impl TypeEnvironment {
-    fn declare_var(&mut self, var: Identifier, type_: RuntimeType) -> Result<(), TypeError> {
-        if let Some((previously_defined, _)) = self.env.get_key_value(&var) {
-            return Err(error::shadowing(var, previously_defined.to_string()));
+    fn declare_var<I>(&mut self, var: I, type_: RuntimeType) -> Result<(), TypeError>
+        where I: AsRef<str> + Into<Identifier> {
+        if let Some((previously_defined, _)) = self.env.get_key_value(var.as_ref()) {
+            return Err(error::shadowing(var.into(), previously_defined.to_string()));
         }
-        self.env.insert(var, type_);
+        self.env.insert(var.into(), type_);
         Ok(())
+    }
+
+    fn declare_param(&mut self, param: &Parameter) -> Result<(), TypeError> {
+        self.declare_var(&param.name, param.type_.type_of())
     }
 
     fn get_var_type(&self, var: &Identifier) -> Result<RuntimeType, TypeError> {
         self.env.get(var).cloned().ok_or(error::undeclared_var(var))
     }
 }
-fn type_compilation_unit(
+pub fn type_compilation_unit(
     compilation_unit: CompilationUnit,
-    env: TypeEnvironment,
     st: &SymbolTable,
 ) -> Result<CompilationUnit, TypeError> {
     let members = compilation_unit
@@ -93,24 +97,28 @@ fn type_member(
         DM::Constructor {
             specification,
             body,
-            ..
+            params, ..
         }
         | DM::Method {
             is_static: false,
             specification,
             body,
+            params,
             ..
         } => {
             let mut env = env.clone();
             env.declare_var(
-                "this".to_owned(),
+                "this",
                 RuntimeType::ReferenceRuntimeType {
                     type_: declaration.name().clone(),
                 },
             )?;
+            for param in params {
+                env.declare_param(param)?;
+            }
             type_specification(&declaration_member, specification.clone(), &mut env)?;
 
-            let body = type_statement(body.clone(), &declaration_member, &mut env, st)?;
+            let body = type_statement(body.clone(), &declaration_member, &mut env, st, &declaration)?;
 
             let mut declaration_member = declaration_member;
             declaration_member.set_body(body);
@@ -119,10 +127,16 @@ fn type_member(
         DM::Method {
             is_static: true,
             body,
+            params,
             ..
         } => {
             let mut env = env.clone();
-            let body = type_statement(body.clone(), &declaration_member, &mut env, st)?;
+
+            for param in params {
+                env.declare_param(param)?;
+            }
+
+            let body = type_statement(body.clone(), &declaration_member, &mut env, st, &declaration)?;
 
             let mut declaration_member = declaration_member;
             declaration_member.set_body(body);
@@ -179,6 +193,7 @@ fn type_statement(
     current_method: &DeclarationMember,
     env: &mut TypeEnvironment,
     st: &SymbolTable,
+    declaration: &Declaration,
 ) -> Result<Statement, TypeError> {
     match statement {
         Statement::Declare { type_, var } => {
@@ -187,29 +202,31 @@ fn type_statement(
         }
         Statement::Assign { lhs, rhs } => {
             let lhs = type_lhs(lhs, env, st)?;
-            let rhs = type_rhs(rhs, env, st)?;
+            let rhs = type_rhs(rhs, env, st, declaration)?;
 
             matches_type(&lhs, rhs.clone())?;
             Ok(Statement::Assign { lhs, rhs })
         }
         Statement::Call { invocation } => {
-            let invocation = type_invocation(invocation, env, st)?;
+            let invocation = type_invocation(invocation, env, st, declaration)?;
             Ok(Statement::Call { invocation })
         }
         Statement::Skip => Ok(Statement::Skip),
         Statement::Assert { assertion } => {
             let assertion = type_expression(assertion.into(), env)?;
+            matches_type(&assertion, RuntimeType::BoolRuntimeType)?;
             Ok(Statement::Assert { assertion })
         }
         Statement::Assume { assumption } => {
             let assumption = type_expression(assumption.into(), env)?;
+            matches_type(&assumption, RuntimeType::BoolRuntimeType)?;
             Ok(Statement::Assume { assumption })
         }
         Statement::While { guard, body } => {
             let guard = type_expression(guard.into(), env)?;
             matches_type(&guard, RuntimeType::BoolRuntimeType)?;
             let mut env = env.clone();
-            let body = type_statement(*body, current_method, &mut env, &st)?;
+            let body = type_statement(*body, current_method, &mut env, &st, declaration)?;
             Ok(Statement::While {
                 guard,
                 body: Box::new(body),
@@ -223,8 +240,8 @@ fn type_statement(
             let guard = type_expression(guard.into(), env)?;
             matches_type(&guard, RuntimeType::BoolRuntimeType)?;
             let mut env = env.clone();
-            let true_body = type_statement(*true_body, current_method, &mut env, &st)?;
-            let false_body = type_statement(*false_body, current_method, &mut env, &st)?;
+            let true_body = type_statement(*true_body, current_method, &mut env, &st, declaration)?;
+            let false_body = type_statement(*false_body, current_method, &mut env, &st, declaration)?;
 
             Ok(Statement::Ite {
                 guard,
@@ -250,6 +267,7 @@ fn type_statement(
                 })
             }
             (_, Some(return_value)) => {
+                let return_value = type_expression(return_value.into(), env)?;
                 matches_type(&return_value, current_method.type_of())?;
                 Ok(Statement::Return {
                     expression: Some(return_value),
@@ -269,23 +287,23 @@ fn type_statement(
             catch_body,
         } => {
             let mut try_env = env.clone();
-            let try_body = type_statement(*try_body, current_method, &mut try_env, st)?;
+            let try_body = type_statement(*try_body, current_method, &mut try_env, st, declaration)?;
             let mut catch_env = env.clone();
-            let catch_body = type_statement(*catch_body, current_method, &mut catch_env, st)?;
+            let catch_body = type_statement(*catch_body, current_method, &mut catch_env, st, declaration)?;
             Ok(Statement::Try {
                 try_body: Box::new(try_body),
                 catch_body: Box::new(catch_body),
             })
         }
         Statement::Block { body } => {
-            let body = type_statement(*body, current_method, env, st)?;
+            let body = type_statement(*body, current_method, env, st, declaration)?;
             Ok(Statement::Block {
                 body: Box::new(body),
             })
         }
         Statement::Seq { stat1, stat2 } => {
-            let stat1 = type_statement(*stat1, current_method, env, st)?;
-            let stat2 = type_statement(*stat2, current_method, env, st)?;
+            let stat1 = type_statement(*stat1, current_method, env, st, declaration)?;
+            let stat2 = type_statement(*stat2, current_method, env, st, declaration)?;
             Ok(Statement::Seq {
                 stat1: Box::new(stat1),
                 stat2: Box::new(stat2),
@@ -339,7 +357,7 @@ fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Lhs
     }
 }
 
-fn type_rhs(rhs: Rhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Rhs, TypeError> {
+fn type_rhs(rhs: Rhs, env: &mut TypeEnvironment, st: &SymbolTable, declaration: &Declaration) -> Result<Rhs, TypeError> {
     match rhs {
         Rhs::RhsExpression { value, .. } => {
             let expr = type_expression(value.into(), env)?;
@@ -377,9 +395,8 @@ fn type_rhs(rhs: Rhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Rhs
             })
         }
         Rhs::RhsCall { invocation, .. } => {
-            let invocation = type_invocation(invocation, env, st)?;
+            let invocation = type_invocation(invocation, env, st, declaration)?;
             let type_ = invocation.type_of();
-
             Ok(Rhs::RhsCall { invocation, type_ })
         }
         Rhs::RhsArray {
@@ -414,6 +431,7 @@ fn type_invocation(
     invocation: Invocation,
     env: &mut TypeEnvironment,
     st: &SymbolTable,
+    declaration: &Declaration
 ) -> Result<Invocation, TypeError> {
     match invocation {
         Invocation::InvokeMethod {
@@ -435,7 +453,7 @@ fn type_invocation(
                     .map_or(Vec::new(), |lhs_type| vec![lhs_type.clone()]);
                 arg_types.extend(arguments.iter().map(Typeable::type_of));
                 arg_types
-            }; // argument types can be used when we support multiple methods with the same name
+            }; // argument types can be used when we support multiple methods with the same name, currently argument types are not checked.
 
             let class_name = lhs_type
                 .as_ref()
@@ -454,28 +472,39 @@ fn type_invocation(
         Invocation::InvokeSuperMethod {
             rhs,
             arguments,
-            resolved,
-        } => Ok(Invocation::InvokeSuperMethod {
-            rhs,
-            arguments,
-            resolved,
-        }),
+            ..
+        } => {
+            let class_name = declaration.name();
+            let resolved = resolver::resolve_super_method(class_name, &rhs, st);
+            
+            Ok(Invocation::InvokeSuperMethod {
+                rhs,    
+                arguments,
+                resolved: Some(resolved),
+            })
+        },
         Invocation::InvokeConstructor {
             class_name,
             arguments,
-            resolved,
-        } => Ok(Invocation::InvokeConstructor {
+            ..
+        } => {
+            let resolved = resolver::resolve_constructor(&class_name, st);
+            Ok(Invocation::InvokeConstructor {
             class_name,
             arguments,
-            resolved,
-        }),
+            resolved: Some(resolved),
+        })
+        },
         Invocation::InvokeSuperConstructor {
             arguments,
-            resolved,
-        } => Ok(Invocation::InvokeSuperConstructor {
+            ..
+        } => {
+            let class_name = declaration.name();
+            let resolved = resolver::resolve_super_constructor(&class_name, st);
+        Ok(Invocation::InvokeSuperConstructor {
             arguments,
-            resolved,
-        }),
+            resolved: Some(resolved),
+        })},
     }
 }
 
@@ -608,8 +637,7 @@ fn type_binop(
         matches_type(exp2, RuntimeType::BoolRuntimeType)?;
         Ok(RuntimeType::BoolRuntimeType)
     } else if [Equal, NotEqual].contains(&binop) {
-        matches_type(exp1, RuntimeType::BoolRuntimeType)?;
-        matches_type(exp2, RuntimeType::BoolRuntimeType)?;
+        matches_type(exp1, exp2)?;
         Ok(RuntimeType::BoolRuntimeType)
     } else if [LessThan, LessThanEqual, GreaterThan, GreaterThanEqual].contains(&binop) {
         matches_type(exp1, RuntimeType::NUMRuntimeType)?;

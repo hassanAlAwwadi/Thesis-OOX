@@ -40,7 +40,7 @@ use crate::{
         Lhs, Lit, NonVoidType, Parameter, Reference, Rhs, RuntimeType, Statement, UnOp,
     },
     typeable::{runtime_to_nonvoidtype, Typeable},
-    utils, z3_checker,
+    utils, z3_checker, typing::type_compilation_unit,
 };
 
 const NULL: Expression = Expression::Lit {
@@ -1829,6 +1829,10 @@ fn verify(
 
     let mut i = 0;
     let symbol_table = SymbolTable::from_ast(&c)?;
+
+
+    let c = type_compilation_unit(c, &symbol_table)?;
+
     let (result, flw) = labelled_statements(c, &mut i);
 
     let program = result.into_iter().collect();
