@@ -25,3 +25,4 @@ slog = "2.7.0" # Logging library
 # slog-bunyan = "2.4.0"
 sloggers = "2.1.1" # Logging extension for displaying logs in terminal
 num = "0.4.0" # Needed for one function (is that worth it?)
+derivative = "2.2.0"

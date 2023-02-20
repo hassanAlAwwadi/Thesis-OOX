@@ -64,7 +64,7 @@ pub(super) fn single_method_invocation(
 /// depending on the type of the object.
 pub(super) fn multiple_method_invocation(
     state: &mut State,
-    invocation_lhs: &String,
+    invocation_lhs: &Identifier,
     invocation: &Invocation,
     potential_methods: &HashMap<Identifier, (Declaration, Rc<Method>)>,
     return_point: u64,
@@ -203,7 +203,7 @@ fn find_unique_type(aliases: &Vec<Rc<Expression>>) -> Option<RuntimeType> {
 pub(super) fn non_static_resolved_method_invocation(
     state: &mut State,
     invocation: &Invocation,
-    class_name: &String,
+    class_name: &Identifier,
     resolved_method: Rc<Method>,
     return_point: u64,
     lhs: Option<Lhs>,
@@ -230,7 +230,7 @@ pub(super) fn non_static_resolved_method_invocation(
         RuntimeType::ReferenceRuntimeType {
             type_: class_name.clone(),
         },
-        invocation_lhs.to_owned(),
+        invocation_lhs.to_owned().into(),
     );
     
 

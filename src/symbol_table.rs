@@ -125,49 +125,49 @@ impl SymbolTable {
         })
     }
 
-    pub fn get_all_fields(&self, class_name: &str) -> &Fields {
+    pub fn get_all_fields(&self, class_name: &Identifier) -> &Fields {
         &self.class_to_fields[class_name]
     }
 
     /// Returns class_name and all subclasses of class_name,
     /// in other words all possible instance types for this class.
-    pub fn get_all_instance_types(&self, class_name: &str) -> &Vec<Identifier> {
+    pub fn get_all_instance_types(&self, class_name: &Identifier) -> &Vec<Identifier> {
         &self.decl_to_instance_types[class_name]
     }
 
-    pub fn lookup_field(&self, class_name: &str, field: &str) -> Option<&Field> {
+    pub fn lookup_field(&self, class_name: &Identifier, field: &str) -> Option<&Field> {
         self.class_to_fields[class_name]
             .iter()
-            .find(|(f, _)| f == field)
+            .find(|(f, _)| *f == field)
     }
 
-    pub fn get_class(&self, class_name: &str) -> Result<Rc<Class>, SymbolError> {
+    pub fn get_class(&self, class_name: &Identifier) -> Result<Rc<Class>, SymbolError> {
         Self::get_class_from_declarations(&self.declarations, class_name)
     }
 
-    pub fn class_extends(&self, class_name: &str) -> Option<Rc<Class>> {
+    pub fn class_extends(&self, class_name: &Identifier) -> Option<Rc<Class>> {
         self.inheritance_table.class_extends[class_name].clone()
     }
 
-    pub fn class_implements(&self, class_name: &str) -> &Vec<Rc<Interface>> {
+    pub fn class_implements(&self, class_name: &Identifier) -> &Vec<Rc<Interface>> {
         &self.inheritance_table.implements[class_name]
     }
 
-    pub fn interface_implemented(&self, interface_name: &str) -> &Vec<Rc<Class>> {
+    pub fn interface_implemented(&self, interface_name: &Identifier) -> &Vec<Rc<Class>> {
         &self.inheritance_table.implemented[interface_name]
     }
 
-    pub fn subclasses(&self, class_name: &str) -> &Vec<Rc<Class>> {
+    pub fn subclasses(&self, class_name: &Identifier) -> &Vec<Rc<Class>> {
         &self.inheritance_table.subclasses[class_name]
     }
 
-    pub fn interface_extends(&self, interface_name: &str) -> &Vec<Rc<Interface>> {
+    pub fn interface_extends(&self, interface_name: &Identifier) -> &Vec<Rc<Interface>> {
         &self.inheritance_table.interface_extends[interface_name]
     }
 
     fn get_class_from_declarations(
         declarations: &HashMap<Identifier, Declaration>,
-        class_name: &str,
+        class_name: &Identifier,
     ) -> Result<Rc<Class>, SymbolError> {
         match declarations.get(class_name) {
             Some(Declaration::Class(class)) => Ok(class.clone()),
@@ -181,7 +181,7 @@ impl SymbolTable {
 
     fn get_interface(
         declarations: &HashMap<Identifier, Declaration>,
-        interface_name: &str,
+        interface_name: &Identifier,
     ) -> Result<Rc<Interface>, SymbolError> {
         match declarations.get(interface_name) {
             Some(Declaration::Interface(interface)) => Ok(interface.clone()),

@@ -10,7 +10,7 @@ use crate::{
     resolver,
     symbol_table::SymbolTable,
     syntax::*,
-    typeable::Typeable,
+    typeable::Typeable, exec::{this_str, retval},
 };
 
 type TypeError = String;
@@ -33,19 +33,17 @@ struct TypeEnvironment {
     env: HashMap<Identifier, RuntimeType>,
 }
 impl TypeEnvironment {
-    fn declare_var<I>(&mut self, var: I, type_: RuntimeType) -> Result<(), TypeError>
-    where
-        I: AsRef<str> + Into<Identifier>,
+    fn declare_var(&mut self, var: Identifier, type_: RuntimeType) -> Result<(), TypeError>
     {
-        if let Some((previously_defined, _)) = self.env.get_key_value(var.as_ref()) {
-            return Err(error::shadowing(var.into(), previously_defined.to_string()));
+        if let Some((previously_defined, _)) = self.env.get_key_value(&var) {
+            return Err(error::shadowing(&var, previously_defined));
         }
-        self.env.insert(var.into(), type_);
+        self.env.insert(var, type_);
         Ok(())
     }
 
     fn declare_param(&mut self, param: &Parameter) -> Result<(), TypeError> {
-        self.declare_var(&param.name, param.type_.type_of())
+        self.declare_var(param.name.clone(), param.type_.type_of())
     }
 
     fn get_var_type(&self, var: &Identifier) -> Result<RuntimeType, TypeError> {
@@ -105,7 +103,7 @@ fn type_member_class(
         DM::Constructor(method) | DM::Method(method) if method.is_static == false => {
             let mut env = env.clone();
             env.declare_var(
-                "this",
+                this_str(),
                 RuntimeType::ReferenceRuntimeType {
                     type_: declaration.name.clone(),
                 },
@@ -203,7 +201,7 @@ fn type_specification(
         if !method_type.is_of_type(RuntimeType::VoidRuntimeType, st) {
             let mut env = env.clone();
 
-            env.declare_var("retval".to_owned(), method_type)?;
+            env.declare_var(retval(), method_type)?;
             let ensures = type_expression(ensures, &mut env, st)?;
             matches_type(&ensures, RuntimeType::BoolRuntimeType, st)?;
             specification.requires = Some(Rc::new(ensures));
@@ -320,7 +318,7 @@ fn type_statement(
             (true, Some(return_value)) => Err(error::unexpected_return_value(&return_value)),
             (true, None) => {
                 let this_type = current_method.type_of();
-                let this = "this".to_owned();
+                let this = this_str();
                 let this_var = Expression::Var {
                     var: this,
                     type_: this_type,

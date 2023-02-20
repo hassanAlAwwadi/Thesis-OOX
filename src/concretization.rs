@@ -54,7 +54,7 @@ pub fn concretizations<'a>(
 
 fn helper(
     expression: Rc<Expression>,
-    concretization: &HashMap<&String, &Rc<Expression>>,
+    concretization: &HashMap<&Identifier, &Rc<Expression>>,
 ) -> Rc<Expression> {
     match expression.as_ref() {
         Expression::SymbolicRef { var, .. } => concretization[&var].clone(),
@@ -140,7 +140,7 @@ fn helper(
 //     node3, [5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6]
 // ]
 
-// alias_map.iter().fold(HashMap::new(), |mut a: HashMap<&String, Option<Box<dyn Iterator<Item = &Expression>>>>, x| {
+// alias_map.iter().fold(HashMap::new(), |mut a: HashMap<&Identifier, Option<Box<dyn Iterator<Item = &Expression>>>>, x| {
 
 //     if a.len() == 0 {
 //         a.insert(x.0, Some(Box::new(x.1.iter())));

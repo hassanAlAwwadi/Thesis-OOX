@@ -1,6 +1,6 @@
 // use std::intrinsics::unreachable;
 
-use crate::{lexer::tokens, parser::parse, syntax::*, typeable::Typeable};
+use crate::{lexer::tokens, parser::parse, syntax::*, typeable::Typeable, exec::this_str};
 
 const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
 
@@ -16,12 +16,12 @@ pub enum CFGStatement {
     CatchExit,
     Seq(u64, u64),
     FunctionEntry {
-        decl_name: String,
-        method_name: String,
+        decl_name: Identifier,
+        method_name: Identifier,
     },
     FunctionExit {
-        decl_name: String,
-        method_name: String,
+        decl_name: Identifier,
+        method_name: Identifier,
     },
 }
 
@@ -57,7 +57,7 @@ pub fn labelled_statements(
 }
 
 fn memberCFG(
-    class_name: String,
+    class_name: Identifier,
     member: &DeclarationMember,
     i: &mut u64,
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
@@ -81,7 +81,7 @@ fn memberCFG(
                 *i,
                 CFGStatement::Statement(Statement::Return {
                     expression: Expression::Var {
-                        var: "this".to_string(),
+                        var: this_str(),
                         type_: member.type_of(),
                     }
                     .into(),
@@ -127,7 +127,7 @@ fn memberCFG(
 }
 
 fn interface_member_cfg(
-    class_name: String,
+    class_name: Identifier,
     member: &InterfaceMember,
     i: &mut u64,
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
@@ -140,8 +140,8 @@ fn interface_member_cfg(
 }
 
 fn label_method(
-    class_name: String,
-    name: &String,
+    class_name: Identifier,
+    name: &Identifier,
     body: &Statement,
     i: &mut u64,
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {

@@ -9,7 +9,7 @@ use crate::{
     exec::{get_element, init_symbolic_reference, AliasMap, Heap, HeapValue, State},
     stack::{remove_from_stack, write_to_stack, StackFrame},
     symbol_table::SymbolTable,
-    syntax::{BinOp, Expression, Lit, RuntimeType, UnOp},
+    syntax::{BinOp, Expression, Lit, RuntimeType, UnOp, Identifier},
 };
 
 pub type EvaluationResult<T> = Either<Rc<Expression>, T>;
@@ -503,9 +503,9 @@ fn evaluate_unop(unop: UnOp, expression: Rc<Expression>) -> Rc<Expression> {
 /// F is a function that chains each subexpression together with a binary operator into one expression.
 fn evaluate_quantifier<'a, F>(
     quantifier: F,
-    elem: &'a String,
-    range: &'a String,
-    domain: &'a String,
+    elem: &'a Identifier,
+    range: &'a Identifier,
+    domain: &'a Identifier,
     formula: &'a Expression,
     state: &'a mut State,
     st: &'a SymbolTable,
@@ -543,8 +543,8 @@ where
                 let element = get_element(i, *ref_, &state.heap);
                 let index = toIntExpr(i as i64);
 
-                write_to_stack(elem.to_string(), element.clone(), &mut state.stack);
-                write_to_stack(range.to_string(), index, &mut state.stack);
+                write_to_stack(elem.clone(), element.clone(), &mut state.stack);
+                write_to_stack(range.clone(), index, &mut state.stack);
                 let value = evaluate(state, formula.clone().into(), st);
                 remove_from_stack(elem, &mut state.stack);
                 remove_from_stack(range, &mut state.stack);

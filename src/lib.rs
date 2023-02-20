@@ -26,6 +26,7 @@ mod fold;
 mod exception_handler;
 mod typing;
 mod error;
+mod positioned;
 
 #[macro_use]
 extern crate pest_derive;

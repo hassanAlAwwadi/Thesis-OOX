@@ -191,11 +191,11 @@ impl<'ctx> TryFrom<AstNode<'ctx>> for Int<'ctx> {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 enum NodeEntry<'a> {
     Lit(Lit),
-    Var(Cow<'a, Identifier>),
+    Var(Cow<'a, str>),
 }
 
 impl<'a> NodeEntry<'a> {
-    fn var(s: &'a String) -> NodeEntry {
+    fn var(s: &'a str) -> NodeEntry {
         NodeEntry::Var(Cow::Borrowed(s))
     }
 }
@@ -212,12 +212,12 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
         .into_iter()
         .map(|(id, type_)| match type_ {
             RuntimeType::BoolRuntimeType => (
-                NodeEntry::Var(Cow::Owned(id.clone())),
-                AstNode::Bool(Bool::new_const(ctx, id)),
+                NodeEntry::Var(Cow::Owned(id.clone().into())),
+                AstNode::Bool(Bool::new_const::<String>(ctx, id.into())),
             ),
             RuntimeType::IntRuntimeType => (
-                NodeEntry::Var(Cow::Owned(id.clone())),
-                AstNode::Int(Int::new_const(ctx, id)),
+                NodeEntry::Var(Cow::Owned(id.clone().into())),
+                AstNode::Int(Int::new_const::<String>(ctx, id.into())),
             ),
             _ => todo!(),
         })

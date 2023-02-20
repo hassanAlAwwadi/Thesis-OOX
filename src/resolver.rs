@@ -47,7 +47,7 @@ use crate::{
 //                             return_type,
 //                             specification,
 //                         } => {
-//                             let mut local_variables: HashMap<&String, NonVoidType> = HashMap::new(); // 'this' must also be set
+//                             let mut local_variables: HashMap<&Identifier, NonVoidType> = HashMap::new(); // 'this' must also be set
 //                             for param in &params {
 //                                 local_variables.insert(&param.name, param.type_.to_owned());
 //                             }
@@ -77,7 +77,7 @@ use crate::{
 //                             body,
 //                             specification,
 //                         } => {
-//                             let mut local_variables: HashMap<&String, NonVoidType> = HashMap::new(); // 'this' must also be set
+//                             let mut local_variables: HashMap<&Identifier, NonVoidType> = HashMap::new(); // 'this' must also be set
 //                             for param in &params {
 //                                 local_variables.insert(&param.name, param.type_.to_owned());
 //                             }
@@ -122,7 +122,7 @@ use crate::{
 //                 let members = interface.members.iter().map(|member| match member.as_ref() {
 //                     syntax::InterfaceMember::Method(method) => {
 //                         let method = method.clone();
-//                         let mut local_variables: HashMap<&String, NonVoidType> = HashMap::new(); // 'this' must also be set
+//                         let mut local_variables: HashMap<&Identifier, NonVoidType> = HashMap::new(); // 'this' must also be set
 //                         for param in &method.parameters {
 //                             local_variables.insert(&param.name, param.type_.to_owned());
 //                         }
@@ -158,7 +158,7 @@ use crate::{
 // fn helper<'a>(
 //     statement: &'a mut Statement,
 //     declarations: &Vec<Declaration>,
-//     class_name: &String,
+//     class_name: &Identifier,
 //     local_variables: &mut HashMap<&'a String, NonVoidType>,
 //     extended_classes: Option<Rc<syntax::Class>>,
 //     implemented_interfaces: &Vec<Rc<syntax::Interface>>,
@@ -304,8 +304,8 @@ use crate::{
 
 // super.method()
 fn super_method_call_helper(
-    class_name: &String,
-    method_name: &String,
+    class_name: &Identifier,
+    method_name: &Identifier,
     st: &SymbolTable,
 ) -> Box<(Declaration, Rc<Method>)> {
     let decl = &st.declarations[class_name];
@@ -338,8 +338,8 @@ fn super_method_call_helper(
 /// The result is added to resolved.
 #[inline(always)]
 fn method_call_helper(
-    class_name: &String,
-    method_name: &String,
+    class_name: &Identifier,
+    method_name: &Identifier,
     st: &SymbolTable,
 ) -> HashMap<Identifier, (Declaration, Rc<Method>)> {
     let decl = &st.declarations[class_name];
@@ -417,7 +417,7 @@ fn method_call_helper(
     }
 }
 
-fn find_declaration(decl_name: &String, declarations: &Vec<Declaration>) -> Option<Declaration> {
+fn find_declaration(decl_name: &Identifier, declarations: &Vec<Declaration>) -> Option<Declaration> {
     declarations
         .iter()
         .filter_map(|declaration| match declaration {
@@ -463,7 +463,7 @@ fn method_in_superclass(
     if let Some(method) = member {
         // Stop on the first overriden method in the chain.
         Some((
-            superclass.name.to_string(),
+            superclass.name.clone(),
             (Declaration::Class(superclass), method.clone()),
         ))
         
@@ -569,7 +569,7 @@ fn method_in_interface(
 }
 
 fn constructor_call_helper(
-    called_constructor: &String,
+    called_constructor: &Identifier,
     st: &SymbolTable
 ) -> Box<(Declaration, Rc<Method>)> {
     let class = st.get_class(called_constructor).unwrap();
@@ -590,7 +590,7 @@ fn constructor_call_helper(
 }
 
 fn constructor_super_call_helper(
-    class_name: &String,
+    class_name: &Identifier,
     st: &SymbolTable,
 ) -> Box<(Declaration, Rc<Method>)> {
     let extends = st.class_extends(class_name).expect("super() found in constructor but class does not extend other class");
@@ -607,26 +607,26 @@ fn constructor_super_call_helper(
 }
 
 pub(crate) fn resolve_method(
-    class_name: &String,
-    method_name: &String,
+    class_name: &Identifier,
+    method_name: &Identifier,
     st: &SymbolTable,
 ) -> HashMap<Identifier, (Declaration, Rc<Method>)> {
     method_call_helper(class_name, method_name, st)
 }
 
 pub fn resolve_super_method(
-    class_name: &String,
-    method_name: &String,
+    class_name: &Identifier,
+    method_name: &Identifier,
     st: &SymbolTable
 ) -> Box<(Declaration, Rc<Method>)> {
     super_method_call_helper(class_name, method_name, st)
 }
 
-pub fn resolve_constructor(class_name: &String, st: &SymbolTable) -> Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)> {
+pub fn resolve_constructor(class_name: &Identifier, st: &SymbolTable) -> Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)> {
     constructor_call_helper(class_name, st)
 }
 
-pub fn resolve_super_constructor(class_name: &String, st: &SymbolTable) -> Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)> {
+pub fn resolve_super_constructor(class_name: &Identifier, st: &SymbolTable) -> Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)> {
     constructor_super_call_helper(class_name, st)
 }
 
@@ -747,21 +747,6 @@ pub fn resolve_super_constructor(class_name: &String, st: &SymbolTable) -> Box<(
 //     }
 // }
 
-/// Returns Some if all interfaces are found, otherwise returns None
-fn find_interfaces(
-    interface_names: &[String],
-    interfaces: &Vec<Rc<Interface>>,
-) -> Option<Vec<Rc<Interface>>> {
-    interface_names
-        .iter()
-        .map(|interface_name| {
-            interfaces
-                .iter()
-                .cloned()
-                .find(|i| i.name == *interface_name)
-        })
-        .collect::<Option<Vec<_>>>()
-}
 
 // /// Assumes no cyclic inheritance between interfaces
 // fn resolve_interfaces(unresolved: &Vec<UnresolvedDeclaration>) -> Vec<Rc<Interface>> {

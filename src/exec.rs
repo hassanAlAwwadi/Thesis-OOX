@@ -40,7 +40,7 @@ use crate::{
         Lhs, Lit, NonVoidType, Parameter, Reference, Rhs, RuntimeType, Statement, UnOp, Method,
     },
     typeable::{runtime_to_nonvoidtype, Typeable},
-    utils, z3_checker, typing::type_compilation_unit,
+    utils, z3_checker, typing::type_compilation_unit, positioned::SourcePos,
 };
 
 const NULL: Expression = Expression::Lit {
@@ -48,8 +48,13 @@ const NULL: Expression = Expression::Lit {
     type_: RuntimeType::ANYRuntimeType,
 };
 
-fn retval() -> String {
-    "retval".to_string()
+pub fn retval() -> Identifier {
+    Identifier::with_unknown_pos("retval".to_string())
+}
+
+
+pub fn this_str() -> Identifier {
+    Identifier::with_unknown_pos("this".to_owned())
 }
 
 pub type Heap = HashMap<Reference, HeapValue>;
@@ -86,7 +91,7 @@ type PathConstraints = HashSet<Expression>;
 
 // refactor to Vec<Reference>? neins, since it can also be ITE and stuff, can it though?
 // nope it can't, refactor this!
-pub type AliasMap = HashMap<String, AliasEntry>;
+pub type AliasMap = HashMap<Identifier, AliasEntry>;
 
 #[derive(Debug, Clone)]
 pub struct AliasEntry {
@@ -432,7 +437,7 @@ fn sym_exec(
 
 fn array_initialisation(
     state: &mut State,
-    array_name: &String,
+    array_name: &Identifier,
     array_size: u64,
     array_type: RuntimeType,
     inner_type: RuntimeType,
@@ -449,7 +454,7 @@ fn array_initialisation(
     );
 
     let array_elements = (0..array_size)
-        .map(|i| create_symbolic_var(format!("{}{}", array_name, i), inner_type.clone(), st).into())
+        .map(|i| create_symbolic_var(format!("{}{}", array_name, i).into(), inner_type.clone(), st).into())
         .collect();
 
     state.heap.insert(
@@ -583,7 +588,7 @@ fn action(
             if let Some(expression) = expression {
                 let expression = evaluate(state, Rc::new(expression.clone()), st);
                 let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
-                params.insert("retval".to_string(), expression);
+                params.insert(retval(), expression);
             }
             ActionResult::Continue
         }
@@ -746,26 +751,6 @@ fn exec_throw(state: &mut State, st: &SymbolTable, message: &str) -> ActionResul
 
         ActionResult::Finish
     }
-}
-
-fn lhs_contains_symbolic_array(state: &State, lhs: &Lhs) -> Option<String> {
-    if let Lhs::LhsElem { var, .. } = lhs {
-        // if var is an uninitialized array (symbolic reference)
-        if let Expression::SymbolicRef { .. } = state.stack.last().unwrap().params[var].as_ref() {
-            return Some(var.clone());
-        }
-    }
-    None
-}
-
-fn rhs_contains_symbolic_array(state: &State, lhs: &Lhs) -> Option<String> {
-    if let Lhs::LhsElem { var, .. } = lhs {
-        // if var is an uninitialized array (symbolic reference)
-        if let Expression::SymbolicRef { .. } = state.stack.last().unwrap().params[var].as_ref() {
-            return Some(var.clone());
-        }
-    }
-    None
 }
 
 fn eval_assertion(state: &mut State, expression: Rc<Expression>, st: &SymbolTable) -> bool {
@@ -933,9 +918,9 @@ fn exec_invocation(
             // Zis is problems with interfaces
             let this_param = Parameter {
                 type_: NonVoidType::ReferenceType {
-                    identifier: class_name.to_string(),
+                    identifier: class_name.clone(),
                 },
-                name: "this".to_owned(),
+                name: this_str(),
             };
             exec_constructor(
                 state,
@@ -965,9 +950,9 @@ fn exec_invocation(
             // zis is trouble with interfaces
             let this_param = Parameter {
                 type_: NonVoidType::ReferenceType {
-                    identifier: class_name.to_string(),
+                    identifier: class_name.clone(),
                 },
-                name: "this".to_owned(),
+                name: this_str(),
             };
             exec_super_constructor(
                 state,
@@ -1016,7 +1001,7 @@ fn find_entry_for_static_invocation(
                 method_name: other_method_name,
             } = *v
             {
-                other_decl_name == class_name && other_method_name == method_name
+                *other_decl_name == class_name && *other_method_name == method_name
             } else {
                 false
             }
@@ -1037,7 +1022,7 @@ fn exec_method(
 ) {
     let this_param = Parameter {
         type_: runtime_to_nonvoidtype(this.0.clone()).expect("concrete, nonvoid type"),
-        name: "this".to_owned(),
+        name: this_str(),
     };
     let this_expr = Expression::Var {
         var: this.1.clone(),
@@ -1081,7 +1066,7 @@ fn exec_constructor(
     method: Rc<Method>,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
-    class_name: &str,
+    class_name: &Identifier,
     st: &SymbolTable,
     this_param: Parameter,
 ) {
@@ -1090,7 +1075,7 @@ fn exec_constructor(
     let fields = st
         .get_all_fields(class_name)
         .iter()
-        .map(|(s, t)| (s.to_string(), t.default().into()))
+        .map(|(s, t)| (s.clone(), t.default().into()))
         .collect();
     let structure = HeapValue::ObjectValue {
         fields,
@@ -1123,7 +1108,7 @@ fn exec_super_constructor(
     let parameters = std::iter::once(&this_param).chain(parameters.iter());
 
     // instead of allocating a new object, add the new fields to the existing 'this' object.
-    let object_ref = lookup_in_stack("this", &state.stack)
+    let object_ref = lookup_in_stack(&this_str(), &state.stack)
         .expect("super() is called in a constructor with a 'this' object on the stack");
     let arguments = std::iter::once(object_ref).chain(arguments.iter().cloned());
 
@@ -1631,12 +1616,12 @@ fn false_lit() -> Expression {
     }
 }
 
-fn remove_symbolic_null(alias_map: &mut AliasMap, var: &str) {
+fn remove_symbolic_null(alias_map: &mut AliasMap, var: &Identifier) {
     // dbg!(&alias_map, &var);
     alias_map.get_mut(var).unwrap().remove_null(var)
 }
 
-fn create_symbolic_var(name: String, type_: impl Typeable, st: &SymbolTable) -> Expression {
+fn create_symbolic_var(name: Identifier, type_: impl Typeable, st: &SymbolTable) -> Expression {
     if type_.is_of_type(RuntimeType::REFRuntimeType, st) {
         Expression::SymbolicRef {
             var: name,
@@ -1653,7 +1638,7 @@ fn create_symbolic_var(name: String, type_: impl Typeable, st: &SymbolTable) -> 
 /// Create uninitialised variable (that can be initialized lazily)
 fn initialize_symbolic_var(name: &str, type_: &RuntimeType, ref_: i64, st: &SymbolTable) -> Expression {
     let sym_name = format!("{}{}", name, ref_);
-    create_symbolic_var(sym_name, type_.clone(), st)
+    create_symbolic_var(sym_name.into(), type_.clone(), st)
 }
 
 fn read_elem_concrete_index(state: &mut State, ref_: Reference, index: i64) -> Rc<Expression> {

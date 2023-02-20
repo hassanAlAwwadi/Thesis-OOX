@@ -1,5 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
+use crate::positioned::SourcePos;
+
 use super::{DeclarationMember, Identifier, Interface};
 use std::fmt::Debug;
 

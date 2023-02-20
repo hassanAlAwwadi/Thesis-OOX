@@ -9,6 +9,8 @@ use std::str::{self, FromStr};
 use std::iter::Extend;
 
 use crate::dsl::{equal, greater_than_equal, less_than, negate, ors, size_of};
+use crate::exec::this_str;
+use crate::positioned::SourcePos;
 use crate::resolver;
 use crate::syntax::*;
 
@@ -702,7 +704,7 @@ fn identifier<'a>() -> Parser<'a, Token<'a>, Identifier> {
     take(1).convert(|tokens| {
         let token = tokens[0]; // only one taken
         if let Token::Identifier(s) = token {
-            Ok(s.to_string())
+            Ok(Identifier::with_unknown_pos(s.to_string()))
         } else {
             Err(())
         }
@@ -729,7 +731,7 @@ fn keyword<'a>(kw: &'a str) -> Parser<'a, Token<'a>, Token> {
     sym(Token::Keyword(kw))
 }
 
-fn exceptional_assignment(lhs: &Lhs, rhs: &Rhs, class_names: &[String]) -> HashSet<Expression> {
+fn exceptional_assignment(lhs: &Lhs, rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Expression> {
     let mut lhs = exceptional_lhs(lhs);
     lhs.extend(exceptional_rhs(rhs, class_names).into_iter());
     lhs
@@ -764,7 +766,7 @@ fn exceptional_lhs(lhs: &Lhs) -> HashSet<Expression> {
     }
 }
 
-fn exceptional_rhs(rhs: &Rhs, class_names: &[String]) -> HashSet<Expression> {
+fn exceptional_rhs(rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Expression> {
     match rhs {
         Rhs::RhsExpression { value, .. } => exceptional_expression(value),
         Rhs::RhsField { var, .. } => HashSet::from([equal(var.clone(), Expression::NULL)]),
@@ -847,30 +849,30 @@ fn exceptional_expression(expression: &Expression) -> HashSet<Expression> {
     }
 }
 
-fn exceptional_invocation(invocation: &Invocation, class_names: &[String]) -> HashSet<Expression> {
+fn exceptional_invocation(invocation: &Invocation, class_names: &[Identifier]) -> HashSet<Expression> {
     match invocation {
         Invocation::InvokeMethod { lhs, arguments, .. } => {
             exceptional_invoke_method(lhs, arguments, class_names)
         }
         Invocation::InvokeSuperMethod { arguments, .. } => {
             // "super" is not actually an object at runtime, but "this" is
-            exceptional_invoke_method("this", arguments, class_names)
+            exceptional_invoke_method(&this_str(), arguments, class_names)
         }
         Invocation::InvokeConstructor { .. } => HashSet::new(),
         Invocation::InvokeSuperConstructor { .. } => HashSet::new(),
     }
 }
 fn exceptional_invoke_method(
-    lhs: &str,
+    lhs: &Identifier,
     arguments: &Vec<Expression>,
-    class_names: &[String],
+    class_names: &[Identifier],
 ) -> HashSet<Expression> {
     let exceptional_args: HashSet<_> = arguments
         .into_iter()
         .flat_map(|arg| exceptional_expression(arg).into_iter())
         .collect();
 
-    let is_static_method = class_names.iter().any(|s| s.as_str() == lhs);
+    let is_static_method = class_names.iter().any(|s| s.as_str() == *lhs);
 
     if !is_static_method {
         let exp = ors(std::iter::once(equal(
@@ -946,7 +948,7 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
 
     fn insert_exceptional_clauses_class_members(
         members: &Vec<DeclarationMember>,
-        decl_names: &[String],
+        decl_names: &[Identifier],
     ) -> Vec<DeclarationMember> {
         members
             .iter()
@@ -970,7 +972,7 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
 
     fn insert_exceptional_clauses_interface_members(
         members: &Vec<InterfaceMember>,
-        decl_names: &[String],
+        decl_names: &[Identifier],
     ) -> Vec<InterfaceMember> {
         members
             .iter()
@@ -985,7 +987,7 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
             .collect()
     }
 
-    fn insert_exceptional_in_body(statement: Statement, class_names: &[String]) -> Statement {
+    fn insert_exceptional_in_body(statement: Statement, class_names: &[Identifier]) -> Statement {
         match statement {
             Statement::Assign { lhs, rhs } => {
                 let conditions = exceptional_assignment(&lhs, &rhs, class_names);

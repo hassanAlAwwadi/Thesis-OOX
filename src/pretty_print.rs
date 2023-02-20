@@ -303,11 +303,11 @@ fn test() {
     let e = Expression::BinOp {
         bin_op: BinOp::Implies,
         lhs: Rc::new(Expression::Var {
-            var: "x".to_owned(),
+            var: "x".into(),
             type_: RuntimeType::ANYRuntimeType,
         }),
         rhs: Rc::new(Expression::Var {
-            var: "y".to_owned(),
+            var: "y".into(),
             type_: RuntimeType::ANYRuntimeType,
         }),
         type_: RuntimeType::ANYRuntimeType,

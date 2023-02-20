@@ -1,6 +1,10 @@
+use derivative::Derivative;
 use ordered_float::NotNan;
 
-pub type Identifier = String;
+mod identifier;
+
+pub use identifier::*;
+
 pub type Reference = i64;
 
 pub type Float = NotNan<f64>;
@@ -9,9 +13,11 @@ use std::{
     collections::HashMap,
     fmt::{Debug, Display},
     ops::Deref,
-    rc::{Rc, Weak},
+    rc::{Rc, Weak}, str::FromStr,
 };
 
+
+use crate::positioned::SourcePos;
 
 pub use self::{
     classes::Class, interfaces::find_interface_method, interfaces::Interface,
@@ -24,6 +30,7 @@ mod interfaces;
 #[derive(Debug)]
 pub struct CompilationUnit {
     pub members: Vec<Declaration>,
+    
 }
 
 impl CompilationUnit {
@@ -32,6 +39,7 @@ impl CompilationUnit {
         identifier: &str,
         class_name: Option<&str>,
     ) -> Option<Rc<Method>> {
+
         for member in &self.members {
             if let Declaration::Class(class) = member {
                 if Some(class.name.as_str()) != class_name {
@@ -39,7 +47,7 @@ impl CompilationUnit {
                 }
                 for declaration_member in &class.members {
                     match declaration_member {
-                        DeclarationMember::Constructor(method) if identifier == method.name => {
+                        DeclarationMember::Constructor(method) if method.name == identifier => {
                             return Some(method.clone());
                         }
                         DeclarationMember::Method(method) if identifier == method.name => {
@@ -268,7 +276,7 @@ impl Invocation {
         }
     }
 
-    pub fn identifier(&self) -> &String {
+    pub fn identifier(&self) -> &Identifier {
         match &self {
             Invocation::InvokeMethod { rhs, .. } => rhs,
             Invocation::InvokeConstructor { class_name, .. } => class_name,
@@ -513,7 +521,7 @@ pub enum NonVoidType {
     BoolType,
     StringType,
     CharType,
-    ReferenceType { identifier: String },
+    ReferenceType { identifier: Identifier },
     ArrayType { inner_type: Box<NonVoidType> },
 }
 
