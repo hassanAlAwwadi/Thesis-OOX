@@ -1,8 +1,6 @@
 // use std::intrinsics::unreachable;
 
-
 use crate::{lexer::tokens, parser::parse, syntax::*, typeable::Typeable};
-
 
 const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
 
@@ -17,13 +15,13 @@ pub enum CFGStatement {
     CatchEntry(u64),
     CatchExit,
     Seq(u64, u64),
-    FunctionEntry{
-        decl_name: String, 
-        method_name: String
+    FunctionEntry {
+        decl_name: String,
+        method_name: String,
     },
     FunctionExit {
-        decl_name: String, 
-        method_name: String
+        decl_name: String,
+        method_name: String,
     },
 }
 
@@ -38,14 +36,16 @@ pub fn labelled_statements(
         match declaration {
             Declaration::Class(class) => {
                 for member in &class.members {
-                    let (mut member_statements, mut member_flow) = memberCFG(class.name.clone(), &member, i);
+                    let (mut member_statements, mut member_flow) =
+                        memberCFG(class.name.clone(), &member, i);
                     labelled_statements.append(&mut member_statements);
                     flow.append(&mut member_flow);
                 }
-            },
+            }
             Declaration::Interface(interface) => {
                 for member in &interface.members {
-                    let (mut member_statements, mut member_flow) = interface_member_cfg(interface.name.clone(), &member, i);
+                    let (mut member_statements, mut member_flow) =
+                        interface_member_cfg(interface.name.clone(), &member, i);
                     labelled_statements.append(&mut member_statements);
                     flow.append(&mut member_flow);
                 }
@@ -62,29 +62,40 @@ fn memberCFG(
     i: &mut u64,
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
     match member {
-        DeclarationMember::Method {
-            name,
-            body,
-            ..
-        }  => {
-            label_method(class_name, name, body, i)
-        },
-        DeclarationMember::Constructor {
-            name,
-            body,
-            ..
-        } => {
+        DeclarationMember::Method(method) => label_method(class_name, &method.name, &method.body.borrow(), i),
+        DeclarationMember::Constructor(method) => {
             let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
             let mut v = Vec::new();
-            v.push((*i, CFGStatement::FunctionEntry { decl_name: class_name.clone(), method_name: name.clone() }));
+            v.push((
+                *i,
+                CFGStatement::FunctionEntry {
+                    decl_name: class_name.clone(),
+                    method_name: method.name.clone(),
+                },
+            ));
             let entry_label = *i;
             *i += 1;
-            v.append(&mut statementCFG(&body, i));
+            v.append(&mut statementCFG(&method.body.borrow(), i));
             // insert `return this;` at the end of the constructor flow.
-            v.push((*i, CFGStatement::Statement(Statement::Return { expression: Expression::Var { var: "this".to_string(), type_: member.type_of() }.into() })));
+            v.push((
+                *i,
+                CFGStatement::Statement(Statement::Return {
+                    expression: Expression::Var {
+                        var: "this".to_string(),
+                        type_: member.type_of(),
+                    }
+                    .into(),
+                }),
+            ));
             let return_this_label = *i;
             *i += 1;
-            v.push((*i, CFGStatement::FunctionExit{ decl_name: class_name, method_name: name.clone() }));
+            v.push((
+                *i,
+                CFGStatement::FunctionExit {
+                    decl_name: class_name,
+                    method_name: method.name.clone(),
+                },
+            ));
             let exit_label = *i;
             *i += 1;
 
@@ -115,26 +126,44 @@ fn memberCFG(
     }
 }
 
-fn interface_member_cfg(class_name: String,
+fn interface_member_cfg(
+    class_name: String,
     member: &InterfaceMember,
-    i: &mut u64,) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
+    i: &mut u64,
+) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
     match member {
-        InterfaceMember::Method(method) => if let Some(body) = &method.body {
-            label_method(class_name, &method.name, body, i)
-        } else {
-            (Vec::new(), Vec::new())
+        InterfaceMember::DefaultMethod(method) => {
+            label_method(class_name, &method.name, &method.body.borrow(), i)
         }
+        InterfaceMember::AbstractMethod(_) => (Vec::new(), Vec::new()),
     }
 }
 
-fn label_method(class_name: String, name: &String,  body: &Statement, i: &mut u64) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
+fn label_method(
+    class_name: String,
+    name: &String,
+    body: &Statement,
+    i: &mut u64,
+) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
     let mut v = Vec::new();
-    v.push((*i, CFGStatement::FunctionEntry { decl_name: class_name.clone(), method_name: name.clone() }));
+    v.push((
+        *i,
+        CFGStatement::FunctionEntry {
+            decl_name: class_name.clone(),
+            method_name: name.clone(),
+        },
+    ));
     let entry_label = *i;
     *i += 1;
     v.append(&mut statementCFG(&body, i));
-    v.push((*i, CFGStatement::FunctionExit { decl_name: class_name, method_name: name.clone() }));
+    v.push((
+        *i,
+        CFGStatement::FunctionExit {
+            decl_name: class_name,
+            method_name: name.clone(),
+        },
+    ));
     let exit_label = *i;
     *i += 1;
 
@@ -269,7 +298,7 @@ fn init((l, stmt): &(u64, CFGStatement)) -> u64 {
         CFGStatement::TryExit => l,
         CFGStatement::CatchEntry(_) => l,
         CFGStatement::CatchExit => l,
-        CFGStatement::FunctionEntry{ .. } => unreachable!(),
+        CFGStatement::FunctionEntry { .. } => unreachable!(),
         CFGStatement::FunctionExit { .. } => unreachable!(),
     }
 }
@@ -323,7 +352,7 @@ fn fallthrough(
         CFGStatement::CatchEntry(_) => Vec::new(),
         CFGStatement::CatchExit => Vec::new(),
         CFGStatement::FunctionEntry { .. } => todo!(),
-        CFGStatement::FunctionExit {.. }=> todo!(),
+        CFGStatement::FunctionExit { .. } => todo!(),
     }
 }
 
@@ -374,8 +403,8 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
                 CFGStatement::Statement(Statement::Return { .. }) => Vec::new(),
                 CFGStatement::Statement(Statement::Throw { .. }) => Vec::new(),
                 CFGStatement::Statement(_) => final_s2,
-                CFGStatement::FunctionEntry{ .. } => unreachable!(),
-                CFGStatement::FunctionExit{..} => unreachable!(),
+                CFGStatement::FunctionEntry { .. } => unreachable!(),
+                CFGStatement::FunctionExit { .. } => unreachable!(),
                 CFGStatement::Ite(_, _, _) => final_s2,
                 CFGStatement::While(_, _) => final_s2,
                 CFGStatement::TryCatch(_, _, _, _) => final_s2,
@@ -403,16 +432,16 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
             let s_l = &(*sl, lookup(*sl, all_smts));
             let final_s_l = r#final(s_l, all_smts);
             final_s_l
-        },
+        }
         CFGStatement::TryExit => vec![*l],
         CFGStatement::CatchEntry(sl) => {
             let s_l = &(*sl, lookup(*sl, all_smts));
             let final_s_l = r#final(s_l, all_smts);
             final_s_l
-        },
+        }
         CFGStatement::CatchExit => vec![*l],
-        CFGStatement::FunctionEntry{..} => unreachable!(),
-        CFGStatement::FunctionExit{..} => unreachable!(),
+        CFGStatement::FunctionEntry { .. } => unreachable!(),
+        CFGStatement::FunctionExit { .. } => unreachable!(),
     }
 }
 
@@ -509,8 +538,8 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
             v
         }
         CFGStatement::CatchExit => Vec::new(),
-        CFGStatement::FunctionEntry{..} => todo!(),
-        CFGStatement::FunctionExit{..} => todo!(),
+        CFGStatement::FunctionEntry { .. } => todo!(),
+        CFGStatement::FunctionExit { .. } => todo!(),
     }
 }
 

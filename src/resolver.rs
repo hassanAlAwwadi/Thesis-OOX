@@ -8,7 +8,7 @@ use crate::{
     symbol_table::SymbolTable,
     syntax::{
         self, Class, CompilationUnit, Declaration, DeclarationMember, Identifier, Interface,
-        Invocation, NonVoidType, Parameter, Rhs, RuntimeType, Specification, Statement,
+        Invocation, NonVoidType, Parameter, Rhs, RuntimeType, Specification, Statement, Method,
     },
 };
 
@@ -307,7 +307,7 @@ fn super_method_call_helper(
     class_name: &String,
     method_name: &String,
     st: &SymbolTable,
-) -> Box<(Declaration, Rc<DeclarationMember>)> {
+) -> Box<(Declaration, Rc<Method>)> {
     let decl = &st.declarations[class_name];
 
     let class = decl
@@ -341,7 +341,7 @@ fn method_call_helper(
     class_name: &String,
     method_name: &String,
     st: &SymbolTable,
-) -> HashMap<Identifier, (Declaration, Rc<DeclarationMember>)> {
+) -> HashMap<Identifier, (Declaration, Rc<Method>)> {
     let decl = &st.declarations[class_name];
 
     // Check if class itself contains the method in question
@@ -432,20 +432,21 @@ fn find_declaration(decl_name: &String, declarations: &Vec<Declaration>) -> Opti
         .next()
 }
 
+/// Finds first normal Method, non-constructor, with given name
 fn find_method(
     method_name: &str,
-    members: &Vec<Rc<DeclarationMember>>,
-) -> Option<Rc<DeclarationMember>> {
+    members: &Vec<DeclarationMember>,
+) -> Option<Rc<Method>> {
     members
         .iter()
-        .find(|member| {
-            if let DeclarationMember::Method { name, .. } = member.as_ref() {
-                name == method_name
-            } else {
-                false
+        .find_map(|member| {
+            if let DeclarationMember::Method(method) = member {
+                if method.name == method_name {
+                    return Some(method.clone());
+                }
             }
+            None
         })
-        .cloned()
 }
 
 /// Find the first method with the name method_name
@@ -455,15 +456,17 @@ fn method_in_superclass(
     superclass: Rc<syntax::Class>,
     method_name: &str,
     st: &SymbolTable,
-) -> Option<(Identifier, (Declaration, Rc<DeclarationMember>))> {
+) -> Option<(Identifier, (Declaration, Rc<Method>))> {
     // Find the first superclass (in the chain) with the method
-    let method = find_method(method_name, &superclass.members);
-    if let Some(method) = method {
+    let member = find_method(method_name, &superclass.members);
+    
+    if let Some(method) = member {
         // Stop on the first overriden method in the chain.
         Some((
             superclass.name.to_string(),
-            (Declaration::Class(superclass), method),
+            (Declaration::Class(superclass), method.clone()),
         ))
+        
     } else if let Some(superclass) = st.class_extends(&superclass.name).clone() {
         method_in_superclass(superclass, method_name, st)
     } else {
@@ -477,9 +480,9 @@ fn method_in_superclass(
 fn methods_in_subclasses(
     class: Rc<Class>,
     method_name: &str,
-    overridable: Option<(Declaration, Rc<DeclarationMember>)>,
+    overridable: Option<(Declaration, Rc<Method>)>,
     st: &SymbolTable,
-) -> HashMap<Identifier, (Declaration, Rc<DeclarationMember>)> {
+) -> HashMap<Identifier, (Declaration, Rc<Method>)> {
     let method = find_method(method_name, &class.members);
     let mut methods = if let Some(method) = method.clone() {
         // this class contains the method, assign it to the type
@@ -498,7 +501,7 @@ fn methods_in_subclasses(
 
     // set new overridable to the method of this class if available, otherwise take the method from superclass.
     let overridable = method
-        .map(|method: Rc<DeclarationMember>| (Declaration::Class(class.clone()), method))
+        .map(|method| (Declaration::Class(class.clone()), method))
         .or(overridable);
 
     methods.extend(st.subclasses(&class.name).iter().flat_map(|subclass| {
@@ -511,7 +514,7 @@ fn method_in_interfaces(
     interfaces: &Vec<Rc<Interface>>,
     method_name: &str,
     st: &SymbolTable,
-) -> Either<Option<(Identifier, (Declaration, Rc<DeclarationMember>))>, ()> {
+) -> Either<Option<(Identifier, (Declaration, Rc<Method>))>, ()> {
     let method_declarations = interfaces
         .iter()
         .map(|superinterface| method_in_interface(superinterface.clone(), method_name, st))
@@ -541,30 +544,20 @@ fn method_in_interface(
     interface: Rc<Interface>,
     method_name: &str,
     st: &SymbolTable,
-) -> Either<Option<(Identifier, (Declaration, Rc<DeclarationMember>))>, ()> {
-    let method = syntax::find_interface_method(&method_name, &interface.members);
+) -> Either<Option<(Identifier, (Declaration, Rc<Method>))>, ()> {
+    let member = syntax::find_interface_method(&method_name, &interface.members);
 
-    if let Some(method) = method {
-        if let Some(body) = method.body.clone() {
-            Either::Left(Some((
+    if let Some(member) = member {
+        match member {
+            syntax::InterfaceMember::DefaultMethod(method) => Either::Left(Some((
                 interface.name.clone(),
                 (
                     Declaration::Interface(interface.clone()),
-                    DeclarationMember::Method {
-                        // this is suboptimal
-                        is_static: false,
-                        return_type: method.type_.clone(),
-                        name: method.name.clone(),
-                        params: method.parameters.clone(),
-                        specification: Specification::default(),
-                        body,
-                    }
-                    .into(),
+                    method
                 ),
-            )))
-        } else {
+            ))),
             // Abstract method defined in this interface, no need to look in superinterfaces, but cannot provide overridable.
-            Either::Left(None)
+            syntax::InterfaceMember::AbstractMethod(method) => Either::Left(None),
         }
     } else {
         // find first non-default method in superinterfaces, or none.
@@ -578,20 +571,17 @@ fn method_in_interface(
 fn constructor_call_helper(
     called_constructor: &String,
     st: &SymbolTable
-) -> Box<(Declaration, Rc<DeclarationMember>)> {
+) -> Box<(Declaration, Rc<Method>)> {
     let class = st.get_class(called_constructor).unwrap();
 
     for member in &class.members {
-        if let DeclarationMember::Constructor {
-            name: constructor_name,
-            ..
-        } = member.as_ref()
+        if let DeclarationMember::Constructor(method) = member
         {
             //dbg!("{:?}, {:?}, {:?}, {:?}", lhs, rhs, class_name, member_name);
-            if called_constructor == constructor_name {
+            if *called_constructor == method.name {
                 return Box::new((
                     Declaration::Class(class.clone()),
-                    member.clone(),
+                    method.clone(),
                 ));
             }
         }
@@ -602,14 +592,14 @@ fn constructor_call_helper(
 fn constructor_super_call_helper(
     class_name: &String,
     st: &SymbolTable,
-) -> Box<(Declaration, Rc<DeclarationMember>)> {
+) -> Box<(Declaration, Rc<Method>)> {
     let extends = st.class_extends(class_name).expect("super() found in constructor but class does not extend other class");
 
     for member in &extends.members {
-        if let DeclarationMember::Constructor { .. } = member.as_ref() {
+        if let DeclarationMember::Constructor(method) = member {
             return Box::new((
                 Declaration::Class(extends.clone()),
-                member.clone(),
+                method.clone(),
             ));
         }
     }
@@ -620,7 +610,7 @@ pub(crate) fn resolve_method(
     class_name: &String,
     method_name: &String,
     st: &SymbolTable,
-) -> HashMap<Identifier, (Declaration, Rc<DeclarationMember>)> {
+) -> HashMap<Identifier, (Declaration, Rc<Method>)> {
     method_call_helper(class_name, method_name, st)
 }
 
@@ -628,15 +618,15 @@ pub fn resolve_super_method(
     class_name: &String,
     method_name: &String,
     st: &SymbolTable
-) -> Box<(Declaration, Rc<DeclarationMember>)> {
+) -> Box<(Declaration, Rc<Method>)> {
     super_method_call_helper(class_name, method_name, st)
 }
 
-pub fn resolve_constructor(class_name: &String, st: &SymbolTable) -> Box<(syntax::Declaration, std::rc::Rc<syntax::DeclarationMember>)> {
+pub fn resolve_constructor(class_name: &String, st: &SymbolTable) -> Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)> {
     constructor_call_helper(class_name, st)
 }
 
-pub fn resolve_super_constructor(class_name: &String, st: &SymbolTable) -> Box<(syntax::Declaration, std::rc::Rc<syntax::DeclarationMember>)> {
+pub fn resolve_super_constructor(class_name: &String, st: &SymbolTable) -> Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)> {
     constructor_super_call_helper(class_name, st)
 }
 

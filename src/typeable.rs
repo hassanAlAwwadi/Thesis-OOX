@@ -4,7 +4,7 @@ use ordered_float::NotNan;
 
 use crate::{
     exec::HeapValue,
-    syntax::{DeclarationMember, Expression, Invocation, Lit, NonVoidType, RuntimeType, Type, Rhs, Lhs},
+    syntax::{DeclarationMember, Expression, Invocation, Lit, NonVoidType, RuntimeType, Type, Rhs, Lhs, Method}, symbol_table::SymbolTable,
 };
 
 pub trait Typeable {
@@ -17,7 +17,7 @@ pub trait Typeable {
         RuntimeType::FloatRuntimeType,
     ];
 
-    fn is_of_type(&self, other: impl Typeable) -> bool {
+    fn is_of_type(&self, other: impl Typeable, st: &SymbolTable) -> bool {
         use RuntimeType::*;
         match (self.type_of(), other.type_of()) {
             (ANYRuntimeType, _) => true,
@@ -37,6 +37,7 @@ pub trait Typeable {
             // Matching ARRAY types
             (ARRAYRuntimeType, (ArrayRuntimeType { .. })) => true,
             (ArrayRuntimeType { .. }, ARRAYRuntimeType) => true,
+            (ReferenceRuntimeType { type_: a }, ReferenceRuntimeType { type_: b}) => st.get_all_instance_types(&b).contains(&a),
             (a, b) => a == b,
         }
     }
@@ -137,10 +138,8 @@ impl Typeable for DeclarationMember {
     fn type_of(&self) -> RuntimeType {
         use DeclarationMember::*;
         match self {
-            Constructor { name, .. } => RuntimeType::ReferenceRuntimeType {
-                type_: name.clone(),
-            },
-            Method { return_type, .. } => return_type.type_of(),
+            Constructor(method) => method.return_type.type_of(),
+            Method(method) => method.return_type.type_of(),
             Field { type_, .. } => type_.type_of(),
         }
     }
@@ -254,5 +253,11 @@ impl Typeable for Rhs {
             Rhs::RhsCall { type_, .. } => type_,
             Rhs::RhsArray { type_, .. } => type_,
         }.clone()
+    }
+}
+
+impl Typeable for Method {
+    fn type_of(&self) -> RuntimeType {
+        self.return_type.type_of()
     }
 }

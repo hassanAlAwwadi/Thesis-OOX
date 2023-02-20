@@ -5,16 +5,17 @@ pub type Reference = i64;
 
 pub type Float = NotNan<f64>;
 use std::{
-    cell::{Ref, RefCell},
+    cell::{Ref, RefCell, Cell},
     collections::HashMap,
     fmt::{Debug, Display},
     ops::Deref,
     rc::{Rc, Weak},
 };
 
+
 pub use self::{
     classes::Class, interfaces::find_interface_method, interfaces::Interface,
-    interfaces::InterfaceMember, interfaces::InterfaceMethod,
+    interfaces::InterfaceMember,
 };
 
 mod classes;
@@ -30,19 +31,19 @@ impl CompilationUnit {
         &self,
         identifier: &str,
         class_name: Option<&str>,
-    ) -> Option<Rc<DeclarationMember>> {
+    ) -> Option<Rc<Method>> {
         for member in &self.members {
             if let Declaration::Class(class) = member {
                 if Some(class.name.as_str()) != class_name {
                     continue;
                 }
                 for declaration_member in &class.members {
-                    match declaration_member.as_ref() {
-                        DeclarationMember::Constructor { name, .. } if identifier == name => {
-                            return Some(declaration_member.clone());
+                    match declaration_member {
+                        DeclarationMember::Constructor(method) if identifier == method.name => {
+                            return Some(method.clone());
                         }
-                        DeclarationMember::Method { name, .. } if identifier == name => {
-                            return Some(declaration_member.clone());
+                        DeclarationMember::Method(method) if identifier == method.name => {
+                            return Some(method.clone());
                         }
                         _ => (),
                     }
@@ -76,22 +77,47 @@ impl Declaration {
     }
 }
 
+/// Non-abstract, with concrete body
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Method {
+    pub is_static: bool,
+    pub return_type: Type,
+    pub name: Identifier,
+    pub params: Vec<Parameter>,
+    pub specification: Specification,
+    pub body: RefCell<Statement>, // This is a RefCell to allow interior mutability for inserting the exceptional clauses and types
+}
+
+impl Method {
+    pub fn requires(&self) -> Option<Rc<Expression>> {
+        self.specification.requires.clone()
+    }
+
+    pub fn post_condition(&self) -> Option<Rc<Expression>> {
+        self.specification.ensures.clone()
+    }
+
+    pub fn exceptional(&self) -> Option<Rc<Expression>> {
+        self.specification.exceptional.clone()
+    }
+}
+
+
+/// Abstract method, has no body implementation
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AbstractMethod {
+    pub is_static: bool,
+    pub return_type: Type,
+    pub name: Identifier,
+    pub params: Vec<Parameter>,
+    pub specification: Specification
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeclarationMember {
-    Constructor {
-        name: Identifier,
-        params: Vec<Parameter>,
-        specification: Specification,
-        body: Statement,
-    },
-    Method {
-        is_static: bool,
-        return_type: Type,
-        name: Identifier,
-        params: Vec<Parameter>,
-        specification: Specification,
-        body: Statement,
-    },
+    /// Note: is_static is always false for constructors
+    Constructor(Rc<Method>),
+    Method(Rc<Method>),
     Field {
         type_: NonVoidType,
         name: Identifier,
@@ -99,47 +125,34 @@ pub enum DeclarationMember {
 }
 
 impl DeclarationMember {
-    fn specification(&self) -> Option<&Specification> {
-        match &self {
-            DeclarationMember::Constructor { specification, .. } => Some(specification),
-            DeclarationMember::Method { specification, .. } => Some(specification),
-            DeclarationMember::Field { .. } => None,
-        }
-    }
-
-    pub fn requires(&self) -> Option<Rc<Expression>> {
-        self.specification().and_then(|s| s.requires.clone())
-    }
-
-    pub fn post_condition(&self) -> Option<Rc<Expression>> {
-        self.specification().and_then(|s| s.ensures.clone())
-    }
-
-    pub fn exceptional(&self) -> Option<Rc<Expression>> {
-        self.specification().and_then(|s| s.exceptional.clone())
-    }
-
     pub fn name(&self) -> &Identifier {
         match &self {
-            DeclarationMember::Constructor { name, .. } => name,
-            DeclarationMember::Method { name, .. } => name,
+            DeclarationMember::Constructor(method) => &method.name,
+            DeclarationMember::Method(method) => &method.name,
             DeclarationMember::Field { name, .. } => name,
         }
     }
 
     pub fn params(&self) -> Option<&Vec<Parameter>> {
         match &self {
-            DeclarationMember::Constructor { params, .. } => Some(params),
-            DeclarationMember::Method { params, .. } => Some(params),
+            DeclarationMember::Constructor(method) => Some(&method.params),
+            DeclarationMember::Method(method)=> Some(&method.params),
             DeclarationMember::Field { .. } => None,
         }
     }
 
-    pub fn set_body(&mut self, new_body: Statement) {
+    pub fn method(&self) -> Option<Rc<Method>> {
         match self {
-            DeclarationMember::Constructor { body, .. } => *body = new_body,
-            DeclarationMember::Method { body, .. } => *body = new_body,
-            DeclarationMember::Field { .. } => panic!("Expected method or constructor"),
+            DeclarationMember::Constructor(method) => Some(method.clone()),
+            DeclarationMember::Method(method) => Some(method.clone()),
+            DeclarationMember::Field { .. } => None,
+        }
+    }
+    pub fn is_constructor(&self) -> bool {
+        if let DeclarationMember::Constructor(_) = self {
+            true
+        } else {
+            false
         }
     }
 }
@@ -214,24 +227,24 @@ pub enum Invocation {
         lhs: Identifier,
         rhs: Identifier,
         arguments: Vec<Expression>,
-        resolved: Option<HashMap<Identifier, (Declaration, Rc<DeclarationMember>)>>, // What is this? -- potential case for Weak<..>
+        resolved: Option<HashMap<Identifier, (Declaration, Rc<Method>)>>,
     },
     InvokeSuperMethod {
         // super.method(..);
         rhs: Identifier,
         arguments: Vec<Expression>,
-        resolved: Option<Box<(Declaration, Rc<DeclarationMember>)>>,
+        resolved: Option<Box<(Declaration, Rc<Method>)>>,
     },
     InvokeConstructor {
         // new Foo(..)
         class_name: Identifier,
         arguments: Vec<Expression>,
-        resolved: Option<Box<(Declaration, Rc<DeclarationMember>)>>, // What is this?
+        resolved: Option<Box<(Declaration, Rc<Method>)>>,
     },
     /// invocation of the constructor of the superclass. i.e. `super(..);`
     InvokeSuperConstructor {
         arguments: Vec<Expression>,
-        resolved: Option<Box<(Declaration, Rc<DeclarationMember>)>>,
+        resolved: Option<Box<(Declaration, Rc<Method>)>>,
     },
 }
 

@@ -52,8 +52,8 @@ fn declaration<'a>() -> Parser<'a, Token<'a>, Declaration> {
     class | interface().map(Rc::new).map(Declaration::Interface)
 }
 
-fn member<'a>() -> Parser<'a, Token<'a>, Rc<DeclarationMember>> {
-    (field() | constructor() | method().name("method")).map(Rc::new)
+fn member<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
+    field() | constructor() | method().name("method")
 
     // empty().map(|_| vec![])
 }
@@ -68,14 +68,14 @@ fn method<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
 
     (is_static + type_() + identifier() + parameters() + specification() + body()).map(
         |(((((is_static, return_type), name), params), specification), body)| {
-            DeclarationMember::Method {
+            DeclarationMember::Method(Method {
                 is_static,
                 return_type,
                 name,
                 params,
                 specification,
-                body,
-            }
+                body: body.into(),
+            }.into())
         },
     )
 
@@ -88,12 +88,14 @@ fn constructor<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     let body = constructor_body();
 
     (p + specification() + body).map(|(((name, params), specification), body)| {
-        DeclarationMember::Constructor {
+        DeclarationMember::Constructor(Method {
+            return_type: Type { type_: Some(NonVoidType::ReferenceType { identifier: name.clone() }) },
+            is_static: false,
             name,
             params,
             specification,
-            body,
-        }
+            body: body.into(),
+        }.into())
     })
 }
 
@@ -943,70 +945,43 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
     }
 
     fn insert_exceptional_clauses_class_members(
-        members: &Vec<Rc<DeclarationMember>>,
+        members: &Vec<DeclarationMember>,
         decl_names: &[String],
-    ) -> Vec<Rc<DeclarationMember>> {
+    ) -> Vec<DeclarationMember> {
         members
             .iter()
-            .map(|dcl| match dcl.as_ref().clone() {
-                DeclarationMember::Method {
-                    body,
-                    is_static,
-                    return_type,
-                    name,
-                    params,
-                    specification,
-                } => {
-                    let body = insert_exceptional_in_body(body, &decl_names);
-                    DeclarationMember::Method {
-                        body,
-                        is_static,
-                        return_type,
-                        name,
-                        params,
-                        specification,
-                    }
+            .map(|dcl| match dcl.clone() {
+                DeclarationMember::Method(method) => {
+                    let new_body =
+                        insert_exceptional_in_body(method.body.borrow().clone(), &decl_names);
+                    *method.body.borrow_mut() = new_body;
+                    DeclarationMember::Method(method)
                 }
-                DeclarationMember::Constructor {
-                    body,
-                    name,
-                    params,
-                    specification,
-                } => {
-                    let body = insert_exceptional_in_body(body, &decl_names);
-                    DeclarationMember::Constructor {
-                        name,
-                        params,
-                        specification,
-                        body,
-                    }
+                DeclarationMember::Constructor(method) => {
+                    let new_body =
+                        insert_exceptional_in_body(method.body.borrow().clone(), &decl_names);
+                        *method.body.borrow_mut() = new_body;
+                    DeclarationMember::Constructor(method)
                 }
                 field @ DeclarationMember::Field { .. } => field,
             })
-            .map(Rc::new)
             .collect_vec()
     }
 
     fn insert_exceptional_clauses_interface_members(
-        members: &Vec<Rc<InterfaceMember>>,
+        members: &Vec<InterfaceMember>,
         decl_names: &[String],
-    ) -> Vec<Rc<InterfaceMember>> {
+    ) -> Vec<InterfaceMember> {
         members
             .iter()
-            .map(|dcl| match dcl.as_ref().clone() {
-                InterfaceMember::Method(InterfaceMethod {
-                    type_,
-                    name,
-                    parameters,
-                    body,
-                }) => InterfaceMember::Method(InterfaceMethod {
-                    type_,
-                    name,
-                    parameters,
-                    body: body.map(|body| insert_exceptional_in_body(body, &decl_names)),
-                }),
+            .map(|dcl| match dcl {
+                InterfaceMember::DefaultMethod(method) => {
+                    let new_body = insert_exceptional_in_body(method.body.borrow().clone(), &decl_names);
+                    *method.body.borrow_mut() = new_body;
+                    InterfaceMember::DefaultMethod(method.clone())
+                },
+                InterfaceMember::AbstractMethod(_) => dcl.clone(),
             })
-            .map(Rc::new)
             .collect()
     }
 

@@ -16,6 +16,7 @@ pub type Field = (Identifier, NonVoidType);
 
 type SymbolError = String;
 
+#[derive(Default)]
 struct InheritanceTable {
     pub class_extends: HashMap<Identifier, Option<Rc<Class>>>, // class to class it extends (or None if not)
     pub interface_extends: HashMap<Identifier, Vec<Rc<Interface>>>, // interface to interface it extends
@@ -38,12 +39,7 @@ impl SymbolTable {
     pub fn from_ast(compilation_unit: &CompilationUnit) -> Result<SymbolTable, SymbolError> {
         let mut class_to_fields = HashMap::new();
 
-        let mut class_extends = HashMap::new();
-        let mut interface_extends = HashMap::<Identifier, Vec<Rc<Interface>>>::new();
-        let mut implements = HashMap::<Identifier, Vec<Rc<Interface>>>::new();
-        let mut subclasses = HashMap::<Identifier, Vec<Rc<Class>>>::new();
-        let mut implemented = HashMap::<Identifier, Vec<Rc<Class>>>::new();
-        let mut subinterfaces = HashMap::<Identifier, Vec<Rc<Interface>>>::new();
+        let mut it: InheritanceTable = Default::default();
 
         // let mut class_to_methods = HashMap::new();
         let mut declarations = HashMap::new();
@@ -55,39 +51,42 @@ impl SymbolTable {
         for (decl_name, member) in &declarations {
             match member.clone() {
                 Declaration::Class(class) => {
-                    subclasses.insert(class.name.clone(), Vec::new());
+                    it.subclasses.insert(class.name.clone(), Vec::new());
                     if let Some(extends_name) = &class.extends {
                         let extend_class =
                             Self::get_class_from_declarations(&declarations, &extends_name)?;
 
-                        class_extends.insert(decl_name.clone(), Some(extend_class));
-                        subclasses
+                        it.class_extends.insert(decl_name.clone(), Some(extend_class));
+                        it.subclasses
                             .entry(extends_name.clone())
                             .or_default()
                             .push(class.clone());
                     } else {
-                        class_extends.insert(decl_name.clone(), None);
+                        it.class_extends.insert(decl_name.clone(), None);
                     }
                     for interface_name in class.implements.iter() {
                         let interface = Self::get_interface(&declarations, &interface_name)?;
-                        implements
+                        it.implements
                             .entry(decl_name.clone())
                             .or_default()
                             .push(interface);
-                        implemented
+                        it.implemented
                             .entry(interface_name.clone())
                             .or_default()
                             .push(class.clone());
                     }
                 }
                 Declaration::Interface(interface) => {
+                    it.interface_extends.insert(interface.name.clone(), Vec::new());
+                    it.subinterfaces.insert(interface.name.clone(), Vec::new());
+                    it.implemented.insert(interface.name.clone(), Vec::new());
                     for interface_name in &interface.extends {
                         let extend_interface = Self::get_interface(&declarations, &interface_name)?;
-                        interface_extends
+                        it.interface_extends
                             .entry(decl_name.clone())
                             .or_default()
                             .push(extend_interface);
-                        subinterfaces
+                        it.subinterfaces
                             .entry(interface_name.clone())
                             .or_default()
                             .push(interface.clone());
@@ -96,18 +95,9 @@ impl SymbolTable {
             }
         }
 
-        let inheritance_table = InheritanceTable {
-            class_extends,
-            interface_extends,
-            implements,
-            subclasses,
-            implemented,
-            subinterfaces,
-        };
-
         for (decl_name, member) in &declarations {
             if let Declaration::Class(class) = member.clone() {
-                let fields = Self::collect_fields(class, &inheritance_table);
+                let fields = Self::collect_fields(class, &it);
                 // let methods = Self::collect_methods(class);
                 class_to_fields.insert(decl_name.clone(), fields);
             }
@@ -118,7 +108,7 @@ impl SymbolTable {
         let decl_to_instance_types = declarations
             .iter()
             .map(|(name, decl)| {
-                let derived_classes = Self::derived_classes(decl.clone(), &inheritance_table)
+                let derived_classes = Self::derived_classes(decl.clone(), &it)
                     .into_iter()
                     .map(|class| class.name.clone())
                     .unique()
@@ -130,7 +120,7 @@ impl SymbolTable {
         Ok(SymbolTable {
             class_to_fields,
             declarations,
-            inheritance_table,
+            inheritance_table: it,
             decl_to_instance_types,
         })
     }
@@ -266,7 +256,7 @@ impl SymbolTable {
         let mut fields = Vec::new();
 
         for declaration_member in &class.members {
-            match declaration_member.as_ref() {
+            match declaration_member {
                 DeclarationMember::Field { type_, name } => {
                     fields.push((name.to_owned(), type_.to_owned()))
                 }

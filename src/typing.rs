@@ -17,12 +17,12 @@ type TypeError = String;
 
 /// Checks whether typeable A is of type B, returning an error when this is not the case.
 /// And an empty Ok result otherwise.
-fn matches_type<A, B>(type1: A, type2: B) -> Result<(), TypeError>
+fn matches_type<A, B>(type1: A, type2: B, st: &SymbolTable) -> Result<(), TypeError>
 where
     A: Typeable,
     B: Typeable,
 {
-    if !type1.is_of_type(type2.type_of()) {
+    if !type1.is_of_type(type2.type_of(), st) {
         return Err(error::unification_error(type2.type_of(), type1.type_of()));
     }
     Ok(())
@@ -34,7 +34,9 @@ struct TypeEnvironment {
 }
 impl TypeEnvironment {
     fn declare_var<I>(&mut self, var: I, type_: RuntimeType) -> Result<(), TypeError>
-        where I: AsRef<str> + Into<Identifier> {
+    where
+        I: AsRef<str> + Into<Identifier>,
+    {
         if let Some((previously_defined, _)) = self.env.get_key_value(var.as_ref()) {
             return Err(error::shadowing(var.into(), previously_defined.to_string()));
         }
@@ -64,84 +66,123 @@ pub fn type_compilation_unit(
 }
 
 fn type_declaration(declaration: Declaration, st: &SymbolTable) -> Result<Declaration, TypeError> {
-    match &declaration {
+    match declaration {
         Declaration::Class(class) => {
-            let mut class = class.as_ref().clone(); // bad clone
             let mut env = TypeEnvironment {
                 env: HashMap::new(),
             };
-            let members = class
-                .members
-                .into_iter()
-                .map(move |member| {
-                    type_member(declaration.clone(), member.as_ref().clone(), &mut env, st)
-                        .map(Rc::new)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            class.members = members;
-            Ok(Declaration::Class(class.into()))
+
+            for member in &class.members {
+                type_member_class(class.clone(), member, &mut env, st)?;
+            }
+
+            Ok(Declaration::Class(class))
         }
-        Declaration::Interface(_) => todo!(),
+        Declaration::Interface(interface) => {
+            let mut env = TypeEnvironment {
+                env: HashMap::new(),
+            };
+            for member in &interface.members {
+                type_member_interface(interface.clone(), member, &mut env, st)?;
+            }
+
+            Ok(Declaration::Interface(interface))
+        }
     }
 }
 
-fn type_member(
-    declaration: Declaration,
-    declaration_member: DeclarationMember,
+/// Will modify the bodies of declaration members with types,
+/// and resolves the method invocations
+fn type_member_class(
+    declaration: Rc<Class>,
+    declaration_member: &DeclarationMember,
     env: &mut TypeEnvironment,
     st: &SymbolTable,
-) -> Result<DeclarationMember, TypeError> {
+) -> Result<(), TypeError> {
     use DeclarationMember as DM;
-    match &declaration_member {
-        field @ DM::Field { .. } => Ok(field.clone()),
-        DM::Constructor {
-            specification,
-            body,
-            params, ..
-        }
-        | DM::Method {
-            is_static: false,
-            specification,
-            body,
-            params,
-            ..
-        } => {
+    match declaration_member.clone() {
+        field @ DM::Field { .. } => Ok(()),
+        DM::Constructor(method) | DM::Method(method) if method.is_static == false => {
             let mut env = env.clone();
             env.declare_var(
                 "this",
                 RuntimeType::ReferenceRuntimeType {
-                    type_: declaration.name().clone(),
+                    type_: declaration.name.clone(),
                 },
             )?;
-            for param in params {
+            for param in &method.params {
                 env.declare_param(param)?;
             }
-            type_specification(&declaration_member, specification.clone(), &mut env)?;
+            type_specification(
+                &declaration_member,
+                method.specification.clone(),
+                &mut env,
+                st,
+            )?;
+            let is_constructor = declaration_member.is_constructor();
+            let new_body = type_statement(
+                method.body.borrow().clone(),
+                is_constructor,
+                method.clone(),
+                &mut env,
+                st,
+                &Declaration::Class(declaration),
+            )?;
+            *method.body.borrow_mut() = new_body;
 
-            let body = type_statement(body.clone(), &declaration_member, &mut env, st, &declaration)?;
-
-            let mut declaration_member = declaration_member;
-            declaration_member.set_body(body);
-            Ok(declaration_member)
+            Ok(())
         }
-        DM::Method {
-            is_static: true,
-            body,
-            params,
-            ..
-        } => {
+        DM::Method(method) => {
+            // static method
             let mut env = env.clone();
 
-            for param in params {
+            for param in &method.params {
                 env.declare_param(param)?;
             }
+            let is_constructor = false;
+            let new_body = type_statement(
+                method.body.borrow().clone(),
+                is_constructor,
+                method.clone(),
+                &mut env,
+                st,
+                &Declaration::Class(declaration),
+            )?;
+            *method.body.borrow_mut() = new_body;
 
-            let body = type_statement(body.clone(), &declaration_member, &mut env, st, &declaration)?;
-
-            let mut declaration_member = declaration_member;
-            declaration_member.set_body(body);
-            Ok(declaration_member)
+            Ok(())
         }
+        DM::Constructor(_) => todo!(),
+    }
+}
+
+fn type_member_interface(
+    interface: Rc<Interface>,
+    member: &InterfaceMember,
+    env: &mut TypeEnvironment,
+    st: &SymbolTable,
+) -> Result<(), TypeError> {
+    use InterfaceMember as IM;
+    match member {
+        IM::DefaultMethod(method) => {
+            let mut env = env.clone();
+
+            for param in &method.params {
+                env.declare_param(param)?;
+            }
+            let is_constructor = false;
+            let new_body = type_statement(
+                method.body.borrow().clone(),
+                is_constructor,
+                method.clone(),
+                &mut env,
+                st,
+                &Declaration::Interface(interface),
+            )?;
+            *method.body.borrow_mut() = new_body;
+            Ok(())
+        }
+        IM::AbstractMethod(_) => Ok(()),
     }
 }
 
@@ -149,28 +190,29 @@ fn type_specification(
     declaration_member: &DeclarationMember,
     mut specification: Specification,
     env: &mut TypeEnvironment,
+    st: &SymbolTable,
 ) -> Result<Specification, TypeError> {
     if let Some(requires) = specification.requires.clone() {
-        let requires = type_expression(requires, env)?;
-        matches_type(&requires, RuntimeType::BoolRuntimeType)?;
+        let requires = type_expression(requires, env, st)?;
+        matches_type(&requires, RuntimeType::BoolRuntimeType, st)?;
         specification.requires = Some(Rc::new(requires));
     }
 
     if let Some(ensures) = specification.ensures.clone() {
         let method_type = declaration_member.type_of();
-        if !method_type.is_of_type(RuntimeType::VoidRuntimeType) {
+        if !method_type.is_of_type(RuntimeType::VoidRuntimeType, st) {
             let mut env = env.clone();
 
             env.declare_var("retval".to_owned(), method_type)?;
-            let ensures = type_expression(ensures, &mut env)?;
-            matches_type(&ensures, RuntimeType::BoolRuntimeType)?;
+            let ensures = type_expression(ensures, &mut env, st)?;
+            matches_type(&ensures, RuntimeType::BoolRuntimeType, st)?;
             specification.requires = Some(Rc::new(ensures));
         }
     }
 
     if let Some(exceptional) = specification.exceptional.clone() {
-        let exceptional = type_expression(exceptional, env)?;
-        matches_type(&exceptional, RuntimeType::BoolRuntimeType)?;
+        let exceptional = type_expression(exceptional, env, st)?;
+        matches_type(&exceptional, RuntimeType::BoolRuntimeType, st)?;
         specification.exceptional = Some(Rc::new(exceptional));
     }
 
@@ -180,9 +222,10 @@ fn type_specification(
 fn optional_type_expression(
     expression: Option<Rc<Expression>>,
     env: &mut TypeEnvironment,
+    st: &SymbolTable,
 ) -> Result<Option<Rc<Expression>>, TypeError> {
     if let Some(expr) = expression {
-        type_expression(expr, env).map(Rc::new).map(Some)
+        type_expression(expr, env, st).map(Rc::new).map(Some)
     } else {
         Ok(None)
     }
@@ -190,7 +233,8 @@ fn optional_type_expression(
 
 fn type_statement(
     statement: Statement,
-    current_method: &DeclarationMember,
+    is_constructor: bool,
+    current_method: Rc<Method>,
     env: &mut TypeEnvironment,
     st: &SymbolTable,
     declaration: &Declaration,
@@ -203,8 +247,8 @@ fn type_statement(
         Statement::Assign { lhs, rhs } => {
             let lhs = type_lhs(lhs, env, st)?;
             let rhs = type_rhs(rhs, env, st, declaration)?;
-
-            matches_type(&lhs, rhs.clone())?;
+            dbg!(lhs.type_of(), rhs.type_of());
+            matches_type(rhs.type_of(), &lhs, st)?;
             Ok(Statement::Assign { lhs, rhs })
         }
         Statement::Call { invocation } => {
@@ -213,20 +257,27 @@ fn type_statement(
         }
         Statement::Skip => Ok(Statement::Skip),
         Statement::Assert { assertion } => {
-            let assertion = type_expression(assertion.into(), env)?;
-            matches_type(&assertion, RuntimeType::BoolRuntimeType)?;
+            let assertion = type_expression(assertion.into(), env, st)?;
+            matches_type(&assertion, RuntimeType::BoolRuntimeType, st)?;
             Ok(Statement::Assert { assertion })
         }
         Statement::Assume { assumption } => {
-            let assumption = type_expression(assumption.into(), env)?;
-            matches_type(&assumption, RuntimeType::BoolRuntimeType)?;
+            let assumption = type_expression(assumption.into(), env, st)?;
+            matches_type(&assumption, RuntimeType::BoolRuntimeType, st)?;
             Ok(Statement::Assume { assumption })
         }
         Statement::While { guard, body } => {
-            let guard = type_expression(guard.into(), env)?;
-            matches_type(&guard, RuntimeType::BoolRuntimeType)?;
+            let guard = type_expression(guard.into(), env, st)?;
+            matches_type(&guard, RuntimeType::BoolRuntimeType, st)?;
             let mut env = env.clone();
-            let body = type_statement(*body, current_method, &mut env, &st, declaration)?;
+            let body = type_statement(
+                *body,
+                is_constructor,
+                current_method,
+                &mut env,
+                &st,
+                declaration,
+            )?;
             Ok(Statement::While {
                 guard,
                 body: Box::new(body),
@@ -237,11 +288,25 @@ fn type_statement(
             true_body,
             false_body,
         } => {
-            let guard = type_expression(guard.into(), env)?;
-            matches_type(&guard, RuntimeType::BoolRuntimeType)?;
+            let guard = type_expression(guard.into(), env, st)?;
+            matches_type(&guard, RuntimeType::BoolRuntimeType, st)?;
             let mut env = env.clone();
-            let true_body = type_statement(*true_body, current_method, &mut env, &st, declaration)?;
-            let false_body = type_statement(*false_body, current_method, &mut env, &st, declaration)?;
+            let true_body = type_statement(
+                *true_body,
+                is_constructor,
+                current_method.clone(),
+                &mut env,
+                &st,
+                declaration,
+            )?;
+            let false_body = type_statement(
+                *false_body,
+                is_constructor,
+                current_method,
+                &mut env,
+                &st,
+                declaration,
+            )?;
 
             Ok(Statement::Ite {
                 guard,
@@ -251,11 +316,9 @@ fn type_statement(
         }
         Statement::Continue => Ok(Statement::Continue),
         Statement::Break => Ok(Statement::Break),
-        Statement::Return { expression } => match (current_method, expression) {
-            (DeclarationMember::Constructor { .. }, Some(return_value)) => {
-                Err(error::unexpected_return_value(&return_value))
-            }
-            (DeclarationMember::Constructor { .. }, None) => {
+        Statement::Return { expression } => match (is_constructor, expression) {
+            (true, Some(return_value)) => Err(error::unexpected_return_value(&return_value)),
+            (true, None) => {
                 let this_type = current_method.type_of();
                 let this = "this".to_owned();
                 let this_var = Expression::Var {
@@ -266,15 +329,15 @@ fn type_statement(
                     expression: Some(this_var),
                 })
             }
-            (_, Some(return_value)) => {
-                let return_value = type_expression(return_value.into(), env)?;
-                matches_type(&return_value, current_method.type_of())?;
+            (false, Some(return_value)) => {
+                let return_value = type_expression(return_value.into(), env, st)?;
+                matches_type(&return_value, current_method.type_of(), st)?;
                 Ok(Statement::Return {
                     expression: Some(return_value),
                 })
             }
-            (_, None) => {
-                if !current_method.is_of_type(RuntimeType::VoidRuntimeType) {
+            (false, None) => {
+                if !current_method.is_of_type(RuntimeType::VoidRuntimeType, st) {
                     Err(error::expected_return_value_error(current_method.type_of()))
                 } else {
                     Ok(Statement::Return { expression: None })
@@ -287,23 +350,45 @@ fn type_statement(
             catch_body,
         } => {
             let mut try_env = env.clone();
-            let try_body = type_statement(*try_body, current_method, &mut try_env, st, declaration)?;
+            let try_body = type_statement(
+                *try_body,
+                is_constructor,
+                current_method.clone(),
+                &mut try_env,
+                st,
+                declaration,
+            )?;
             let mut catch_env = env.clone();
-            let catch_body = type_statement(*catch_body, current_method, &mut catch_env, st, declaration)?;
+            let catch_body = type_statement(
+                *catch_body,
+                is_constructor,
+                current_method,
+                &mut catch_env,
+                st,
+                declaration,
+            )?;
             Ok(Statement::Try {
                 try_body: Box::new(try_body),
                 catch_body: Box::new(catch_body),
             })
         }
         Statement::Block { body } => {
-            let body = type_statement(*body, current_method, env, st, declaration)?;
+            let body = type_statement(*body, is_constructor, current_method, env, st, declaration)?;
             Ok(Statement::Block {
                 body: Box::new(body),
             })
         }
         Statement::Seq { stat1, stat2 } => {
-            let stat1 = type_statement(*stat1, current_method, env, st, declaration)?;
-            let stat2 = type_statement(*stat2, current_method, env, st, declaration)?;
+            let stat1 = type_statement(
+                *stat1,
+                is_constructor,
+                current_method.clone(),
+                env,
+                st,
+                declaration,
+            )?;
+            let stat2 =
+                type_statement(*stat2, is_constructor, current_method, env, st, declaration)?;
             Ok(Statement::Seq {
                 stat1: Box::new(stat1),
                 stat2: Box::new(stat2),
@@ -346,8 +431,8 @@ fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Lhs
             let inner_type = type_.get_inner_array_type().ok_or_else(|| {
                 error::unification_error(RuntimeType::ARRAYRuntimeType, type_.clone())
             })?;
-            let index = type_expression(index, env)?;
-            matches_type(&index, RuntimeType::IntRuntimeType)?;
+            let index = type_expression(index, env, st)?;
+            matches_type(&index, RuntimeType::IntRuntimeType, st)?;
             Ok(Lhs::LhsElem {
                 var,
                 index: index.into(),
@@ -357,15 +442,20 @@ fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Lhs
     }
 }
 
-fn type_rhs(rhs: Rhs, env: &mut TypeEnvironment, st: &SymbolTable, declaration: &Declaration) -> Result<Rhs, TypeError> {
+fn type_rhs(
+    rhs: Rhs,
+    env: &mut TypeEnvironment,
+    st: &SymbolTable,
+    declaration: &Declaration,
+) -> Result<Rhs, TypeError> {
     match rhs {
         Rhs::RhsExpression { value, .. } => {
-            let expr = type_expression(value.into(), env)?;
+            let expr = type_expression(value.into(), env, st)?;
             let type_ = expr.type_of();
             Ok(Rhs::RhsExpression { value: expr, type_ })
         }
         Rhs::RhsField { var, field, .. } => {
-            let var = type_expression(var.into(), env)?;
+            let var = type_expression(var.into(), env, st)?;
             let var_type = var.type_of();
             let class_name = var_type.as_reference_type().ok_or_else(|| {
                 error::unification_error(RuntimeType::REFRuntimeType, var_type.clone())
@@ -381,13 +471,13 @@ fn type_rhs(rhs: Rhs, env: &mut TypeEnvironment, st: &SymbolTable, declaration: 
             }
         }
         Rhs::RhsElem { var, index, .. } => {
-            let var = type_expression(var.into(), env)?;
+            let var = type_expression(var.into(), env, st)?;
             let var_type = var.type_of();
             let inner_type = var_type.get_inner_array_type().ok_or_else(|| {
                 error::unification_error(RuntimeType::ARRAYRuntimeType, var_type.clone())
             })?;
-            let index = type_expression(index.into(), env)?;
-            matches_type(&index, RuntimeType::IntRuntimeType)?;
+            let index = type_expression(index.into(), env, st)?;
+            matches_type(&index, RuntimeType::IntRuntimeType, st)?;
             Ok(Rhs::RhsElem {
                 var,
                 index,
@@ -404,11 +494,11 @@ fn type_rhs(rhs: Rhs, env: &mut TypeEnvironment, st: &SymbolTable, declaration: 
         } => {
             let sizes = sizes
                 .into_iter()
-                .map(|size_expr| type_expression(size_expr.into(), env))
+                .map(|size_expr| type_expression(size_expr.into(), env, st))
                 .collect::<Result<Vec<_>, _>>()?;
 
             for size in sizes.iter() {
-                matches_type(size, RuntimeType::IntRuntimeType)?;
+                matches_type(size, RuntimeType::IntRuntimeType, st)?;
             }
             let type_ =
                 sizes
@@ -426,12 +516,11 @@ fn type_rhs(rhs: Rhs, env: &mut TypeEnvironment, st: &SymbolTable, declaration: 
     }
 }
 
-// TODO: merge with resolver
 fn type_invocation(
     invocation: Invocation,
     env: &mut TypeEnvironment,
     st: &SymbolTable,
-    declaration: &Declaration
+    declaration: &Declaration,
 ) -> Result<Invocation, TypeError> {
     match invocation {
         Invocation::InvokeMethod {
@@ -442,7 +531,7 @@ fn type_invocation(
         } => {
             let arguments = arguments
                 .into_iter()
-                .map(|arg| type_expression(arg.into(), env))
+                .map(|arg| type_expression(arg.into(), env, st))
                 .collect::<Result<Vec<_>, _>>()?;
             // if lhs is not found as a variable, assume this is a static invocation.
             let lhs_type = env.get_var_type(&lhs).ok();
@@ -469,20 +558,16 @@ fn type_invocation(
                 resolved: Some(resolved),
             })
         }
-        Invocation::InvokeSuperMethod {
-            rhs,
-            arguments,
-            ..
-        } => {
+        Invocation::InvokeSuperMethod { rhs, arguments, .. } => {
             let class_name = declaration.name();
             let resolved = resolver::resolve_super_method(class_name, &rhs, st);
-            
+
             Ok(Invocation::InvokeSuperMethod {
-                rhs,    
+                rhs,
                 arguments,
                 resolved: Some(resolved),
             })
-        },
+        }
         Invocation::InvokeConstructor {
             class_name,
             arguments,
@@ -490,21 +575,19 @@ fn type_invocation(
         } => {
             let resolved = resolver::resolve_constructor(&class_name, st);
             Ok(Invocation::InvokeConstructor {
-            class_name,
-            arguments,
-            resolved: Some(resolved),
-        })
-        },
-        Invocation::InvokeSuperConstructor {
-            arguments,
-            ..
-        } => {
+                class_name,
+                arguments,
+                resolved: Some(resolved),
+            })
+        }
+        Invocation::InvokeSuperConstructor { arguments, .. } => {
             let class_name = declaration.name();
             let resolved = resolver::resolve_super_constructor(&class_name, st);
-        Ok(Invocation::InvokeSuperConstructor {
-            arguments,
-            resolved: Some(resolved),
-        })},
+            Ok(Invocation::InvokeSuperConstructor {
+                arguments,
+                resolved: Some(resolved),
+            })
+        }
     }
 }
 
@@ -513,6 +596,7 @@ fn type_invocation(
 fn type_expression(
     expression: Rc<Expression>,
     env: &mut TypeEnvironment,
+    st: &SymbolTable,
 ) -> Result<Expression, TypeError> {
     let expr = match expression.as_ref().clone() {
         Expression::Forall {
@@ -530,8 +614,8 @@ fn type_expression(
 
             env.declare_var(elem.clone(), inner_type)?;
             env.declare_var(range.clone(), RuntimeType::IntRuntimeType)?;
-            let formula = type_expression(formula.into(), &mut env)?;
-            matches_type(&formula, RuntimeType::BoolRuntimeType)?;
+            let formula = type_expression(formula.into(), &mut env, st)?;
+            matches_type(&formula, RuntimeType::BoolRuntimeType, st)?;
 
             Expression::Forall {
                 type_: RuntimeType::BoolRuntimeType,
@@ -556,8 +640,8 @@ fn type_expression(
 
             env.declare_var(elem.clone(), inner_type)?;
             env.declare_var(range.clone(), RuntimeType::IntRuntimeType)?;
-            let formula = type_expression(formula.into(), &mut env)?;
-            matches_type(&formula, RuntimeType::BoolRuntimeType)?;
+            let formula = type_expression(formula.into(), &mut env, st)?;
+            matches_type(&formula, RuntimeType::BoolRuntimeType, st)?;
 
             Expression::Exists {
                 type_: RuntimeType::BoolRuntimeType,
@@ -570,9 +654,9 @@ fn type_expression(
         Expression::BinOp {
             bin_op, lhs, rhs, ..
         } => {
-            let lhs = type_expression(lhs, env)?;
-            let rhs = type_expression(rhs, env)?;
-            let type_ = type_binop(bin_op, &lhs, &rhs)?;
+            let lhs = type_expression(lhs, env, st)?;
+            let rhs = type_expression(rhs, env, st)?;
+            let type_ = type_binop(bin_op, &lhs, &rhs, st)?;
             Expression::BinOp {
                 bin_op,
                 lhs: lhs.into(),
@@ -585,14 +669,14 @@ fn type_expression(
             value,
             type_,
         } => {
-            let value = type_expression(value, env)?;
+            let value = type_expression(value, env, st)?;
             let type_ = match un_op {
                 UnOp::Negative => {
-                    matches_type(&value, RuntimeType::NUMRuntimeType)?;
+                    matches_type(&value, RuntimeType::NUMRuntimeType, st)?;
                     value.type_of()
                 }
                 UnOp::Negate => {
-                    matches_type(&value, RuntimeType::BoolRuntimeType)?;
+                    matches_type(&value, RuntimeType::BoolRuntimeType, st)?;
                     RuntimeType::BoolRuntimeType
                 }
             };
@@ -630,23 +714,24 @@ fn type_binop(
     binop: BinOp,
     exp1: &Expression,
     exp2: &Expression,
+    st: &SymbolTable,
 ) -> Result<RuntimeType, TypeError> {
     use BinOp::*;
     if [Implies, And, Or].contains(&binop) {
-        matches_type(exp1, RuntimeType::BoolRuntimeType)?;
-        matches_type(exp2, RuntimeType::BoolRuntimeType)?;
+        matches_type(exp1, RuntimeType::BoolRuntimeType, st)?;
+        matches_type(exp2, RuntimeType::BoolRuntimeType, st)?;
         Ok(RuntimeType::BoolRuntimeType)
     } else if [Equal, NotEqual].contains(&binop) {
-        matches_type(exp1, exp2)?;
+        matches_type(exp1, exp2, st)?;
         Ok(RuntimeType::BoolRuntimeType)
     } else if [LessThan, LessThanEqual, GreaterThan, GreaterThanEqual].contains(&binop) {
-        matches_type(exp1, RuntimeType::NUMRuntimeType)?;
-        matches_type(exp2, RuntimeType::NUMRuntimeType)?;
+        matches_type(exp1, RuntimeType::NUMRuntimeType, st)?;
+        matches_type(exp2, RuntimeType::NUMRuntimeType, st)?;
         Ok(RuntimeType::BoolRuntimeType)
     } else if [Plus, Minus, Multiply, Divide, Modulo].contains(&binop) {
         let type_of = exp1.type_of();
-        matches_type(exp1, RuntimeType::NUMRuntimeType)?;
-        matches_type(exp2, RuntimeType::NUMRuntimeType)?;
+        matches_type(exp1, RuntimeType::NUMRuntimeType, st)?;
+        matches_type(exp2, RuntimeType::NUMRuntimeType, st)?;
         Ok(type_of)
     } else {
         unreachable!("missing case in type_binop")
