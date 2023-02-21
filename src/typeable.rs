@@ -4,7 +4,7 @@ use ordered_float::NotNan;
 
 use crate::{
     exec::HeapValue,
-    syntax::{DeclarationMember, Expression, Invocation, Lit, NonVoidType, RuntimeType, Type, Rhs, Lhs, Method}, symbol_table::SymbolTable,
+    syntax::{DeclarationMember, Expression, Invocation, Lit, NonVoidType, RuntimeType, Type, Rhs, Lhs, Method}, symbol_table::SymbolTable, positioned::SourcePos,
 };
 
 pub trait Typeable {
@@ -65,23 +65,23 @@ pub trait Typeable {
             RuntimeType::UnknownRuntimeType => todo!(),
         };
 
-        Expression::Lit { lit, type_ }
+        Expression::Lit { lit, type_, info: SourcePos::UnknownPosition }
     }
 }
 
 impl<B: Borrow<NonVoidType>> Typeable for B {
     fn type_of(&self) -> RuntimeType {
         match self.borrow() {
-            NonVoidType::UIntType => RuntimeType::UIntRuntimeType,
-            NonVoidType::IntType => RuntimeType::IntRuntimeType,
-            NonVoidType::FloatType => RuntimeType::FloatRuntimeType,
-            NonVoidType::BoolType => RuntimeType::BoolRuntimeType,
-            NonVoidType::StringType => RuntimeType::StringRuntimeType,
-            NonVoidType::CharType => RuntimeType::CharRuntimeType,
-            NonVoidType::ReferenceType { identifier } => RuntimeType::ReferenceRuntimeType {
+            NonVoidType::UIntType {..} => RuntimeType::UIntRuntimeType,
+            NonVoidType::IntType {..} => RuntimeType::IntRuntimeType,
+            NonVoidType::FloatType {..} => RuntimeType::FloatRuntimeType,
+            NonVoidType::BoolType {..} => RuntimeType::BoolRuntimeType,
+            NonVoidType::StringType {..} => RuntimeType::StringRuntimeType,
+            NonVoidType::CharType {..} => RuntimeType::CharRuntimeType,
+            NonVoidType::ReferenceType { identifier, .. } => RuntimeType::ReferenceRuntimeType {
                 type_: identifier.to_owned(),
             },
-            NonVoidType::ArrayType { inner_type } => RuntimeType::ArrayRuntimeType {
+            NonVoidType::ArrayType { inner_type, .. } => RuntimeType::ArrayRuntimeType {
                 inner_type: Box::new(inner_type.as_ref().type_of()),
             },
         }
@@ -164,17 +164,18 @@ impl Typeable for HeapValue {
 
 pub fn runtime_to_nonvoidtype(type_: RuntimeType) -> Option<NonVoidType> {
     match type_ {
-        RuntimeType::UIntRuntimeType => Some(NonVoidType::UIntType),
-        RuntimeType::IntRuntimeType => Some(NonVoidType::IntType),
-        RuntimeType::FloatRuntimeType => Some(NonVoidType::FloatType),
-        RuntimeType::BoolRuntimeType => Some(NonVoidType::BoolType),
-        RuntimeType::StringRuntimeType => Some(NonVoidType::StringType),
-        RuntimeType::CharRuntimeType => Some(NonVoidType::CharType),
+        RuntimeType::UIntRuntimeType => Some(NonVoidType::UIntType{ info: SourcePos::UnknownPosition }),
+        RuntimeType::IntRuntimeType => Some(NonVoidType::IntType{ info: SourcePos::UnknownPosition }),
+        RuntimeType::FloatRuntimeType => Some(NonVoidType::FloatType{ info: SourcePos::UnknownPosition }),
+        RuntimeType::BoolRuntimeType => Some(NonVoidType::BoolType{ info: SourcePos::UnknownPosition }),
+        RuntimeType::StringRuntimeType => Some(NonVoidType::StringType{ info: SourcePos::UnknownPosition }),
+        RuntimeType::CharRuntimeType => Some(NonVoidType::CharType{ info: SourcePos::UnknownPosition }),
         RuntimeType::ReferenceRuntimeType { type_ } => {
-            Some(NonVoidType::ReferenceType { identifier: type_ })
+            Some(NonVoidType::ReferenceType { identifier: type_, info: SourcePos::UnknownPosition })
         }
         RuntimeType::ArrayRuntimeType { inner_type } => Some(NonVoidType::ArrayType {
             inner_type: runtime_to_nonvoidtype(*inner_type).map(Box::new)?,
+            info: SourcePos::UnknownPosition
         }),
         _ => None,
     }

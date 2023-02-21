@@ -1,6 +1,6 @@
 // use std::intrinsics::unreachable;
 
-use crate::{lexer::tokens, parser::parse, syntax::*, typeable::Typeable, exec::this_str};
+use crate::{lexer::tokens, parser::parse, syntax::*, typeable::Typeable, exec::this_str, positioned::SourcePos};
 
 const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
 
@@ -83,8 +83,10 @@ fn memberCFG(
                     expression: Expression::Var {
                         var: this_str(),
                         type_: member.type_of(),
+                        info: SourcePos::UnknownPosition 
                     }
                     .into(),
+                    info: SourcePos::UnknownPosition 
                 }),
             ));
             let return_this_label = *i;
@@ -122,7 +124,7 @@ fn memberCFG(
             labelled_statements.append(&mut v);
             (labelled_statements, flw)
         }
-        DeclarationMember::Field { type_, name } => (Vec::new(), Vec::new()),
+        DeclarationMember::Field { .. } => (Vec::new(), Vec::new()),
     }
 }
 
@@ -208,6 +210,7 @@ fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> 
             guard,
             true_body,
             false_body,
+            info,
         } => {
             let mut v = vec![];
             let ite_l = *i;
@@ -219,7 +222,7 @@ fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> 
             labelled_statements.push((ite_l, CFGStatement::Ite(guard.clone(), i_true, i_false)));
             labelled_statements.append(&mut v);
         }
-        Statement::While { guard, body } => {
+        Statement::While { guard, body , info } => {
             let ite_l = *i;
             *i += 1;
             let i_body = *i;
@@ -233,6 +236,7 @@ fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> 
         Statement::Try {
             try_body,
             catch_body,
+            info
         } => {
             let try_catch_l = *i;
             *i += 1;
@@ -340,8 +344,8 @@ fn fallthrough(
             fallthrough_body
                 .into_iter()
                 .filter(|(l, s)| match s {
-                    CFGStatement::Statement(Statement::Continue) => false,
-                    CFGStatement::Statement(Statement::Break) => false,
+                    CFGStatement::Statement(Statement::Continue { .. }) => false,
+                    CFGStatement::Statement(Statement::Break { .. }) => false,
                     _ => true,
                 })
                 .collect()
@@ -398,8 +402,8 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
             let s1 = lookup(*l1, all_smts);
             let final_s2 = r#final(&(*l2, lookup(*l2, all_smts)), all_smts);
             match s1 {
-                CFGStatement::Statement(Statement::Continue) => Vec::new(),
-                CFGStatement::Statement(Statement::Break) => Vec::new(),
+                CFGStatement::Statement(Statement::Continue { .. }) => Vec::new(),
+                CFGStatement::Statement(Statement::Break { .. }) => Vec::new(),
                 CFGStatement::Statement(Statement::Return { .. }) => Vec::new(),
                 CFGStatement::Statement(Statement::Throw { .. }) => Vec::new(),
                 CFGStatement::Statement(_) => final_s2,
@@ -419,7 +423,7 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
             let mut v = fallthrough(&(*l_body, lookup(*l_body, all_smts)), all_smts)
                 .into_iter()
                 .filter_map(|(l, s)| match s {
-                    CFGStatement::Statement(Statement::Break) => Some(l),
+                    CFGStatement::Statement(Statement::Break { .. }) => Some(l),
                     _ => None,
                 })
                 .collect::<Vec<_>>();
@@ -453,8 +457,8 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
         CFGStatement::Statement(Statement::Skip { .. }) => Vec::new(),
         CFGStatement::Statement(Statement::Assert { .. }) => Vec::new(),
         CFGStatement::Statement(Statement::Assume { .. }) => Vec::new(),
-        CFGStatement::Statement(Statement::Continue) => Vec::new(),
-        CFGStatement::Statement(Statement::Break) => Vec::new(),
+        CFGStatement::Statement(Statement::Continue { .. }) => Vec::new(),
+        CFGStatement::Statement(Statement::Break { .. }) => Vec::new(),
         CFGStatement::Statement(Statement::Return { .. }) => Vec::new(),
         CFGStatement::Statement(Statement::Throw { .. }) => Vec::new(),
         CFGStatement::Statement(Statement::Try { .. }) => Vec::new(), // to be fixed
@@ -498,7 +502,7 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
                 fallthrough(&s_l, all_smts)
                     .into_iter()
                     .filter(|(_, s)| match s {
-                        CFGStatement::Statement(Statement::Continue) => true,
+                        CFGStatement::Statement(Statement::Continue { .. }) => true,
                         _ => false,
                     })
             {

@@ -1,6 +1,6 @@
 use derivative::Derivative;
 
-use crate::positioned::SourcePos;
+use crate::positioned::{SourcePos, WithPosition};
 
 use std::{fmt::{Debug, Display}, ops::Deref};
 
@@ -14,6 +14,12 @@ pub struct Identifier {
     #[derivative(PartialEq="ignore")]
     #[derivative(Hash="ignore")]
     info: SourcePos
+}
+
+impl WithPosition for Identifier {
+    fn get_position(&self) -> SourcePos {
+        self.info
+    }
 }
 
 impl Debug for Identifier {

@@ -77,7 +77,7 @@ pub(super) fn multiple_method_invocation(
     // the latter means that we have to split states here, one path for every alias object types,
     // if there is only one possible then we can also continue with that path
     match object.as_ref() {
-        Expression::Ref { ref_, type_ } => {
+        Expression::Ref { ref_, type_, .. } => {
             let this = (type_.clone(), invocation_lhs.to_owned());
 
             let reference_type_name = type_.as_reference_type().expect("expected reference type");
@@ -105,7 +105,7 @@ pub(super) fn multiple_method_invocation(
             return ActionResult::FunctionCall(next_entry);
             
         }
-        Expression::SymbolicRef { var, type_ } => {
+        Expression::SymbolicRef { var, type_, ..  } => {
             remove_symbolic_null(&mut state.alias_map, invocation_lhs);
             let alias_entry = &state.alias_map[var];
 

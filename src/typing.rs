@@ -10,7 +10,7 @@ use crate::{
     resolver,
     symbol_table::SymbolTable,
     syntax::*,
-    typeable::Typeable, exec::{this_str, retval},
+    typeable::Typeable, exec::{this_str, retval}, positioned::WithPosition,
 };
 
 type TypeError = String;
@@ -238,33 +238,32 @@ fn type_statement(
     declaration: &Declaration,
 ) -> Result<Statement, TypeError> {
     match statement {
-        Statement::Declare { type_, var } => {
+        Statement::Declare { type_, var , info} => {
             env.declare_var(var.clone(), type_.type_of())?;
-            Ok(Statement::Declare { type_, var })
+            Ok(Statement::Declare { type_, var, info })
         }
-        Statement::Assign { lhs, rhs } => {
+        Statement::Assign { lhs, rhs , info} => {
             let lhs = type_lhs(lhs, env, st)?;
             let rhs = type_rhs(rhs, env, st, declaration)?;
-            dbg!(lhs.type_of(), rhs.type_of());
             matches_type(rhs.type_of(), &lhs, st)?;
-            Ok(Statement::Assign { lhs, rhs })
+            Ok(Statement::Assign { lhs, rhs, info })
         }
-        Statement::Call { invocation } => {
+        Statement::Call { invocation, info } => {
             let invocation = type_invocation(invocation, env, st, declaration)?;
-            Ok(Statement::Call { invocation })
+            Ok(Statement::Call { invocation, info })
         }
         Statement::Skip => Ok(Statement::Skip),
-        Statement::Assert { assertion } => {
+        Statement::Assert { assertion, info } => {
             let assertion = type_expression(assertion.into(), env, st)?;
             matches_type(&assertion, RuntimeType::BoolRuntimeType, st)?;
-            Ok(Statement::Assert { assertion })
+            Ok(Statement::Assert { assertion, info })
         }
-        Statement::Assume { assumption } => {
+        Statement::Assume { assumption, info } => {
             let assumption = type_expression(assumption.into(), env, st)?;
             matches_type(&assumption, RuntimeType::BoolRuntimeType, st)?;
-            Ok(Statement::Assume { assumption })
+            Ok(Statement::Assume { assumption, info })
         }
-        Statement::While { guard, body } => {
+        Statement::While { guard, body, info } => {
             let guard = type_expression(guard.into(), env, st)?;
             matches_type(&guard, RuntimeType::BoolRuntimeType, st)?;
             let mut env = env.clone();
@@ -278,13 +277,13 @@ fn type_statement(
             )?;
             Ok(Statement::While {
                 guard,
-                body: Box::new(body),
+                body: Box::new(body), info
             })
         }
         Statement::Ite {
             guard,
             true_body,
-            false_body,
+            false_body, info
         } => {
             let guard = type_expression(guard.into(), env, st)?;
             matches_type(&guard, RuntimeType::BoolRuntimeType, st)?;
@@ -309,12 +308,13 @@ fn type_statement(
             Ok(Statement::Ite {
                 guard,
                 true_body: true_body.into(),
-                false_body: false_body.into(),
+                false_body: false_body.into(), info
+
             })
         }
-        Statement::Continue => Ok(Statement::Continue),
-        Statement::Break => Ok(Statement::Break),
-        Statement::Return { expression } => match (is_constructor, expression) {
+        Statement::Continue { info } => Ok(Statement::Continue { info}),
+        Statement::Break { info } => Ok(Statement::Break { info }),
+        Statement::Return { expression, info } => match (is_constructor, expression) {
             (true, Some(return_value)) => Err(error::unexpected_return_value(&return_value)),
             (true, None) => {
                 let this_type = current_method.type_of();
@@ -322,9 +322,11 @@ fn type_statement(
                 let this_var = Expression::Var {
                     var: this,
                     type_: this_type,
+                    info: current_method.get_position()
                 };
                 Ok(Statement::Return {
                     expression: Some(this_var),
+                    info
                 })
             }
             (false, Some(return_value)) => {
@@ -332,20 +334,22 @@ fn type_statement(
                 matches_type(&return_value, current_method.type_of(), st)?;
                 Ok(Statement::Return {
                     expression: Some(return_value),
+                    info
                 })
             }
             (false, None) => {
                 if !current_method.is_of_type(RuntimeType::VoidRuntimeType, st) {
                     Err(error::expected_return_value_error(current_method.type_of()))
                 } else {
-                    Ok(Statement::Return { expression: None })
+                    Ok(Statement::Return { expression: None, info })
                 }
             }
         },
-        Statement::Throw { message } => Ok(Statement::Throw { message }),
+        Statement::Throw { message, info } => Ok(Statement::Throw { message, info }),
         Statement::Try {
             try_body,
             catch_body,
+            info
         } => {
             let mut try_env = env.clone();
             let try_body = type_statement(
@@ -368,6 +372,7 @@ fn type_statement(
             Ok(Statement::Try {
                 try_body: Box::new(try_body),
                 catch_body: Box::new(catch_body),
+                info
             })
         }
         Statement::Block { body } => {
@@ -397,15 +402,16 @@ fn type_statement(
 
 fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Lhs, TypeError> {
     match lhs {
-        Lhs::LhsVar { var, type_ } => {
+        Lhs::LhsVar { var, type_, info } => {
             let type_ = env.get_var_type(&var)?;
-            Ok(Lhs::LhsVar { var, type_ })
+            Ok(Lhs::LhsVar { var, type_, info })
         }
         Lhs::LhsField {
             var,
             var_type,
             field,
             type_,
+            info
         } => {
             let var_type = env.get_var_type(&var)?;
             let class_name = var_type.get_reference_type().ok_or_else(|| {
@@ -419,12 +425,13 @@ fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Lhs
                     var_type,
                     field: field,
                     type_: field_type.type_of(),
+                    info
                 })
             } else {
                 Err(error::unresolved_field_error(&class_name, &field))
             }
         }
-        Lhs::LhsElem { var, index, .. } => {
+        Lhs::LhsElem { var, index, info, .. } => {
             let type_ = env.get_var_type(&var)?;
             let inner_type = type_.get_inner_array_type().ok_or_else(|| {
                 error::unification_error(RuntimeType::ARRAYRuntimeType, type_.clone())
@@ -434,7 +441,7 @@ fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Lhs
             Ok(Lhs::LhsElem {
                 var,
                 index: index.into(),
-                type_: inner_type,
+                type_: inner_type, info
             })
         }
     }
@@ -447,12 +454,12 @@ fn type_rhs(
     declaration: &Declaration,
 ) -> Result<Rhs, TypeError> {
     match rhs {
-        Rhs::RhsExpression { value, .. } => {
+        Rhs::RhsExpression { value, info, .. } => {
             let expr = type_expression(value.into(), env, st)?;
             let type_ = expr.type_of();
-            Ok(Rhs::RhsExpression { value: expr, type_ })
+            Ok(Rhs::RhsExpression { value: expr, type_, info })
         }
-        Rhs::RhsField { var, field, .. } => {
+        Rhs::RhsField { var, field, info , .. } => {
             let var = type_expression(var.into(), env, st)?;
             let var_type = var.type_of();
             let class_name = var_type.as_reference_type().ok_or_else(|| {
@@ -463,12 +470,13 @@ fn type_rhs(
                     var,
                     field,
                     type_: field_type.type_of(),
+                    info
                 })
             } else {
                 Err(error::unresolved_field_error(class_name, &field))
             }
         }
-        Rhs::RhsElem { var, index, .. } => {
+        Rhs::RhsElem { var, index, info, .. } => {
             let var = type_expression(var.into(), env, st)?;
             let var_type = var.type_of();
             let inner_type = var_type.get_inner_array_type().ok_or_else(|| {
@@ -480,15 +488,16 @@ fn type_rhs(
                 var,
                 index,
                 type_: inner_type,
+                info
             })
         }
-        Rhs::RhsCall { invocation, .. } => {
+        Rhs::RhsCall { invocation, info, .. } => {
             let invocation = type_invocation(invocation, env, st, declaration)?;
             let type_ = invocation.type_of();
-            Ok(Rhs::RhsCall { invocation, type_ })
+            Ok(Rhs::RhsCall { invocation, type_, info, })
         }
         Rhs::RhsArray {
-            array_type, sizes, ..
+            array_type, sizes, info, ..
         } => {
             let sizes = sizes
                 .into_iter()
@@ -509,6 +518,7 @@ fn type_rhs(
                 array_type,
                 sizes,
                 type_,
+                info
             })
         }
     }
@@ -525,6 +535,7 @@ fn type_invocation(
             lhs,
             rhs,
             arguments,
+            info,
             ..
         } => {
             let arguments = arguments
@@ -554,9 +565,10 @@ fn type_invocation(
                 rhs,
                 arguments,
                 resolved: Some(resolved),
+                info,
             })
         }
-        Invocation::InvokeSuperMethod { rhs, arguments, .. } => {
+        Invocation::InvokeSuperMethod { rhs, arguments, info, .. } => {
             let class_name = declaration.name();
             let resolved = resolver::resolve_super_method(class_name, &rhs, st);
 
@@ -564,11 +576,13 @@ fn type_invocation(
                 rhs,
                 arguments,
                 resolved: Some(resolved),
+                info
             })
         }
         Invocation::InvokeConstructor {
             class_name,
             arguments,
+            info,
             ..
         } => {
             let resolved = resolver::resolve_constructor(&class_name, st);
@@ -576,14 +590,16 @@ fn type_invocation(
                 class_name,
                 arguments,
                 resolved: Some(resolved),
+                info
             })
         }
-        Invocation::InvokeSuperConstructor { arguments, .. } => {
+        Invocation::InvokeSuperConstructor { arguments, info, .. } => {
             let class_name = declaration.name();
             let resolved = resolver::resolve_super_constructor(&class_name, st);
             Ok(Invocation::InvokeSuperConstructor {
                 arguments,
                 resolved: Some(resolved),
+                info,
             })
         }
     }
@@ -602,7 +618,8 @@ fn type_expression(
             range,
             domain,
             formula,
-            ..
+            info
+            ,..
         } => {
             let array = env.get_var_type(&domain)?;
             let inner_type = array
@@ -621,6 +638,7 @@ fn type_expression(
                 range,
                 domain,
                 formula: Box::new(formula),
+                info
             }
         }
         Expression::Exists {
@@ -629,6 +647,7 @@ fn type_expression(
             domain,
             formula,
             type_,
+            info,
         } => {
             let array = env.get_var_type(&domain)?;
             let inner_type = array
@@ -647,10 +666,11 @@ fn type_expression(
                 range,
                 domain,
                 formula: Box::new(formula),
+                info
             }
         }
         Expression::BinOp {
-            bin_op, lhs, rhs, ..
+            bin_op, lhs, rhs, info, ..
         } => {
             let lhs = type_expression(lhs, env, st)?;
             let rhs = type_expression(rhs, env, st)?;
@@ -660,12 +680,14 @@ fn type_expression(
                 lhs: lhs.into(),
                 rhs: rhs.into(),
                 type_,
+                info
             }
         }
         Expression::UnOp {
             un_op,
             value,
             type_,
+            info
         } => {
             let value = type_expression(value, env, st)?;
             let type_ = match un_op {
@@ -682,24 +704,27 @@ fn type_expression(
                 un_op,
                 value: value.into(),
                 type_,
+                info
             }
         }
-        Expression::Var { var, .. } => {
+        Expression::Var { var, info, .. } => {
             let type_ = env.get_var_type(&var)?;
-            Expression::Var { var, type_ }
+            Expression::Var { var, type_, info }
         }
         Expression::SymbolicVar { .. } => unreachable!("Symbolic variable in analysis phase"),
-        Expression::Lit { lit, .. } => {
+        Expression::Lit { lit, info, .. } => {
             let type_ = lit.type_of();
-            Expression::Lit { lit, type_ }
+            Expression::Lit { lit, type_, info }
         }
-        Expression::SizeOf { var, .. } => Expression::SizeOf {
+        Expression::SizeOf { var, info, .. } => Expression::SizeOf {
             var,
             type_: RuntimeType::IntRuntimeType,
+            info
         },
-        Expression::Ref { ref_, .. } => Expression::Ref {
+        Expression::Ref { ref_, info, .. } => Expression::Ref {
             ref_,
             type_: RuntimeType::REFRuntimeType,
+            info
         },
         Expression::SymbolicRef { .. } => unreachable!("Symbolic object in analysis phase"),
         Expression::Conditional { .. } => unreachable!("Ite in analysis phase"),

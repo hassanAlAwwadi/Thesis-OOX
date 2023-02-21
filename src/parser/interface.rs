@@ -27,6 +27,7 @@ fn interface_member<'a>() -> Parser<'a, Token<'a>, InterfaceMember> {
                     params: parameters,
                     specification: Default::default(), // not yet implemented
                     body: body.into(),
+                    info: SourcePos::UnknownPosition
                 }.into()),
                 None => InterfaceMember::AbstractMethod(AbstractMethod { 
                     is_static: false,

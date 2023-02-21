@@ -7,7 +7,7 @@ use super::{
 };
 use std::fmt::Debug;
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct Interface {
     pub name: Identifier,
     pub members: Vec<InterfaceMember>,
@@ -15,7 +15,7 @@ pub struct Interface {
     pub extends: Vec<Identifier>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum InterfaceMember {
     DefaultMethod(Rc<Method>),
     AbstractMethod(Rc<AbstractMethod>),

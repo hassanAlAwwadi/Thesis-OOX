@@ -32,26 +32,28 @@ use crate::{
     exec::invocation::{non_static_resolved_method_invocation, single_method_invocation},
     lexer::tokens,
     parser::{insert_exceptional_clauses, parse},
+    positioned::SourcePos,
     resolver,
     stack::{lookup_in_stack, write_to_stack, StackFrame},
     symbol_table::SymbolTable,
     syntax::{
         BinOp, CompilationUnit, Declaration, DeclarationMember, Expression, Identifier, Invocation,
-        Lhs, Lit, NonVoidType, Parameter, Reference, Rhs, RuntimeType, Statement, UnOp, Method,
+        Lhs, Lit, Method, NonVoidType, Parameter, Reference, Rhs, RuntimeType, Statement, UnOp,
     },
     typeable::{runtime_to_nonvoidtype, Typeable},
-    utils, z3_checker, typing::type_compilation_unit, positioned::SourcePos,
+    typing::type_compilation_unit,
+    utils, z3_checker,
 };
 
 const NULL: Expression = Expression::Lit {
     lit: Lit::NullLit,
     type_: RuntimeType::ANYRuntimeType,
+    info: SourcePos::UnknownPosition
 };
 
 pub fn retval() -> Identifier {
     Identifier::with_unknown_pos("retval".to_string())
 }
-
 
 pub fn this_str() -> Identifier {
     Identifier::with_unknown_pos("this".to_owned())
@@ -217,6 +219,7 @@ impl State {
         return Rc::new(Expression::Ref {
             ref_: ref_fresh,
             type_,
+            info: SourcePos::UnknownPosition
         });
     }
 }
@@ -354,7 +357,7 @@ fn sym_exec(
                         array_size,
                         array_type.clone(),
                         *inner_type.clone(),
-                        st
+                        st,
                     );
 
                     // note path_length does not decrease, we stay at the same statement containing array access
@@ -374,7 +377,7 @@ fn sym_exec(
                     0,
                     array_type.clone(),
                     *inner_type.clone(),
-                    st
+                    st,
                 );
             }
             ActionResult::StateSplit((guard, true_lhs, false_lhs, lhs_name)) => {
@@ -441,7 +444,7 @@ fn array_initialisation(
     array_size: u64,
     array_type: RuntimeType,
     inner_type: RuntimeType,
-    st: &SymbolTable
+    st: &SymbolTable,
 ) {
     let r = state.next_reference_id();
     let StackFrame { params, .. } = state.stack.last_mut().unwrap();
@@ -450,11 +453,19 @@ fn array_initialisation(
         Rc::new(Expression::Ref {
             ref_: r,
             type_: RuntimeType::ARRAYRuntimeType,
+            info: SourcePos::UnknownPosition
         }),
     );
 
     let array_elements = (0..array_size)
-        .map(|i| create_symbolic_var(format!("{}{}", array_name, i).into(), inner_type.clone(), st).into())
+        .map(|i| {
+            create_symbolic_var(
+                format!("{}{}", array_name, i).into(),
+                inner_type.clone(),
+                st,
+            )
+            .into()
+        })
         .collect();
 
     state.heap.insert(
@@ -516,13 +527,15 @@ fn action(
     // );
 
     match action {
-        CFGStatement::Statement(Statement::Declare { type_, var }) => {
+        CFGStatement::Statement(Statement::Declare { type_, var , 
+            info}) => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             params.insert(var.clone(), Rc::new(type_.default()));
 
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::Assign { lhs, rhs }) => {
+        CFGStatement::Statement(Statement::Assign { lhs, rhs ,
+            info}) => {
             // If lhs or rhs contains an uninitialized array, we must initialize it
             // When we initialize an array, we split up the state into multiple states each with an increasingly longer instance of the array.
             // In other words, we must split this path into multiple paths.
@@ -550,7 +563,7 @@ fn action(
                         return ActionResult::ArrayInitialization(var.clone());
                     }
                 }
-                Rhs::RhsCall { invocation, type_ } => {
+                Rhs::RhsCall { invocation, type_, info } => {
                     // if rhs contains an invocation.
                     return exec_invocation(state, invocation, &program, pc, Some(lhs.clone()), st);
                 }
@@ -568,7 +581,7 @@ fn action(
 
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::Assert { assertion }) => {
+        CFGStatement::Statement(Statement::Assert { assertion , ..}) => {
             let expression = prepare_assert_expression(state, Rc::new(assertion.clone()), st);
 
             let is_valid = eval_assertion(state, expression, st);
@@ -577,14 +590,14 @@ fn action(
             }
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::Assume { assumption }) => {
+        CFGStatement::Statement(Statement::Assume { assumption, .. }) => {
             let is_feasible_path = exec_assume(state, Rc::new(assumption.clone()), st);
             if !is_feasible_path {
                 return ActionResult::InfeasiblePath;
             }
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::Return { expression }) => {
+        CFGStatement::Statement(Statement::Return { expression , ..}) => {
             if let Some(expression) = expression {
                 let expression = evaluate(state, Rc::new(expression.clone()), st);
                 let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
@@ -611,6 +624,7 @@ fn action(
                             if let Expression::SymbolicRef {
                                 var,
                                 type_: RuntimeType::ArrayRuntimeType { inner_type },
+                                info
                             } = exp.as_ref()
                             {
                                 true
@@ -690,10 +704,10 @@ fn action(
                 ActionResult::Return(pc)
             }
         }
-        CFGStatement::Statement(Statement::Call { invocation }) => {
+        CFGStatement::Statement(Statement::Call { invocation , info}) => {
             exec_invocation(state, invocation, &program, pc, None, st)
         }
-        CFGStatement::Statement(Statement::Throw { message }) => exec_throw(state, st, message),
+        CFGStatement::Statement(Statement::Throw { message, .. }) => exec_throw(state, st, message),
         CFGStatement::TryCatch(_, _, catch_entry_pc, _) => {
             state
                 .exception_handler
@@ -916,12 +930,13 @@ fn exec_invocation(
                 .collect::<Vec<_>>();
 
             // Zis is problems with interfaces
-            let this_param = Parameter {
-                type_: NonVoidType::ReferenceType {
+            let this_param = Parameter::new(
+                NonVoidType::ReferenceType {
                     identifier: class_name.clone(),
+                    info: SourcePos::UnknownPosition,
                 },
-                name: this_str(),
-            };
+                this_str(),
+            );
             exec_constructor(
                 state,
                 return_point,
@@ -937,9 +952,12 @@ fn exec_invocation(
             ActionResult::FunctionCall(next_entry)
         }
         Invocation::InvokeSuperConstructor { resolved, .. } => {
-            let (declaration, method) = resolved.as_ref().map(AsRef::as_ref).expect("super constructor call not resolved");
+            let (declaration, method) = resolved
+                .as_ref()
+                .map(AsRef::as_ref)
+                .expect("super constructor call not resolved");
             let class_name = declaration.name();
-            
+
             // evaluate arguments
             let arguments = invocation
                 .arguments()
@@ -948,12 +966,13 @@ fn exec_invocation(
                 .collect::<Vec<_>>();
 
             // zis is trouble with interfaces
-            let this_param = Parameter {
-                type_: NonVoidType::ReferenceType {
+            let this_param = Parameter::new(
+                NonVoidType::ReferenceType {
                     identifier: class_name.clone(),
+                    info: SourcePos::UnknownPosition
                 },
-                name: this_str(),
-            };
+                this_str(),
+            );
             exec_super_constructor(
                 state,
                 return_point,
@@ -966,7 +985,6 @@ fn exec_invocation(
             );
             let next_entry = find_entry_for_static_invocation(&class_name, &method.name, program);
             ActionResult::FunctionCall(next_entry)
-            
         }
         Invocation::InvokeSuperMethod { resolved, .. } => {
             let potential_method = resolved.as_ref().unwrap();
@@ -1020,13 +1038,15 @@ fn exec_method(
     st: &SymbolTable,
     this: (RuntimeType, Identifier),
 ) {
-    let this_param = Parameter {
-        type_: runtime_to_nonvoidtype(this.0.clone()).expect("concrete, nonvoid type"),
-        name: this_str(),
-    };
+    let this_param = Parameter::new(
+        runtime_to_nonvoidtype(this.0.clone()).expect("concrete, nonvoid type"),
+        this_str(),
+    );
+
     let this_expr = Expression::Var {
         var: this.1.clone(),
         type_: this.0,
+        info: method.info
     };
     let parameters = std::iter::once(&this_param).chain(method.params.iter());
     let arguments = std::iter::once(Rc::new(this_expr)).chain(arguments.iter().cloned());
@@ -1159,6 +1179,7 @@ fn prepare_assert_expression(
                 lhs: Rc::new(x),
                 rhs: Rc::new(y),
                 type_: RuntimeType::BoolRuntimeType,
+                info: SourcePos::UnknownPosition
             })
             .unwrap();
 
@@ -1167,6 +1188,7 @@ fn prepare_assert_expression(
             lhs: Rc::new(assumptions),
             rhs: assertion,
             type_: RuntimeType::BoolRuntimeType,
+            info: SourcePos::UnknownPosition
         }))
     } else {
         negate(assertion)
@@ -1221,10 +1243,12 @@ fn read_field_symbolic_ref(
                         lhs: sym_ref.clone(),
                         rhs: r.clone(),
                         type_: RuntimeType::ANYRuntimeType,
+                        info: SourcePos::UnknownPosition
                     }),
                     true_: (read_field_concrete_ref(heap, ref_, &field)),
                     false_: (read_field_symbolic_ref(heap, rs, sym_ref, field)),
                     type_: RuntimeType::ANYRuntimeType,
+                    info: SourcePos::UnknownPosition
                 })
             } else {
                 panic!()
@@ -1268,7 +1292,7 @@ fn write_field_symbolic_ref(
         }
         rs => {
             for r in rs {
-                if let Expression::Ref { ref_, type_ } = r.as_ref() {
+                if let Expression::Ref { ref_, type_, .. } = r.as_ref() {
                     let ite = ite(
                         Rc::new(equal(sym_ref.clone(), r.clone())),
                         value.clone(),
@@ -1287,6 +1311,7 @@ fn null() -> Expression {
     Expression::Lit {
         lit: Lit::NullLit,
         type_: RuntimeType::ANYRuntimeType,
+        info: SourcePos::UnknownPosition
     }
 }
 
@@ -1309,7 +1334,7 @@ pub fn init_symbolic_reference(
         } else {
             panic!("Cannot initialize type {:?}", type_ref);
         };
-
+        dbg!(&st);
         // initialise new objects, one for each possible type (sub)class of class_name
         let new_object_references = st
             .get_all_instance_types(decl_name)
@@ -1325,7 +1350,7 @@ pub fn init_symbolic_reference(
                                 &field_name,
                                 &type_.type_of(),
                                 state.next_reference_id(),
-                                st
+                                st,
                             )),
                         )
                     })
@@ -1408,7 +1433,7 @@ fn execute_assign(
     st: &SymbolTable,
 ) -> Option<ConditionalStateSplit> {
     match lhs {
-        Lhs::LhsVar { var, type_ } => {
+        Lhs::LhsVar { var, type_, info} => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             params.insert(var.clone(), e);
         }
@@ -1417,6 +1442,7 @@ fn execute_assign(
             var_type,
             field,
             type_,
+            info
         } => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             let o = params
@@ -1425,10 +1451,10 @@ fn execute_assign(
                 .clone();
 
             match o.as_ref() {
-                Expression::Ref { ref_, type_ } => {
+                Expression::Ref { ref_, type_, .. } => {
                     write_field_concrete_ref(&mut state.heap, *ref_, field, e);
                 }
-                sym_ref @ Expression::SymbolicRef { var, type_ } => {
+                sym_ref @ Expression::SymbolicRef { var, type_, .. } => {
                     init_symbolic_reference(state, &var, &type_, st);
                     // should also remove null here? --Assignemnt::45
                     // Yes, we have if (x = null) { throw; } guards that ensure it cannot be null
@@ -1448,6 +1474,7 @@ fn execute_assign(
                     true_,
                     false_,
                     type_,
+                    ..
                 } => {
                     return Some((guard.clone(), true_.clone(), false_.clone(), var.clone()));
                 }
@@ -1455,7 +1482,7 @@ fn execute_assign(
                 _ => todo!("{:?}", o.as_ref()),
             }
         }
-        Lhs::LhsElem { var, index, type_ } => {
+        Lhs::LhsElem { var, index, type_, info} => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             let ref_ = params
                 .get(var)
@@ -1469,7 +1496,7 @@ fn execute_assign(
             // };
 
             match ref_.as_ref() {
-                Expression::Ref { ref_, type_ } => {
+                Expression::Ref { ref_, type_, .. } => {
                     let index = evaluateAsInt(state, index.clone(), st);
 
                     match index {
@@ -1488,9 +1515,9 @@ fn execute_assign(
 // fn evaluateRhs(state: &mut State, rhs: &Rhs) -> Expression {
 fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolTable) -> Rc<Expression> {
     match rhs {
-        Rhs::RhsExpression { value, type_ } => {
+        Rhs::RhsExpression { value, type_, .. } => {
             match value {
-                Expression::Var { var, type_ } => lookup_in_stack(var, &state.stack)
+                Expression::Var { var, type_, .. } => lookup_in_stack(var, &state.stack)
                     .unwrap_or_else(|| {
                         panic!(
                             "Could not find {:?} on the stack {:?}",
@@ -1501,7 +1528,7 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolTable) -> Rc<Expression>
                 _ => Rc::new(value.clone()), // might have to expand on this when dealing with complex quantifying expressions and array
             }
         }
-        Rhs::RhsField { var, field, type_ } => {
+        Rhs::RhsField { var, field, type_, .. } => {
             if let Expression::Var { var, .. } = var {
                 let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
                 let object = params.get(var).unwrap().clone();
@@ -1512,7 +1539,7 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolTable) -> Rc<Expression>
                 )
             }
         }
-        Rhs::RhsElem { var, index, type_ } => {
+        Rhs::RhsElem { var, index, type_, .. } => {
             if let Expression::Var { var, .. } = var {
                 let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
                 let array = params.get(var).unwrap().clone();
@@ -1523,7 +1550,7 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolTable) -> Rc<Expression>
             //read_elem_concrete_index(state, ref_, index)
             //
         }
-        Rhs::RhsCall { invocation, type_ } => {
+        Rhs::RhsCall { invocation, type_, .. } => {
             unreachable!("unreachable, invocations are handled in function exec_invocation()")
         }
 
@@ -1531,6 +1558,7 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolTable) -> Rc<Expression>
             array_type,
             sizes,
             type_,
+            ..
         } => {
             return exec_array_construction(state, array_type, sizes, type_, st);
         }
@@ -1551,6 +1579,7 @@ fn exec_rhs_field(
             true_,
             false_,
             type_,
+            info
         } => {
             // bedoelt hij hier niet exec true_ ipv execField true_ ?
             // nope want hij wil nog steeds het field weten ervan
@@ -1562,13 +1591,14 @@ fn exec_rhs_field(
                 true_: true_,
                 false_: false_,
                 type_: type_.clone(),
+                info: *info
             })
         }
         Expression::Lit {
             lit: Lit::NullLit, ..
         } => panic!("infeasible"),
-        Expression::Ref { ref_, type_ } => read_field_concrete_ref(&mut state.heap, *ref_, field),
-        sym_ref @ Expression::SymbolicRef { var, type_ } => {
+        Expression::Ref { ref_, type_, info } => read_field_concrete_ref(&mut state.heap, *ref_, field),
+        sym_ref @ Expression::SymbolicRef { var, type_, info } => {
             init_symbolic_reference(state, var, type_, st);
             remove_symbolic_null(&mut state.alias_map, var);
             let concrete_refs = &state.alias_map[var];
@@ -1606,6 +1636,7 @@ fn true_lit() -> Expression {
     Expression::Lit {
         lit: Lit::BoolLit { bool_value: true },
         type_: RuntimeType::BoolRuntimeType,
+        info: SourcePos::UnknownPosition
     }
 }
 
@@ -1613,6 +1644,7 @@ fn false_lit() -> Expression {
     Expression::Lit {
         lit: Lit::BoolLit { bool_value: false },
         type_: RuntimeType::BoolRuntimeType,
+        info: SourcePos::UnknownPosition
     }
 }
 
@@ -1626,17 +1658,24 @@ fn create_symbolic_var(name: Identifier, type_: impl Typeable, st: &SymbolTable)
         Expression::SymbolicRef {
             var: name,
             type_: type_.type_of(),
+            info: SourcePos::UnknownPosition
         }
     } else {
         Expression::SymbolicVar {
             var: name,
             type_: type_.type_of(),
+            info: SourcePos::UnknownPosition
         }
     }
 }
 
 /// Create uninitialised variable (that can be initialized lazily)
-fn initialize_symbolic_var(name: &str, type_: &RuntimeType, ref_: i64, st: &SymbolTable) -> Expression {
+fn initialize_symbolic_var(
+    name: &str,
+    type_: &RuntimeType,
+    ref_: i64,
+    st: &SymbolTable,
+) -> Expression {
     let sym_name = format!("{}{}", name, ref_);
     create_symbolic_var(sym_name.into(), type_.clone(), st)
 }
@@ -1758,6 +1797,7 @@ fn exec_array_construction(
     Rc::new(Expression::Ref {
         ref_: ref_id,
         type_: type_.clone(),
+        info: SourcePos::UnknownPosition
     })
 }
 
@@ -1798,7 +1838,6 @@ fn verify(
     let mut i = 0;
     let symbol_table = SymbolTable::from_ast(&c)?;
 
-
     let c = type_compilation_unit(c, &symbol_table)?;
 
     let (result, flw) = labelled_statements(c, &mut i);
@@ -1812,15 +1851,19 @@ fn verify(
     // dbg!(&flows);
     // panic!();
 
-    
     let pc = find_entry_for_static_invocation(class_name, method_name, &program);
     // dbg!(&params);
-    let params = initial_method.params
+    let params = initial_method
+        .params
         .iter()
         .map(|p| {
             (
                 p.name.clone(),
-                Rc::new(create_symbolic_var(p.name.clone(), p.type_.type_of(), &symbol_table)),
+                Rc::new(create_symbolic_var(
+                    p.name.clone(),
+                    p.type_.type_of(),
+                    &symbol_table,
+                )),
             )
         })
         .collect();
@@ -1869,7 +1912,6 @@ fn verify(
         root_logger,
         path_counter,
     ));
-    
 }
 
 #[test]

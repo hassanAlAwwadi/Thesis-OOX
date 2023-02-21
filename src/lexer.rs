@@ -2,6 +2,8 @@ use std::{fmt::{Display}};
 
 use pest::{Parser};
 
+use crate::positioned::{SourcePos, WithPosition};
+
 #[derive(Parser)]
 #[grammar = "oox.pest"]
 struct OOXLexer;
@@ -11,12 +13,35 @@ struct OOXLexer;
 //     pub position: (usize, usize),
 // }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum Token<'a> {
-    Identifier(&'a str),
-    Keyword(&'a str),
-    Punctuator(&'a str),
-    Literal(&'a str),
+    Identifier(&'a str, SourcePos),
+    Keyword(&'a str, SourcePos),
+    Punctuator(&'a str, SourcePos),
+    Literal(&'a str, SourcePos),
+}
+
+impl PartialEq for Token<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Identifier(l0, _), Self::Identifier(r0, _)) => l0 == r0,
+            (Self::Keyword(l0, _), Self::Keyword(r0, _)) => l0 == r0,
+            (Self::Punctuator(l0, _), Self::Punctuator(r0, _)) => l0 == r0,
+            (Self::Literal(l0, _), Self::Literal(r0, _)) => l0 == r0 ,
+            _ => false,
+        }
+    }
+}
+
+impl WithPosition for Token<'_> {
+    fn get_position(&self) -> SourcePos {
+        *match self {
+            Token::Identifier(_, pos) => pos,
+            Token::Keyword(_, pos) => pos,
+            Token::Punctuator(_, pos) => pos,
+            Token::Literal(_, pos) => pos,
+        }
+    }
 }
 
 impl<'a> Display for Token<'a> {
@@ -48,6 +73,7 @@ pub fn tokens<'a>(file: &'a str) -> Vec<Token<'a>> {
                 .into_inner()
                 .filter(|record| record.as_rule() == Rule::token)
                 .map(|token_pair| {
+                    let (line, col) = token_pair.as_span().start_pos().line_col();
                     let token_str = token_pair.as_str();
                     let token_rule = token_pair.into_inner().next().unwrap().as_rule();
                     // a token always is one of four, see grammar
@@ -57,7 +83,7 @@ pub fn tokens<'a>(file: &'a str) -> Vec<Token<'a>> {
                         Rule::punctuator => Token::Punctuator,
                         Rule::literal => Token::Literal,
                         _ => unreachable!(),
-                    }(&token_str);
+                    }(&token_str, SourcePos::SourcePos { line, col });
                     // (token, token_pair.as_span().start_pos().line_col())
                     token
                 })

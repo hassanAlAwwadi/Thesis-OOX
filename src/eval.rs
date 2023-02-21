@@ -9,7 +9,7 @@ use crate::{
     exec::{get_element, init_symbolic_reference, AliasMap, Heap, HeapValue, State},
     stack::{remove_from_stack, write_to_stack, StackFrame},
     symbol_table::SymbolTable,
-    syntax::{BinOp, Expression, Lit, RuntimeType, UnOp, Identifier},
+    syntax::{BinOp, Expression, Lit, RuntimeType, UnOp, Identifier}, positioned::SourcePos,
 };
 
 pub type EvaluationResult<T> = Either<Rc<Expression>, T>;
@@ -53,6 +53,7 @@ fn substitute(state: &mut State, expression: Rc<Expression>, st: &SymbolTable) -
             lhs,
             rhs,
             type_,
+            info
         } => {
             let lhs = substitute(state, lhs.clone(), st);
             let rhs = substitute(state, rhs.clone(), st);
@@ -61,21 +62,24 @@ fn substitute(state: &mut State, expression: Rc<Expression>, st: &SymbolTable) -
                 lhs,
                 rhs,
                 type_: type_.clone(),
+                info: SourcePos::UnknownPosition
             });
         }
         Expression::UnOp {
             un_op,
             value,
             type_,
+            info
         } => {
             let value = substitute(state, value.clone(), st);
             Rc::new(Expression::UnOp {
                 un_op: un_op.clone(),
                 value,
                 type_: type_.clone(),
+                info: SourcePos::UnknownPosition
             })
         }
-        Expression::Var { var, type_ } => {
+        Expression::Var { var, type_, info } => {
             let StackFrame { pc, t, params, .. } = state.stack.last().unwrap();
             let o = params
                 .get(var)
@@ -83,7 +87,7 @@ fn substitute(state: &mut State, expression: Rc<Expression>, st: &SymbolTable) -
                 .clone();
 
             match o.as_ref() {
-                Expression::SymbolicRef { var, type_ } => {
+                Expression::SymbolicRef { var, type_, info } => {
                     let value = match state.alias_map.get(var) {
                         None => o.clone(),
                         Some(alias_entry) => {
@@ -103,16 +107,17 @@ fn substitute(state: &mut State, expression: Rc<Expression>, st: &SymbolTable) -
         }
         Expression::SymbolicVar { .. } => expression,
         Expression::Lit { .. } => expression,
-        Expression::SizeOf { var, type_ } => {
+        Expression::SizeOf { var, type_ , info} => {
             todo!()
         }
         Expression::Ref { .. } => expression,
-        Expression::SymbolicRef { var, type_ } => {
+        Expression::SymbolicRef { var, type_ , info} => {
             init_symbolic_reference(state, &var, &type_, st);
 
             Rc::new(Expression::SymbolicRef {
                 var: var.clone(),
                 type_: type_.clone(),
+                info: *info
             })
         }
         Expression::Conditional {
@@ -120,6 +125,7 @@ fn substitute(state: &mut State, expression: Rc<Expression>, st: &SymbolTable) -
             true_,
             false_,
             type_,
+            info
         } => {
             let guard = substitute(state, guard.clone(), st);
             let false_ = substitute(state, false_.clone(), st);
@@ -129,6 +135,7 @@ fn substitute(state: &mut State, expression: Rc<Expression>, st: &SymbolTable) -
                 true_,
                 false_,
                 type_: type_.clone(),
+                info: *info
             })
         }
         Expression::Forall {
@@ -137,6 +144,7 @@ fn substitute(state: &mut State, expression: Rc<Expression>, st: &SymbolTable) -
             domain,
             formula,
             type_,
+            info
         } => todo!(),
         Expression::Exists {
             elem,
@@ -144,6 +152,7 @@ fn substitute(state: &mut State, expression: Rc<Expression>, st: &SymbolTable) -
             domain,
             formula,
             type_,
+            info
         } => todo!(),
     }
 }
@@ -159,6 +168,7 @@ fn eval_locally(
             lhs,
             rhs,
             type_,
+            info
         } => {
             let lhs = eval_locally(state, lhs.clone(), st);
             let rhs = eval_locally(state, rhs.clone(), st);
@@ -168,11 +178,12 @@ fn eval_locally(
             un_op,
             value,
             type_,
+            info
         } => {
             let value = eval_locally(state, value.clone(), st);
             evaluate_unop(un_op.clone(), value)
         }
-        Expression::Var { var, type_ } => {
+        Expression::Var { var, type_ , info} => {
             let StackFrame { pc, t, params, .. } = state.stack.last().unwrap();
             let o = params
                 .get(var)
@@ -207,12 +218,13 @@ fn eval_locally(
         }
         Expression::SymbolicVar { .. } => expression,
         Expression::Lit { .. } => expression,
-        Expression::SizeOf { var, type_ } => {
+        Expression::SizeOf { var, type_, info } => {
             let StackFrame { pc, t, params, .. } = state.stack.last().unwrap();
             match params[var].as_ref() {
                 Expression::Lit {
                     lit: Lit::NullLit,
                     type_,
+                    info
                 } => {
                     // infeasible path
                     return Expression::int(-1);
@@ -228,12 +240,13 @@ fn eval_locally(
             panic!("invalid state, expected initialised array with arrayvalue in heap");
         }
         Expression::Ref { .. } => expression,
-        Expression::SymbolicRef { var, type_ } => {
+        Expression::SymbolicRef { var, type_ , info} => {
             init_symbolic_reference(state, &var, &type_, st);
 
             Rc::new(Expression::SymbolicRef {
                 var: var.clone(),
                 type_: type_.clone(),
+                info: *info,
             })
         }
         Expression::Conditional {
@@ -241,6 +254,7 @@ fn eval_locally(
             true_,
             false_,
             type_,
+            info
         } => {
             let guard = eval_locally(state, guard.clone(), st);
             let true_ = eval_locally(state, true_.clone(), st);
@@ -261,6 +275,7 @@ fn eval_locally(
                     true_: true_,
                     false_: false_,
                     type_: type_.clone(),
+                    info: *info
                 }),
             }
         }
@@ -270,6 +285,7 @@ fn eval_locally(
             domain,
             formula,
             type_,
+            info
         } => evaluate_quantifier(ands, elem, range, domain, formula, state, st),
         Expression::Exists {
             elem,
@@ -277,6 +293,7 @@ fn eval_locally(
             domain,
             formula,
             type_,
+            info
         } => evaluate_quantifier(ors, elem, range, domain, formula, state, st),
     }
 }
@@ -342,6 +359,7 @@ fn evaluate_binop(bin_op: BinOp, lhs: &Expression, rhs: &Expression) -> Rc<Expre
                 lhs: Rc::new(lhs.clone()),
                 rhs: Rc::new(rhs.clone()),
                 type_: RuntimeType::BoolRuntimeType,
+                info: SourcePos::UnknownPosition
             }),
         },
         (
@@ -378,6 +396,7 @@ fn evaluate_binop(bin_op: BinOp, lhs: &Expression, rhs: &Expression) -> Rc<Expre
                 lhs: Rc::new(lhs.clone()),
                 rhs: Rc::new(rhs.clone()),
                 type_: RuntimeType::BoolRuntimeType,
+                info: SourcePos::UnknownPosition
             }),
         },
         // Integer evaluation
@@ -387,6 +406,7 @@ fn evaluate_binop(bin_op: BinOp, lhs: &Expression, rhs: &Expression) -> Rc<Expre
             Lit {
                 lit: IntLit { int_value: 0 },
                 type_,
+                info: SourcePos::UnknownPosition
             },
         ) => panic!("infeasible, division/modulo by zero"),
         (
@@ -446,6 +466,7 @@ fn evaluate_binop(bin_op: BinOp, lhs: &Expression, rhs: &Expression) -> Rc<Expre
                     lhs: Rc::new(lhs.clone()),
                     rhs: Rc::new(rhs.clone()),
                     type_: RuntimeType::BoolRuntimeType,
+                    info: SourcePos::UnknownPosition
                 })
             }
         }
@@ -454,6 +475,7 @@ fn evaluate_binop(bin_op: BinOp, lhs: &Expression, rhs: &Expression) -> Rc<Expre
             lhs: Rc::new(lhs.clone()),
             rhs: Rc::new(rhs.clone()),
             type_: RuntimeType::BoolRuntimeType,
+            info: SourcePos::UnknownPosition
         }), // room for optimization
     }
 }
@@ -471,6 +493,7 @@ fn evaluate_unop(unop: UnOp, expression: Rc<Expression>) -> Rc<Expression> {
                 int_value: -int_value,
             },
             type_: RuntimeType::IntRuntimeType,
+            info: SourcePos::UnknownPosition
         }),
         (UnOp::Negative, _) => Rc::new(negative(expression)),
         (
@@ -484,6 +507,7 @@ fn evaluate_unop(unop: UnOp, expression: Rc<Expression>) -> Rc<Expression> {
                 bool_value: !bool_value,
             },
             type_: RuntimeType::BoolRuntimeType,
+            info: SourcePos::UnknownPosition
         }),
         (UnOp::Negate, _) => Rc::new(negate(expression)),
     }
@@ -526,7 +550,7 @@ where
         Expression::Lit {
             lit: Lit::NullLit, ..
         } => Expression::FALSE.into(), // return false?
-        Expression::Ref { ref_, type_ } => {
+        Expression::Ref { ref_, type_ , info } => {
             // This might be optimized by not passing in &mut State, but instead pass in &Heap, &mut AliasMap, &mut reference_counter
             // for i in 0..elements.len()
             //    clone value, clone index
@@ -554,7 +578,7 @@ where
 
             quantifier(formulas).into()
         }
-        Expression::SymbolicRef { var, type_ } => {
+        Expression::SymbolicRef { var, type_, info } => {
             unreachable!("Arrays are initialized as concrete references for each path")
         },
         _ => unreachable!("Expected array to be a reference, found {:?}", array),
