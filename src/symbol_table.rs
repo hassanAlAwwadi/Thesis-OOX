@@ -7,7 +7,7 @@ use crate::{
     syntax::{
         self, Class, CompilationUnit, Declaration, DeclarationMember, Identifier, Interface,
         NonVoidType, RuntimeType,
-    },
+    }, positioned::WithPosition,
 };
 
 pub type Fields = Vec<(Identifier, NonVoidType)>;
@@ -58,6 +58,7 @@ pub struct SymbolTable {
 
     pub declarations: HashMap<Identifier, Declaration>,
     pub decl_to_instance_types: HashMap<Identifier, Vec<Identifier>>,
+    pub subtypes: HashMap<Identifier, Vec<Identifier>>
 }
 
 impl SymbolTable {
@@ -131,20 +132,35 @@ impl SymbolTable {
         let decl_to_instance_types = declarations
             .iter()
             .map(|(name, decl)| {
-                let derived_classes = Self::derived_classes(decl.clone(), &it)
+                let derived_classes = Self::derived_declarations(decl.clone(), &it)
                     .into_iter()
+                    .filter_map(|d| d.try_into_class())
                     .map(|class| class.name.clone())
                     .unique()
                     .collect_vec();
                 (name.clone(), derived_classes)
             })
             .collect::<HashMap<_, _>>();
+        
+        let subtypes = declarations
+        .iter()
+        .map(|(name, decl)| {
+            let derived_classes = Self::derived_declarations(decl.clone(), &it)
+                .into_iter()
+                .map(|d| d.name().clone())
+                .unique()
+                .collect_vec();
+            (name.clone(), derived_classes)
+        })
+        .collect::<HashMap<_, _>>();
+        
 
         Ok(SymbolTable {
             class_to_fields,
             declarations,
             inheritance_table: it,
             decl_to_instance_types,
+            subtypes
         })
     }
 
@@ -195,10 +211,10 @@ impl SymbolTable {
         match declarations.get(class_name) {
             Some(Declaration::Class(class)) => Ok(class.clone()),
             Some(Declaration::Interface(_)) => {
-                Err(error::expected_class_found_interface(class_name))
+                Err(error::expected_class_found_interface(class_name, class_name.get_position()))
             }
 
-            None => Err(error::class_does_not_exist(class_name)),
+            None => Err(error::class_does_not_exist(class_name, class_name.get_position())),
         }
     }
 
@@ -209,10 +225,10 @@ impl SymbolTable {
         match declarations.get(interface_name) {
             Some(Declaration::Interface(interface)) => Ok(interface.clone()),
             Some(Declaration::Class(_)) => {
-                Err(error::expected_interface_found_class(interface_name))
+                Err(error::expected_interface_found_class(interface_name, interface_name.get_position()))
             }
 
-            None => Err(error::class_does_not_exist(interface_name)),
+            None => Err(error::class_does_not_exist(interface_name, interface_name.get_position())),
         }
     }
 
@@ -222,12 +238,12 @@ impl SymbolTable {
     //     self.lookupMethod
     // }
 
-    /// Get all derived classes of the declaration
+    /// Get all derived declarations of the declaration
     /// This includes childs of child etc.
-    fn derived_classes<'a>(
+    fn derived_declarations<'a>(
         declaration: Declaration,
         it: &InheritanceTable,
-    ) -> Vec<Rc<syntax::Class>> {
+    ) -> Vec<Declaration> {
         let derived_classes = match declaration {
             Declaration::Class(class) => class_helper(class, it),
             Declaration::Interface(interface) => interface_helper(interface, it),
@@ -236,9 +252,9 @@ impl SymbolTable {
         fn class_helper(
             subclass: Rc<syntax::Class>,
             it: &InheritanceTable,
-        ) -> Vec<Rc<syntax::Class>> {
+        ) -> Vec<Declaration> {
             let subclasses = &it.class[&subclass.name].subclasses;
-            std::iter::once(subclass.clone())
+            std::iter::once(Declaration::Class(subclass.clone()))
                 .chain(
                     subclasses
                         .iter()
@@ -251,7 +267,7 @@ impl SymbolTable {
         fn interface_helper(
             subinterface: Rc<syntax::Interface>,
             it: &InheritanceTable,
-        ) -> Vec<Rc<syntax::Class>> {
+        ) -> Vec<Declaration> {
             let implemented = &it.interface[&subinterface.name].implemented;
             let subinterfaces = &it.interface[&subinterface.name].subinterfaces;
 
@@ -265,8 +281,10 @@ impl SymbolTable {
                 .flat_map(|subinterface| interface_helper(subinterface, it))
                 .into_iter();
 
+            std::iter::once(Declaration::Interface(subinterface.clone()))
+            .chain(
             subclasses_from_subclasses
-                .chain(subclasses_from_interfaces)
+                .chain(subclasses_from_interfaces))
                 .collect()
         }
 

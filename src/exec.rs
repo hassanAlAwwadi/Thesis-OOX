@@ -42,7 +42,7 @@ use crate::{
     },
     typeable::{runtime_to_nonvoidtype, Typeable},
     typing::type_compilation_unit,
-    utils, z3_checker,
+    utils, z3_checker, FILE_NAMES,
 };
 
 const NULL: Expression = Expression::Lit {
@@ -1818,18 +1818,27 @@ fn exec_assume(state: &mut State, assumption: Rc<Expression>, st: &SymbolTable) 
 pub type Error = String;
 
 fn verify(
-    file_content: &str,
+    path: &str,
     class_name: &str,
     method_name: &str,
     k: u64,
 ) -> std::result::Result<SymResult, Error> {
-    let tokens = tokens(file_content);
+    println!("Starting up");
+    let file_content =
+    std::fs::read_to_string(path).unwrap();
+
+    // Set global file names
+    *FILE_NAMES.lock().unwrap() = path.to_string();
+
+
+    let tokens = tokens(&file_content);
     let as_ref = tokens.as_slice();
     // dbg!(as_ref);
     let c = parse(&tokens);
     let c = c.unwrap();
 
     // dbg!(&c);
+    println!("Parsing completed");
 
     let initial_method = c
         .find_class_declaration_member(method_name, class_name.into())
@@ -1837,8 +1846,11 @@ fn verify(
 
     let mut i = 0;
     let symbol_table = SymbolTable::from_ast(&c)?;
+    println!("Symbol table completed");
 
     let c = type_compilation_unit(c, &symbol_table)?;
+    println!("Typing completed");
+    
 
     let (result, flw) = labelled_statements(c, &mut i);
 
@@ -1916,27 +1928,27 @@ fn verify(
 
 #[test]
 fn sym_exec_of_absolute_simplest() {
-    let file_content = include_str!("../examples/absolute_simplest.oox");
+    let path = "./examples/absolute_simplest.oox";
     assert_eq!(
-        verify(file_content, "Foo", "f", 20).unwrap(),
+        verify(path, "Foo", "f", 20).unwrap(),
         SymResult::Valid
     );
 }
 
 #[test]
 fn sym_exec_min() {
-    let file_content = include_str!("../examples/psv/min.oox");
+    let path = "./examples/psv/min.oox";
     assert_eq!(
-        verify(file_content, "Foo", "min", 20).unwrap(),
+        verify(path, "Foo", "min", 20).unwrap(),
         SymResult::Valid
     );
 }
 
 #[test]
 fn sym_exec_method() {
-    let file_content = include_str!("../examples/psv/method.oox");
+    let path = "./examples/psv/method.oox";
     assert_eq!(
-        verify(file_content, "Main", "min", 20).unwrap(),
+        verify(path, "Main", "min", 20).unwrap(),
         SymResult::Valid
     );
 }
@@ -1949,180 +1961,180 @@ fn sym_exec_method() {
 
 #[test]
 fn sym_test_failure() {
-    let file_content = std::fs::read_to_string("./examples/psv/test.oox").unwrap();
+    let path = "./examples/psv/test.oox";
     assert_eq!(
-        verify(&file_content, "Main", "main", 30).unwrap(),
+        verify(&path, "Main", "main", 30).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_div_by_n() {
-    let file_content = std::fs::read_to_string("./examples/psv/divByN.oox").unwrap();
+    let path = "./examples/psv/divByN.oox";
     // so this one is invalid at k = 100, in OOX it's invalid at k=105, due to exceptions (more if statements are added)
     assert_eq!(
-        verify(&file_content, "Main", "divByN_invalid", 100).unwrap(),
+        verify(&path, "Main", "divByN_invalid", 100).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_nonstatic_function() {
-    let file_content = std::fs::read_to_string("./examples/nonstatic_function.oox").unwrap();
+    let path = "./examples/nonstatic_function.oox";
     assert_eq!(
-        verify(&file_content, "Main", "f", 20).unwrap(),
+        verify(&path, "Main", "f", 20).unwrap(),
         SymResult::Valid
     );
 }
 
 #[test]
 fn sym_exec_this_method() {
-    let file_content = std::fs::read_to_string("./examples/this_method.oox").unwrap();
+    let path = "./examples/this_method.oox";
     assert_eq!(
-        verify(&file_content, "Main", "main", 30).unwrap(),
+        verify(&path, "Main", "main", 30).unwrap(),
         SymResult::Valid
     );
 }
 
 #[test]
 fn sym_exec_linked_list1() {
-    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    let path = "./examples/intLinkedList.oox";
     assert_eq!(
-        verify(&file_content, "Node", "test2", 90).unwrap(),
+        verify(&path, "Node", "test2", 90).unwrap(),
         SymResult::Valid
     );
 }
 
 #[test]
 fn sym_exec_linked_list1_invalid() {
-    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    let path = "./examples/intLinkedList.oox";
     assert_eq!(
-        verify(&file_content, "Node", "test2_invalid", 90).unwrap(),
+        verify(&path, "Node", "test2_invalid", 90).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_linked_list3_invalid() {
-    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    let path = "./examples/intLinkedList.oox";
     // at k=80 it fails, after ~170 sec in hs oox, rs oox does this in ~90 sec
     assert_eq!(
-        verify(&file_content, "Node", "test3_invalid1", 110).unwrap(),
+        verify(&path, "Node", "test3_invalid1", 110).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_linked_list4() {
-    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    let path = "./examples/intLinkedList.oox";
     assert_eq!(
-        verify(&file_content, "Node", "test4", 90).unwrap(),
+        verify(&path, "Node", "test4", 90).unwrap(),
         SymResult::Valid
     );
 }
 
 #[test]
 fn sym_exec_linked_list4_invalid() {
-    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    let path = "./examples/intLinkedList.oox";
     assert_eq!(
-        verify(&file_content, "Node", "test4_invalid", 90).unwrap(),
+        verify(&path, "Node", "test4_invalid", 90).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_linked_list4_if_problem() {
-    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    let path = "./examples/intLinkedList.oox";
     assert_eq!(
-        verify(&file_content, "Node", "test4_if_problem", 90).unwrap(),
+        verify(&path, "Node", "test4_if_problem", 90).unwrap(),
         SymResult::Valid
     );
 }
 
 #[test]
 fn sym_exec_exceptions1() {
-    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    let path = "./examples/exceptions.oox";
 
     assert_eq!(
-        verify(&file_content, "Main", "test1", 20).unwrap(),
+        verify(&path, "Main", "test1", 20).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "test1_invalid", 20).unwrap(),
+        verify(&path, "Main", "test1_invalid", 20).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Main", "div", 30).unwrap(),
+        verify(&path, "Main", "div", 30).unwrap(),
         SymResult::Valid
     );
 }
 
 #[test]
 fn sym_exec_exceptions_m0() {
-    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    let path = "./examples/exceptions.oox";
 
     assert_eq!(
-        verify(&file_content, "Main", "m0", 20).unwrap(),
+        verify(&path, "Main", "m0", 20).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "m0_invalid", 20).unwrap(),
+        verify(&path, "Main", "m0_invalid", 20).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_exceptions_m1() {
-    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    let path = "./examples/exceptions.oox";
 
     assert_eq!(
-        verify(&file_content, "Main", "m1", 20).unwrap(),
+        verify(&path, "Main", "m1", 20).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "m1_invalid", 20).unwrap(),
+        verify(&path, "Main", "m1_invalid", 20).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_exceptions_m2() {
-    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    let path = "./examples/exceptions.oox";
 
     assert_eq!(
-        verify(&file_content, "Main", "m2", 20).unwrap(),
+        verify(&path, "Main", "m2", 20).unwrap(),
         SymResult::Valid
     );
 }
 
 #[test]
 fn sym_exec_exceptions_m3() {
-    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    let path = "./examples/exceptions.oox";
 
     assert_eq!(
-        verify(&file_content, "Main", "m3", 30).unwrap(),
+        verify(&path, "Main", "m3", 30).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "m3_invalid1", 30).unwrap(),
+        verify(&path, "Main", "m3_invalid1", 30).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Main", "m3_invalid2", 30).unwrap(),
+        verify(&path, "Main", "m3_invalid2", 30).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_exceptions_null() {
-    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    let path = "./examples/exceptions.oox";
 
     assert_eq!(
-        verify(&file_content, "Main", "nullExc1", 30).unwrap(),
+        verify(&path, "Main", "nullExc1", 30).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "nullExc2", 30).unwrap(),
+        verify(&path, "Main", "nullExc2", 30).unwrap(),
         SymResult::Valid
     );
     // assert_eq!(verify_file(&file_content, "m3_invalid1", 30), SymResult::Invalid);
@@ -2131,188 +2143,187 @@ fn sym_exec_exceptions_null() {
 
 #[test]
 fn sym_exec_array1() {
-    let file_content = std::fs::read_to_string("./examples/array/array1.oox").unwrap();
+    let path = "./examples/array/array1.oox";
 
     assert_eq!(
-        verify(&file_content, "Main", "foo", 50).unwrap(),
+        verify(&path, "Main", "foo", 50).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "foo_invalid", 50).unwrap(),
+        verify(&path, "Main", "foo_invalid", 50).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Main", "sort", 300).unwrap(),
+        verify(&path, "Main", "sort", 300).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "sort_invalid1", 50).unwrap(),
+        verify(&path, "Main", "sort_invalid1", 50).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Main", "max", 50).unwrap(),
+        verify(&path, "Main", "max", 50).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "max_invalid1", 50).unwrap(),
+        verify(&path, "Main", "max_invalid1", 50).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Main", "max_invalid2", 50).unwrap(),
+        verify(&path, "Main", "max_invalid2", 50).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Main", "exists_valid", 50).unwrap(),
+        verify(&path, "Main", "exists_valid", 50).unwrap(),
         SymResult::Valid
     );
     // assert_eq!(verify_file(&file_content, "exists_invalid1", 50), SymResult::Invalid);
     assert_eq!(
-        verify(&file_content, "Main", "exists_invalid2", 50).unwrap(),
+        verify(&path, "Main", "exists_invalid2", 50).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Main", "array_creation1", 50).unwrap(),
+        verify(&path, "Main", "array_creation1", 50).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "array_creation2", 50).unwrap(),
+        verify(&path, "Main", "array_creation2", 50).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "array_creation_invalid", 50).unwrap(),
+        verify(&path, "Main", "array_creation_invalid", 50).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_array2() {
-    let file_content = std::fs::read_to_string("./examples/array/array2.oox").unwrap();
+    let path = "./examples/array/array2.oox";
 
     assert_eq!(
-        verify(&file_content, "Main", "foo1", 50).unwrap(),
+        verify(&path, "Main", "foo1", 50).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "foo1_invalid", 50).unwrap(),
+        verify(&path, "Main", "foo1_invalid", 50).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Main", "foo2_invalid", 50).unwrap(),
+        verify(&path, "Main", "foo2_invalid", 50).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Main", "sort", 100).unwrap(),
+        verify(&path, "Main", "sort", 100).unwrap(),
         SymResult::Valid
     );
 }
 
 #[test]
 fn sym_exec_inheritance() {
-    let file_content = std::fs::read_to_string("./examples/inheritance/inheritance.oox").unwrap();
+    let path = "./examples/inheritance/inheritance.oox";
     let k = 150;
 
     assert_eq!(
-        verify(&file_content, "Main", "test1", k).unwrap(),
+        verify(&path, "Main", "test1", k).unwrap(),
         SymResult::Valid
     );
     // assert_eq!(
-    //     verify(&file_content, "Main", "test1_invalid", k).unwrap(),
+    //     verify(&path, "Main", "test1_invalid", k).unwrap(),
     //     SymResult::Invalid
     // );
     // assert_eq!(
-    //     verify(&file_content, "Main", "test2a", k).unwrap(),
+    //     verify(&path, "Main", "test2a", k).unwrap(),
     //     SymResult::Valid
     // );
 
     // assert_eq!(
-    //     verify(&file_content, "Main", "test2b", k).unwrap(),
+    //     verify(&path, "Main", "test2b", k).unwrap(),
     //     SymResult::Valid
     // );
 
     // assert_eq!(
-    //     verify(&file_content, "Main", "test2b_invalid", k).unwrap(),
+    //     verify(&path, "Main", "test2b_invalid", k).unwrap(),
     //     SymResult::Invalid
     // );
 
     // assert_eq!(
-    //     verify(&file_content, "Main", "test3", k).unwrap(),
+    //     verify(&path, "Main", "test3", k).unwrap(),
     //     SymResult::Valid
     // );
 
     // assert_eq!(
-    //     verify(&file_content, "Main", "test4_valid", k).unwrap(),
+    //     verify(&path, "Main", "test4_valid", k).unwrap(),
     //     SymResult::Valid
     // );
     // assert_eq!(
-    //     verify(&file_content, "Main", "test4_invalid", k).unwrap(),
+    //     verify(&path, "Main", "test4_invalid", k).unwrap(),
     //     SymResult::Invalid
     // );
     // assert_eq!(
-    //     verify(&file_content, "Main", "test5", k).unwrap(),
+    //     verify(&path, "Main", "test5", k).unwrap(),
     //     SymResult::Valid
     // );
 
     // assert_eq!(
-    //     verify(&file_content, "Main", "test6", k).unwrap(),
+    //     verify(&path, "Main", "test6", k).unwrap(),
     //     SymResult::Valid
     // );
 }
 
 #[test]
 fn sym_exec_inheritance_specifications() {
-    let file_content =
-        std::fs::read_to_string("./examples/inheritance/specifications.oox").unwrap();
+    let path = "./examples/inheritance/specifications.oox";
     let k = 150;
     assert_eq!(
-        verify(&file_content, "Main", "test_valid", k).unwrap(),
+        verify(&path, "Main", "test_valid", k).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "test_invalid", k).unwrap(),
+        verify(&path, "Main", "test_invalid", k).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_interface() {
-    let file_content = std::fs::read_to_string("./examples/inheritance/interface.oox").unwrap();
+    let path = "./examples/inheritance/interface.oox";
     let k = 150;
 
     println!("hello");
 
     assert_eq!(
-        verify(&file_content, "Main", "main", k).unwrap(),
+        verify(&path, "Main", "main", k).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "test1_valid", k).unwrap(),
+        verify(&path, "Main", "test1_valid", k).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "test1_invalid", k).unwrap(),
+        verify(&path, "Main", "test1_invalid", k).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_interface2() {
-    let file_content = std::fs::read_to_string("./examples/inheritance/interface2.oox").unwrap();
+    let path = "./examples/inheritance/interface2.oox";
     let k = 150;
 
     assert_eq!(
-        verify(&file_content, "Foo", "test_valid", k).unwrap(),
+        verify(&path, "Foo", "test_valid", k).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Foo1", "test_invalid", k).unwrap(),
+        verify(&path, "Foo1", "test_invalid", k).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Foo2", "test_valid", k).unwrap(),
+        verify(&path, "Foo2", "test_valid", k).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Foo3", "test_invalid", k).unwrap(),
+        verify(&path, "Foo3", "test_invalid", k).unwrap(),
         SymResult::Invalid
     );
     //assert_eq!(verify(&file_content, "Foo4", "test_valid", k), SymResult::Valid);
@@ -2320,44 +2331,36 @@ fn sym_exec_interface2() {
 
 #[test]
 fn sym_exec_polymorphic() {
-    let file_content =
-        std::fs::read_to_string("./examples/inheritance/sym_exec_polymorphic.oox").unwrap();
     let k = 150;
     assert_eq!(
-        verify(&file_content, "Main", "main", k).unwrap(),
+        verify("./examples/inheritance/sym_exec_polymorphic.oox", "Main", "main", k).unwrap(),
         SymResult::Valid
     );
 }
 
 #[test]
 fn benchmark_col_25() {
-    let file_content =
-        std::fs::read_to_string("./benchmarks/defects4j/collections_25.oox").unwrap();
     let k = 15000;
     assert_eq!(
-        verify(&file_content, "Test", "test", k).unwrap(),
+        verify("./benchmarks/defects4j/collections_25.oox", "Test", "test", k).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn benchmark_col_25_symbolic() {
-    let file_content =
-        std::fs::read_to_string("./benchmarks/defects4j/collections_25.oox").unwrap();
     let k = 15000;
     assert_eq!(
-        verify(&file_content, "Test", "test_symbolic", k).unwrap(),
+        verify("./benchmarks/defects4j/collections_25.oox", "Test", "test_symbolic", k).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn benchmark_col_25_test3() {
-    let file_content =
-        std::fs::read_to_string("./benchmarks/defects4j/collections_25.oox").unwrap();
     let k = 15000;
     assert_eq!(
-        verify(&file_content, "Test", "test3", k).unwrap(),
+        verify("./benchmarks/defects4j/collections_25.oox", "Test", "test3", k).unwrap(),
         SymResult::Valid
     );
 }

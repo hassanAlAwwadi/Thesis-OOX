@@ -1,4 +1,8 @@
+use std::{fmt::Display, collections::HashMap};
+
+use crate::FILE_NAMES;
 use crate::syntax::{NonVoidType, Expression, Rhs, Lhs, Invocation, Method};
+
 
 
 #[derive(Debug, Clone, Copy)]
@@ -7,6 +11,19 @@ pub enum SourcePos {
     SourcePos {
         line: usize,
         col: usize,
+    }
+}
+
+impl Display for SourcePos {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+
+        
+        if let SourcePos::SourcePos { line, col } = self {
+            let path = FILE_NAMES.lock().unwrap();
+            write!(f, "{}:{}:{}", path, line, col)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -60,6 +77,12 @@ impl WithPosition for Rhs {
     }
 }
 
+impl WithPosition for &Rhs {
+    fn get_position(&self) -> SourcePos {
+        Rhs::get_position(self)
+    }
+}
+
 impl WithPosition for Lhs {
     fn get_position(&self) -> SourcePos {
         match self {
@@ -84,5 +107,23 @@ impl WithPosition for Invocation {
 impl WithPosition for Method {
     fn get_position(&self) -> SourcePos {
         self.info
+    }
+}
+
+impl WithPosition for &Expression {
+    fn get_position(&self) -> SourcePos {
+        match self {
+            Expression::Forall { elem, range, domain, formula, type_, info } => *info,
+            Expression::Exists { elem, range, domain, formula, type_, info } => *info,
+            Expression::BinOp { bin_op, lhs, rhs, type_, info } => *info,
+            Expression::UnOp { un_op, value, type_, info } => *info,
+            Expression::Var { var, type_, info } => *info,
+            Expression::SymbolicVar { var, type_, info } => *info,
+            Expression::Lit { lit, type_, info } => *info,
+            Expression::SizeOf { var, type_, info } => *info,
+            Expression::Ref { ref_, type_, info } => *info,
+            Expression::SymbolicRef { var, type_, info } => *info,
+            Expression::Conditional { guard, true_, false_, type_, info } => *info,
+        }
     }
 }

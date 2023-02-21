@@ -23,7 +23,6 @@ mod interface;
 pub fn parse<'a>(tokens: &[Token<'a>]) -> Result<CompilationUnit, pom::Error> {
     (program() - end()).parse(tokens).map(|mut c| {
         let c = insert_exceptional_clauses(c);
-        dbg!("Setting resolvers");
         c
     })
 }
@@ -158,8 +157,8 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     .map(|((guard, true_body), false_body)| create_ite(guard, true_body, false_body));
     let continue_ = (keyword("continue") - punct(";")).map(|t| Statement::Continue { info: t.get_position() });
     let break_ = (keyword("break") - punct(";")).map(|t| Statement::Break { info: t.get_position()});
-    let return_ = (keyword("return") * expression().opt() - punct(";"))
-        .map(|(/*return_token,*/ expression)| Statement::Return { expression, info: SourcePos::UnknownPosition /*return_token.get_position()*/ });
+    let return_ = (keyword("return") + expression().opt() - punct(";"))
+        .map(|(return_token, expression)| Statement::Return { expression, info: return_token.get_position() });
     let throw = (keyword("throw") * literal() - punct(";")).map(|x| {
         if let Expression::Lit {
             lit: Lit::StringLit { string_value },

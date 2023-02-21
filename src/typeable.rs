@@ -37,7 +37,7 @@ pub trait Typeable {
             // Matching ARRAY types
             (ARRAYRuntimeType, (ArrayRuntimeType { .. })) => true,
             (ArrayRuntimeType { .. }, ARRAYRuntimeType) => true,
-            (ReferenceRuntimeType { type_: a }, ReferenceRuntimeType { type_: b}) => st.get_all_instance_types(&b).contains(&a),
+            (ReferenceRuntimeType { type_: a }, ReferenceRuntimeType { type_: b}) => st.subtypes[&b].contains(&a),
             (a, b) => a == b,
         }
     }
@@ -200,8 +200,11 @@ impl Typeable for Invocation {
         match self {
             Invocation::InvokeMethod {
                 resolved: Some(resolved),
+                lhs, 
+                rhs,
                 ..
             } => {
+                dbg!(lhs, rhs);
                 let (_, (_, method)) = resolved
                     .iter()
                     .next()
@@ -246,6 +249,18 @@ impl Typeable for &Lhs {
 }
 
 impl Typeable for Rhs {
+    fn type_of(&self) -> RuntimeType {
+        match self {
+            Rhs::RhsExpression { type_, .. } => type_,
+            Rhs::RhsField { type_, .. } => type_,
+            Rhs::RhsElem { type_, .. } => type_,
+            Rhs::RhsCall { type_, .. } => type_,
+            Rhs::RhsArray { type_, .. } => type_,
+        }.clone()
+    }
+}
+
+impl Typeable for &Rhs {
     fn type_of(&self) -> RuntimeType {
         match self {
             Rhs::RhsExpression { type_, .. } => type_,

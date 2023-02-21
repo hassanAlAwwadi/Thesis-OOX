@@ -311,7 +311,7 @@ fn super_method_call_helper(
     let decl = &st.declarations[class_name];
 
     let class = decl
-        .as_class()
+        .try_into_class()
         .expect("cannot call super.method() for interface methods"); // TODO: turn this into an error
 
     let extends = st

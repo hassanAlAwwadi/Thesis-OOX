@@ -29,7 +29,16 @@ mod error;
 mod positioned;
 
 #[macro_use]
+extern crate lazy_static;
+
+#[macro_use]
 extern crate pest_derive;
 
 
+use std::sync::Mutex;
+
+
+
 pub use z3_checker::playground;
+
+static FILE_NAMES: Mutex<String> = Mutex::new(String::new());

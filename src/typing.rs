@@ -19,11 +19,11 @@ type TypeError = String;
 /// And an empty Ok result otherwise.
 fn matches_type<A, B>(type1: A, type2: B, st: &SymbolTable) -> Result<(), TypeError>
 where
-    A: Typeable,
+    A: Typeable + WithPosition,
     B: Typeable,
 {
     if !type1.is_of_type(type2.type_of(), st) {
-        return Err(error::unification_error(type2.type_of(), type1.type_of()));
+        return Err(error::unification_error(type2.type_of(), type1.type_of(), type1.get_position()));
     }
     Ok(())
 }
@@ -36,7 +36,7 @@ impl TypeEnvironment {
     fn declare_var(&mut self, var: Identifier, type_: RuntimeType) -> Result<(), TypeError>
     {
         if let Some((previously_defined, _)) = self.env.get_key_value(&var) {
-            return Err(error::shadowing(&var, previously_defined));
+            return Err(error::shadowing(&var, previously_defined, var.get_position()));
         }
         self.env.insert(var, type_);
         Ok(())
@@ -47,7 +47,7 @@ impl TypeEnvironment {
     }
 
     fn get_var_type(&self, var: &Identifier) -> Result<RuntimeType, TypeError> {
-        self.env.get(var).cloned().ok_or(error::undeclared_var(var))
+        self.env.get(var).cloned().ok_or(error::undeclared_var(var, var.get_position()))
     }
 }
 pub fn type_compilation_unit(
@@ -237,7 +237,25 @@ fn type_statement(
     st: &SymbolTable,
     declaration: &Declaration,
 ) -> Result<Statement, TypeError> {
+
+
     match statement {
+        Statement::Seq { stat1, stat2 } => {
+            let stat1 = type_statement(
+                *stat1,
+                is_constructor,
+                current_method.clone(),
+                env,
+                st,
+                declaration,
+            )?;
+            let stat2 =
+                type_statement(*stat2, is_constructor, current_method, env, st, declaration)?;
+            Ok(Statement::Seq {
+                stat1: Box::new(stat1),
+                stat2: Box::new(stat2),
+            })
+        }
         Statement::Declare { type_, var , info} => {
             env.declare_var(var.clone(), type_.type_of())?;
             Ok(Statement::Declare { type_, var, info })
@@ -245,7 +263,7 @@ fn type_statement(
         Statement::Assign { lhs, rhs , info} => {
             let lhs = type_lhs(lhs, env, st)?;
             let rhs = type_rhs(rhs, env, st, declaration)?;
-            matches_type(rhs.type_of(), &lhs, st)?;
+            matches_type(&rhs, &lhs, st)?;
             Ok(Statement::Assign { lhs, rhs, info })
         }
         Statement::Call { invocation, info } => {
@@ -315,7 +333,7 @@ fn type_statement(
         Statement::Continue { info } => Ok(Statement::Continue { info}),
         Statement::Break { info } => Ok(Statement::Break { info }),
         Statement::Return { expression, info } => match (is_constructor, expression) {
-            (true, Some(return_value)) => Err(error::unexpected_return_value(&return_value)),
+            (true, Some(return_value)) => Err(error::unexpected_return_value(&return_value, info)),
             (true, None) => {
                 let this_type = current_method.type_of();
                 let this = this_str();
@@ -339,7 +357,7 @@ fn type_statement(
             }
             (false, None) => {
                 if !current_method.is_of_type(RuntimeType::VoidRuntimeType, st) {
-                    Err(error::expected_return_value_error(current_method.type_of()))
+                    Err(error::expected_return_value_error(current_method.type_of(), info))
                 } else {
                     Ok(Statement::Return { expression: None, info })
                 }
@@ -381,22 +399,6 @@ fn type_statement(
                 body: Box::new(body),
             })
         }
-        Statement::Seq { stat1, stat2 } => {
-            let stat1 = type_statement(
-                *stat1,
-                is_constructor,
-                current_method.clone(),
-                env,
-                st,
-                declaration,
-            )?;
-            let stat2 =
-                type_statement(*stat2, is_constructor, current_method, env, st, declaration)?;
-            Ok(Statement::Seq {
-                stat1: Box::new(stat1),
-                stat2: Box::new(stat2),
-            })
-        }
     }
 }
 
@@ -415,7 +417,7 @@ fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Lhs
         } => {
             let var_type = env.get_var_type(&var)?;
             let class_name = var_type.get_reference_type().ok_or_else(|| {
-                error::unification_error(RuntimeType::REFRuntimeType, var_type.clone())
+                error::unification_error(RuntimeType::REFRuntimeType, var_type.clone(), info)
             })?;
 
             // something's going to need to be changed here due to inheritance of fields
@@ -428,13 +430,13 @@ fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Lhs
                     info
                 })
             } else {
-                Err(error::unresolved_field_error(&class_name, &field))
+                Err(error::unresolved_field_error(&class_name, &field, info))
             }
         }
         Lhs::LhsElem { var, index, info, .. } => {
             let type_ = env.get_var_type(&var)?;
             let inner_type = type_.get_inner_array_type().ok_or_else(|| {
-                error::unification_error(RuntimeType::ARRAYRuntimeType, type_.clone())
+                error::unification_error(RuntimeType::ARRAYRuntimeType, type_.clone(), info)
             })?;
             let index = type_expression(index, env, st)?;
             matches_type(&index, RuntimeType::IntRuntimeType, st)?;
@@ -463,7 +465,7 @@ fn type_rhs(
             let var = type_expression(var.into(), env, st)?;
             let var_type = var.type_of();
             let class_name = var_type.as_reference_type().ok_or_else(|| {
-                error::unification_error(RuntimeType::REFRuntimeType, var_type.clone())
+                error::unification_error(RuntimeType::REFRuntimeType, var_type.clone(), info)
             })?;
             if let Some((_, field_type)) = st.lookup_field(class_name, &field) {
                 Ok(Rhs::RhsField {
@@ -473,14 +475,14 @@ fn type_rhs(
                     info
                 })
             } else {
-                Err(error::unresolved_field_error(class_name, &field))
+                Err(error::unresolved_field_error(class_name, &field, info))
             }
         }
         Rhs::RhsElem { var, index, info, .. } => {
             let var = type_expression(var.into(), env, st)?;
             let var_type = var.type_of();
             let inner_type = var_type.get_inner_array_type().ok_or_else(|| {
-                error::unification_error(RuntimeType::ARRAYRuntimeType, var_type.clone())
+                error::unification_error(RuntimeType::ARRAYRuntimeType, var_type.clone(), info)
             })?;
             let index = type_expression(index.into(), env, st)?;
             matches_type(&index, RuntimeType::IntRuntimeType, st)?;
@@ -624,7 +626,7 @@ fn type_expression(
             let array = env.get_var_type(&domain)?;
             let inner_type = array
                 .get_inner_array_type()
-                .ok_or(unification_error(RuntimeType::ARRAYRuntimeType, array))?;
+                .ok_or(unification_error(RuntimeType::ARRAYRuntimeType, array, info))?;
             let mut env = env.clone();
 
             env.declare_var(elem.clone(), inner_type)?;
@@ -652,7 +654,7 @@ fn type_expression(
             let array = env.get_var_type(&domain)?;
             let inner_type = array
                 .get_inner_array_type()
-                .ok_or(unification_error(RuntimeType::ARRAYRuntimeType, array))?;
+                .ok_or(unification_error(RuntimeType::ARRAYRuntimeType, array, info))?;
             let mut env = env.clone();
 
             env.declare_var(elem.clone(), inner_type)?;

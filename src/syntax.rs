@@ -67,7 +67,7 @@ pub enum Declaration {
 }
 
 impl Declaration {
-    pub fn as_class(&self) -> Option<Rc<Class>> {
+    pub fn try_into_class(&self) -> Option<Rc<Class>> {
         if let Declaration::Class(class) = self {
             Some(class.clone())
         } else {
