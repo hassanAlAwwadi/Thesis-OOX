@@ -35,7 +35,7 @@ pub trait Typeable {
             (StringRuntimeType, REFRuntimeType) => true,
             (ARRAYRuntimeType, REFRuntimeType) => true,
             // Matching ARRAY types
-            (ARRAYRuntimeType, (ArrayRuntimeType { .. })) => true,
+            (ARRAYRuntimeType, ArrayRuntimeType { .. }) => true,
             (ArrayRuntimeType { .. }, ARRAYRuntimeType) => true,
             (ReferenceRuntimeType { type_: a }, ReferenceRuntimeType { type_: b}) => st.subtypes[&b].contains(&a),
             (a, b) => a == b,
@@ -204,7 +204,6 @@ impl Typeable for Invocation {
                 rhs,
                 ..
             } => {
-                dbg!(lhs, rhs);
                 let (_, (_, method)) = resolved
                     .iter()
                     .next()

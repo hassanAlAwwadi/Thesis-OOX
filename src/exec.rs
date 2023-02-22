@@ -42,7 +42,7 @@ use crate::{
     },
     typeable::{runtime_to_nonvoidtype, Typeable},
     typing::type_compilation_unit,
-    utils, z3_checker, FILE_NAMES,
+    utils, z3_checker, FILE_NAMES, statistics::Statistics,
 };
 
 const NULL: Expression = Expression::Lit {
@@ -176,6 +176,10 @@ where
         self.last_value += T::one();
         self.last_value.clone()
     }
+
+    fn current_value(&self) -> T {
+        self.last_value.clone()
+    }
 }
 
 // perhaps separate program from this structure, such that we can have multiple references to it.
@@ -239,6 +243,7 @@ fn sym_exec(
     st: &SymbolTable,
     root_logger: Logger,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
+    statistics: &mut Statistics,
 ) -> SymResult {
     let mut remaining_states: Vec<State> = vec![];
     let mut state = state;
@@ -247,6 +252,7 @@ fn sym_exec(
         // dbg!(&remaining_states.len());
         if state.path_length >= k {
             // finishing current branch
+            statistics.measure_finish();
             if let Some(next_state) = remaining_states.pop() {
                 state = next_state;
             } else {
@@ -255,7 +261,7 @@ fn sym_exec(
             }
         }
 
-        let next = action(&mut state, program, k, st);
+        let next = action(&mut state, program, k, st, statistics);
         match next {
             ActionResult::FunctionCall(next) => {
                 // function call or return
@@ -280,6 +286,7 @@ fn sym_exec(
             ActionResult::Continue => {
                 if let Some(neighbours) = flows.get(&state.pc) {
                     //dbg!(&neighbours);
+                    statistics.measure_branches((neighbours.len() - 1) as u32);
 
                     let mut neighbours = neighbours.iter();
                     let first_neighbour = neighbours.next().unwrap();
@@ -299,6 +306,7 @@ fn sym_exec(
                     // Function exit of the main function under verification
                     if let CFGStatement::FunctionExit { .. } = &program[&state.pc] {
                         // Valid program exit, continue
+                        statistics.measure_finish();
                         if let Some(next_state) = remaining_states.pop() {
                             state = next_state;
                         } else {
@@ -315,6 +323,7 @@ fn sym_exec(
             }
             ActionResult::InfeasiblePath => {
                 // Finish this branch
+                statistics.measure_prune();
                 if let Some(next_state) = remaining_states.pop() {
                     state = next_state;
                 } else {
@@ -323,6 +332,7 @@ fn sym_exec(
                 }
             }
             ActionResult::Finish => {
+                statistics.measure_finish();
                 if let Some(next_state) = remaining_states.pop() {
                     state = next_state;
                 } else {
@@ -333,6 +343,8 @@ fn sym_exec(
 
             ActionResult::ArrayInitialization(array_name) => {
                 const N: u64 = 3;
+                statistics.measure_branches((N + 1) as u32); // including null, so + 1
+                info!(state.logger, "Symbolic array initialisation of {} into {} paths", array_name, N + 1);
                 let StackFrame { params, .. } = state.stack.last_mut().unwrap();
 
                 let array_type = params[&array_name].type_of();
@@ -383,6 +395,7 @@ fn sym_exec(
             ActionResult::StateSplit((guard, true_lhs, false_lhs, lhs_name)) => {
                 // split up the paths into two, one where guard == true and one where guard == false.
                 // Do not increase path_length
+                statistics.measure_branches(2);
                 let mut true_state = state.clone();
                 true_state.path_id = path_counter.borrow_mut().next_id();
                 let feasible_path = exec_assume(&mut true_state, guard.clone(), st);
@@ -404,6 +417,8 @@ fn sym_exec(
                 let alias = &state.alias_map[&symbolic_object_ref];
 
                 assert!(resulting_alias.len() > 1);
+                
+                statistics.measure_branches(resulting_alias.len() as u32);
 
                 debug!(state.logger, "Splitting up current path into {:?} paths due to polymorphic method invocation", resulting_alias.len();
                     "object" => #?symbolic_object_ref,
@@ -488,7 +503,11 @@ enum ActionResult {
     InfeasiblePath,
     Finish,
     ArrayInitialization(Identifier),
-    StateSplit((Rc<Expression>, Rc<Expression>, Rc<Expression>, Identifier)), // ?
+    /// This occurs when a lhs in a statement is a conditional
+    /// and requires the state to split into paths where the condition is true and false.
+    /// A lhs becomes a conditional for example when `Point p := a[i];` where `i` is a symbolic variable.
+    /// When later on p is referenced, e.g. `p.x` is called, it must be determined which element of a is referred to.
+    StateSplit((Rc<Expression>, Rc<Expression>, Rc<Expression>, Identifier)), 
     StateSplitObjectTypes {
         symbolic_object_ref: Identifier, // alias map entry
         resulting_alias: HashMap<(Identifier, Identifier), Vec<Rc<Expression>>>, // (class_name, method) -> resulting objects.
@@ -500,6 +519,7 @@ fn action(
     program: &HashMap<u64, CFGStatement>,
     k: u64,
     st: &SymbolTable,
+    statistics: &mut Statistics
 ) -> ActionResult {
     let pc = state.pc;
     let action = &program[&pc];
@@ -584,7 +604,7 @@ fn action(
         CFGStatement::Statement(Statement::Assert { assertion , ..}) => {
             let expression = prepare_assert_expression(state, Rc::new(assertion.clone()), st);
 
-            let is_valid = eval_assertion(state, expression, st);
+            let is_valid = eval_assertion(state, expression, st, statistics);
             if !is_valid {
                 return ActionResult::InvalidAssertion;
             }
@@ -646,8 +666,9 @@ fn action(
                         state.constraints.insert(expression.deref().clone());
                     }
                 } else {
+                    // Assert that requires is true
                     let requires = prepare_assert_expression(state, requires, st);
-                    let is_valid = eval_assertion(state, requires.clone(), st);
+                    let is_valid = eval_assertion(state, requires.clone(), st, statistics);
                     if !is_valid {
                         return ActionResult::InvalidAssertion;
                     }
@@ -670,7 +691,7 @@ fn action(
             } = state.stack.last().unwrap();
             if let Some(post_condition) = current_member.post_condition() {
                 let expression = prepare_assert_expression(state, post_condition, st);
-                let is_valid = eval_assertion(state, expression, st);
+                let is_valid = eval_assertion(state, expression, st, statistics);
                 if !is_valid {
                     // postcondition invalid
                     return ActionResult::InvalidAssertion;
@@ -707,7 +728,7 @@ fn action(
         CFGStatement::Statement(Statement::Call { invocation , info}) => {
             exec_invocation(state, invocation, &program, pc, None, st)
         }
-        CFGStatement::Statement(Statement::Throw { message, .. }) => exec_throw(state, st, message),
+        CFGStatement::Statement(Statement::Throw { message, .. }) => exec_throw(state, st, message, statistics),
         CFGStatement::TryCatch(_, _, catch_entry_pc, _) => {
             state
                 .exception_handler
@@ -724,7 +745,7 @@ fn action(
     }
 }
 
-fn exec_throw(state: &mut State, st: &SymbolTable, message: &str) -> ActionResult {
+fn exec_throw(state: &mut State, st: &SymbolTable, message: &str, statistics: &mut Statistics) -> ActionResult {
     if let Some(ExceptionHandlerEntry {
         catch_pc,
         mut current_depth,
@@ -739,7 +760,7 @@ fn exec_throw(state: &mut State, st: &SymbolTable, message: &str) -> ActionResul
             if let Some(exceptional) = stack_frame.current_member.exceptional() {
                 let assertion = prepare_assert_expression(state, exceptional, st);
                 //dbg!(&assertion);
-                let is_valid = eval_assertion(state, assertion, st);
+                let is_valid = eval_assertion(state, assertion, st, statistics);
                 if !is_valid {
                     error!(state.logger, "Exceptional error: {:?}", message);
                     return ActionResult::InvalidAssertion;
@@ -754,7 +775,7 @@ fn exec_throw(state: &mut State, st: &SymbolTable, message: &str) -> ActionResul
             if let Some(exceptional) = stack_frame.current_member.exceptional() {
                 let assertion = prepare_assert_expression(state, exceptional, st);
                 //dbg!(&assertion);
-                let is_valid = eval_assertion(state, assertion, st);
+                let is_valid = eval_assertion(state, assertion, st, statistics);
                 if !is_valid {
                     error!(state.logger, "Exceptional error: {:?}", message);
                     return ActionResult::InvalidAssertion;
@@ -767,9 +788,10 @@ fn exec_throw(state: &mut State, st: &SymbolTable, message: &str) -> ActionResul
     }
 }
 
-fn eval_assertion(state: &mut State, expression: Rc<Expression>, st: &SymbolTable) -> bool {
+fn eval_assertion(state: &mut State, expression: Rc<Expression>, st: &SymbolTable, statistics: &mut Statistics) -> bool {
     // dbg!("invoke Z3 with:", &expression);
     // dbg!(&alias_map);
+    statistics.measure_veficiation();
 
     if *expression == true_lit() {
         false
@@ -786,21 +808,25 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, st: &SymbolTabl
         } else {
             // dbg!(&symbolic_refs);
             let expressions = concretizations(expression.clone(), &symbolic_refs, &state.alias_map);
+            // This introduces branching in computation for each concretization proposed:
+            statistics.measure_branches(expressions.len() as u32);
             // dbg!(&expressions);
 
             for expression in expressions {
                 let expression = evaluate(state, expression, st);
                 if *expression == true_lit() {
+                    // Invalid
+                    statistics.measure_local_solve();
                     return false;
                 } else if *expression == false_lit() {
-                    // valid, keep going
-                    // dbg!("locally solved!");
+                    // valid, continue
+                    statistics.measure_local_solve();
                 } else {
-                    // panic!("should not do that right now");
+                    statistics.measure_invoke_z3();
                     let result = z3_checker::verify(&expression);
                     if let SatResult::Unsat = result {
+                        // valid, continue
                     } else {
-                        // panic!("invalid");
                         return false;
                     }
                 }
@@ -1334,7 +1360,7 @@ pub fn init_symbolic_reference(
         } else {
             panic!("Cannot initialize type {:?}", type_ref);
         };
-        dbg!(&st);
+        
         // initialise new objects, one for each possible type (sub)class of class_name
         let new_object_references = st
             .get_all_instance_types(decl_name)
@@ -1887,14 +1913,14 @@ fn verify(
     // );
 
     let mut builder = TerminalLoggerBuilder::new();
-    builder.level(Severity::Debug);
+    builder.level(Severity::Info);
     builder.destination(Destination::Stdout);
     builder.format(sloggers::types::Format::Full);
     builder.source_location(sloggers::types::SourceLocation::FileAndLine);
 
     let root_logger = builder.build().unwrap();
 
-    let mut state = State {
+    let state = State {
         pc,
         stack: vec![StackFrame {
             pc,
@@ -1914,16 +1940,29 @@ fn verify(
     };
 
     let path_counter = Rc::new(RefCell::new(IdCounter::new(0)));
+    let mut statistics = Statistics::default();
 
-    return Ok(sym_exec(
+    let sym_result = sym_exec(
         state,
         &program,
         &flows,
         k,
         &symbol_table,
         root_logger,
-        path_counter,
-    ));
+        path_counter.clone(),
+        &mut statistics,
+    );
+
+    println!("Statistics");
+    println!("  Final result:     {}", if sym_result == SymResult::Valid { "VALID" } else { "INVALID "});
+    println!("  #branches:        {}", statistics.number_of_branches);
+    println!("  #prunes:          {}", statistics.number_of_prunes);
+    println!("  #complete_paths:  {}", statistics.number_of_complete_paths);
+    println!("  #locally_solved:  {}", statistics.number_of_local_solves);
+    println!("  #Z3 invocations:  {}", statistics.number_of_z3_invocations);
+    println!("  #paths explored:  {}", path_counter.borrow().current_value());
+
+    return Ok(sym_result);
 }
 
 #[test]

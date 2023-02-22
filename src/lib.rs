@@ -28,6 +28,8 @@ mod typing;
 mod error;
 mod positioned;
 
+mod statistics;
+
 #[macro_use]
 extern crate pest_derive;
 
