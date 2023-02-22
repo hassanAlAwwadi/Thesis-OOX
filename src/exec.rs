@@ -2266,47 +2266,47 @@ fn sym_exec_inheritance() {
         verify(&path, "Main", "test1", k).unwrap(),
         SymResult::Valid
     );
-    // assert_eq!(
-    //     verify(&path, "Main", "test1_invalid", k).unwrap(),
-    //     SymResult::Invalid
-    // );
-    // assert_eq!(
-    //     verify(&path, "Main", "test2a", k).unwrap(),
-    //     SymResult::Valid
-    // );
+    assert_eq!(
+        verify(&path, "Main", "test1_invalid", k).unwrap(),
+        SymResult::Invalid
+    );
+    assert_eq!(
+        verify(&path, "Main", "test2a", k).unwrap(),
+        SymResult::Valid
+    );
 
-    // assert_eq!(
-    //     verify(&path, "Main", "test2b", k).unwrap(),
-    //     SymResult::Valid
-    // );
+    assert_eq!(
+        verify(&path, "Main", "test2b", k).unwrap(),
+        SymResult::Valid
+    );
 
-    // assert_eq!(
-    //     verify(&path, "Main", "test2b_invalid", k).unwrap(),
-    //     SymResult::Invalid
-    // );
+    assert_eq!(
+        verify(&path, "Main", "test2b_invalid", k).unwrap(),
+        SymResult::Invalid
+    );
 
-    // assert_eq!(
-    //     verify(&path, "Main", "test3", k).unwrap(),
-    //     SymResult::Valid
-    // );
+    assert_eq!(
+        verify(&path, "Main", "test3", k).unwrap(),
+        SymResult::Valid
+    );
 
-    // assert_eq!(
-    //     verify(&path, "Main", "test4_valid", k).unwrap(),
-    //     SymResult::Valid
-    // );
-    // assert_eq!(
-    //     verify(&path, "Main", "test4_invalid", k).unwrap(),
-    //     SymResult::Invalid
-    // );
-    // assert_eq!(
-    //     verify(&path, "Main", "test5", k).unwrap(),
-    //     SymResult::Valid
-    // );
+    assert_eq!(
+        verify(&path, "Main", "test4_valid", k).unwrap(),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify(&path, "Main", "test4_invalid", k).unwrap(),
+        SymResult::Invalid
+    );
+    assert_eq!(
+        verify(&path, "Main", "test5", k).unwrap(),
+        SymResult::Valid
+    );
 
-    // assert_eq!(
-    //     verify(&path, "Main", "test6", k).unwrap(),
-    //     SymResult::Valid
-    // );
+    assert_eq!(
+        verify(&path, "Main", "test6", k).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
@@ -2400,6 +2400,15 @@ fn benchmark_col_25_test3() {
     let k = 15000;
     assert_eq!(
         verify("./benchmarks/defects4j/collections_25.oox", "Test", "test3", k).unwrap(),
+        SymResult::Valid
+    );
+}
+
+#[test]
+fn any_linked_list() {
+    let k = 40;
+    assert_eq!(
+        verify("./benchmarks/experiment1/anyLinkedList.oox", "Main", "test2", k).unwrap(),
         SymResult::Valid
     );
 }
