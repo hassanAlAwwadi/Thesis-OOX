@@ -9,12 +9,16 @@ interface Comparator {
     int compare(int o1, int o2);
 }
 
+class ComparatorImpl implements Comparator {
+    int compare(int o1, int o2) { ; }
+}
+
 class IteratorList {
     Iterator[] elements;
-    Iterator capacity;
-    Iterator size;
+    int capacity;
+    int size;
 
-    IteratorList(Iterator capacity) 
+    IteratorList(int capacity) 
     {
         this.elements := new Iterator[capacity];
         this.capacity := capacity;
@@ -25,13 +29,12 @@ class IteratorList {
         int i := this.size;
         int oldSize := this.size;
         this.size := oldSize + 1;
-        int[] elements := this.elements;
-        int[] a := elements;
-        a[i] := element;
+        Iterator[] elements := this.elements;
+        elements[i] := element;
     }
 
     Iterator get(int index) {
-        int[] elements := this.elements;
+        Iterator[] elements := this.elements;
         Iterator element := elements[index];
         return element;
     }
@@ -96,7 +99,7 @@ class CollatingIterator implements Iterator {
 
     void setComparator(Comparator comp) {
         this.checkNotStarted();
-        this.comparator := comp;
+        this.comp := comp;
     }
 
     void checkNotStarted() {
@@ -207,14 +210,14 @@ class CollatingIterator implements Iterator {
             if (valueSetI == false) {
                 this.set(i);
             }
-            bool valueSetI := valueSet.get(i);
+            valueSetI := valueSet.get(i);
             if (valueSetI) {
                 if (leastIndex == -1) {
                     leastIndex := i;
                     leastObject := values.get(i);
                 } else {
                     int curObject := values.get(i);
-                    Comparator comparator := this.comparator;
+                    Comparator comparator := this.comp;
                     if (comparator == null) {
                         throw "new NullPointerException(You must invoke setComparator() to set a comparator first.";
                     }
@@ -273,7 +276,7 @@ class BitSet {
     }
 
     void set(int index) {
-        int[] elements := this.elements;
+        bool[] elements := this.elements;
         elements[index] := true;
     }
 }

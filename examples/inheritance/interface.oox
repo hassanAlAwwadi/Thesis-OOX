@@ -50,9 +50,9 @@ class Main {
     myPig.eat();
     myPig.sleep();
 
-    bool hasMadeSound := myPig.hasMadeSound;
-    bool hasSlept := myPig.hasSlept;
-    bool hasEaten := myPig.hasEaten;
+    hasMadeSound := myPig.hasMadeSound;
+    hasSlept := myPig.hasSlept;
+    hasEaten := myPig.hasEaten;
 
     assert hasMadeSound == true && hasSlept == true && hasEaten == true;
   }
