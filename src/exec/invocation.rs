@@ -7,8 +7,8 @@ use crate::{
     cfg::CFGStatement,
     eval::evaluate,
     exec::State,
-    symbolic_table::SymbolicTable,
-    syntax::{Declaration, DeclarationMember, Invocation, Lhs, RuntimeType, Parameter, Expression, Identifier}, stack::lookup_in_stack, typeable::Typeable, utils,
+    symbol_table::SymbolTable,
+    syntax::{Declaration, DeclarationMember, Invocation, Lhs, RuntimeType, Parameter, Expression, Identifier, Method}, stack::lookup_in_stack, typeable::Typeable, utils,
 };
 
 use super::{exec_method, exec_static_method, find_entry_for_static_invocation, ActionResult, remove_symbolic_null};
@@ -19,53 +19,43 @@ use super::{exec_method, exec_static_method, find_entry_for_static_invocation, A
 pub(super) fn single_method_invocation(
     state: &mut State,
     invocation: &Invocation,
-    resolved: &(Declaration, Rc<DeclarationMember>),
+    resolved: &(Declaration, Rc<Method>),
     return_point: u64,
     lhs: Option<Lhs>,
     program: &HashMap<u64, CFGStatement>,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> u64 {
     let (
         declaration,
         resolved_method,
     ) = resolved;
     let class_name = &declaration.name();
-    if let DeclarationMember::Method {
-        is_static,
-        return_type,
-        name,
-        params,
-        specification,
-        body,
-    } = resolved_method.as_ref()
-    {
-        if *is_static {
-            // evaluate arguments
-            let arguments = invocation
-                .arguments()
-                .into_iter()
-                .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
-                .collect::<Vec<_>>();
+    
+    if resolved_method.is_static {
+        // evaluate arguments
+        let arguments = invocation
+            .arguments()
+            .into_iter()
+            .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
+            .collect::<Vec<_>>();
 
-            exec_static_method(
-                state,
-                return_point,
-                resolved_method.clone(),
-                lhs,
-                &arguments,
-                &params,
-                st,
-            );
-            let next_entry =
-                find_entry_for_static_invocation(class_name, invocation.identifier(), program);
+        exec_static_method(
+            state,
+            return_point,
+            resolved_method.clone(),
+            lhs,
+            &arguments,
+            &resolved_method.params,
+            st,
+        );
+        let next_entry =
+            find_entry_for_static_invocation(class_name, invocation.identifier(), program);
 
-            return next_entry;
-        } else {
-            non_static_resolved_method_invocation(state, invocation, class_name, resolved_method.clone(), params, return_point, lhs, program, st)
-        }
+        return next_entry;
     } else {
-        panic!();
+        non_static_resolved_method_invocation(state, invocation, class_name, resolved_method.clone(), return_point, lhs, program, st)
     }
+
 }
 
 /// Non-static case, multiple candidate methods that could be called
@@ -74,20 +64,20 @@ pub(super) fn single_method_invocation(
 /// depending on the type of the object.
 pub(super) fn multiple_method_invocation(
     state: &mut State,
-    invocation_lhs: &String,
+    invocation_lhs: &Identifier,
     invocation: &Invocation,
-    potential_methods: &HashMap<Identifier, (Declaration, Rc<DeclarationMember>)>,
+    potential_methods: &HashMap<Identifier, (Declaration, Rc<Method>)>,
     return_point: u64,
     lhs: Option<Lhs>,
     program: &HashMap<u64, CFGStatement>,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> ActionResult {
     let object = lookup_in_stack(invocation_lhs, &state.stack).unwrap();
     // object can be either a concrete reference to a heap object, or a symbolic object
     // the latter means that we have to split states here, one path for every alias object types,
     // if there is only one possible then we can also continue with that path
     match object.as_ref() {
-        Expression::Ref { ref_, type_ } => {
+        Expression::Ref { ref_, type_, .. } => {
             let this = (type_.clone(), invocation_lhs.to_owned());
 
             let reference_type_name = type_.as_reference_type().expect("expected reference type");
@@ -98,28 +88,24 @@ pub(super) fn multiple_method_invocation(
             let (
                 declaration,
                 member,
-            ) = method; // i don't get this
+            ) = method;
 
             let decl_name = declaration.name();
 
-            if let DeclarationMember::Method { params, .. } = member.as_ref() {
-                let next_entry = non_static_resolved_method_invocation(
-                    state,
-                    invocation,
-                    decl_name,
-                    member.clone(),
-                    params,
-                    return_point,
-                    lhs,
-                    program,
-                    st,
-                );
-                return ActionResult::FunctionCall(next_entry);
-            } else {
-                panic!()
-            }
+            let next_entry = non_static_resolved_method_invocation(
+                state,
+                invocation,
+                decl_name,
+                member.clone(),
+                return_point,
+                lhs,
+                program,
+                st,
+            );
+            return ActionResult::FunctionCall(next_entry);
+            
         }
-        Expression::SymbolicRef { var, type_ } => {
+        Expression::SymbolicRef { var, type_, ..  } => {
             remove_symbolic_null(&mut state.alias_map, invocation_lhs);
             let alias_entry = &state.alias_map[var];
 
@@ -140,7 +126,6 @@ pub(super) fn multiple_method_invocation(
                     invocation,
                     decl_name,
                     member.clone(),
-                    member.params().unwrap(),
                     return_point,
                     lhs,
                     program,
@@ -152,7 +137,7 @@ pub(super) fn multiple_method_invocation(
                 // dbg!(&alias_entry.aliases.iter().map(|a| (a.clone(), Typeable::type_of(a.as_ref()))).collect_vec());
                 // dbg!(potential_methods.keys());
                 let resulting_alias = utils::group_by(alias_entry.aliases.iter().map(|alias| (potential_methods.get(alias.type_of().as_reference_type().expect("expected reference type")).map(|(d, dm)| {
-                    (d.name().clone(), dm.name().clone())
+                    (d.name().clone(), dm.name.clone())
                 }).expect("Could not find method for the type"), alias.clone())));
 
                 if resulting_alias.len() == 1 {
@@ -172,7 +157,6 @@ pub(super) fn multiple_method_invocation(
                         invocation,
                         decl_name,
                         member.clone(),
-                        member.params().unwrap(),
                         return_point,
                         lhs,
                         program,
@@ -219,13 +203,12 @@ fn find_unique_type(aliases: &Vec<Rc<Expression>>) -> Option<RuntimeType> {
 pub(super) fn non_static_resolved_method_invocation(
     state: &mut State,
     invocation: &Invocation,
-    class_name: &String,
-    resolved_method: Rc<DeclarationMember>,
-    params: &[Parameter],
+    class_name: &Identifier,
+    resolved_method: Rc<Method>,
     return_point: u64,
     lhs: Option<Lhs>,
     program: &HashMap<u64, CFGStatement>,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> u64 {
     debug!(state.logger, "non-static method invocation");
 
@@ -247,7 +230,7 @@ pub(super) fn non_static_resolved_method_invocation(
         RuntimeType::ReferenceRuntimeType {
             type_: class_name.clone(),
         },
-        invocation_lhs.to_owned(),
+        invocation_lhs.to_owned().into(),
     );
     
 
@@ -257,7 +240,6 @@ pub(super) fn non_static_resolved_method_invocation(
         resolved_method,
         lhs,
         &arguments,
-        &params,
         st,
         this,
     );

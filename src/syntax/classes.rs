@@ -1,26 +1,17 @@
-use std::{rc::Rc, cell::RefCell};
+use std::{cell::RefCell, rc::Rc};
 
-use super::{Identifier, DeclarationMember, Interface};
+use crate::positioned::SourcePos;
+
+use super::{DeclarationMember, Identifier, Interface};
 use std::fmt::Debug;
 
-
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Class {
     pub name: Identifier,
-    pub extends: Option<Rc<Class>>,
-    pub subclasses: RefCell<Vec<Rc<Class>>>, // classes that extend from this class.
-    pub implements: Vec<Rc<Interface>>,
-    pub members: Vec<Rc<DeclarationMember>>,
-}
+    pub members: Vec<DeclarationMember>,
 
-impl Debug for Class {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Class")
-            .field("name", &self.name)
-            .field("extends",&self.extends.is_some())
-            .field("subclasses", &self.subclasses.borrow().len())
-            .field("implements", &self.implements.len())
-            .field("members", &self.members)
-            .finish()
-    }
+    pub extends: Option<Identifier>,
+    pub implements: Vec<Identifier>,
+
+    pub info: SourcePos,
 }

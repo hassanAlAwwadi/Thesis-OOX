@@ -2,60 +2,49 @@ use std::{cell::RefCell, rc::Rc};
 
 use itertools::Itertools;
 
-use super::{classes::Class, Identifier, NonVoidType, Parameter, Statement, Type};
+use super::{
+    classes::Class, AbstractMethod, Identifier, Method, NonVoidType, Parameter, Statement, Type,
+};
 use std::fmt::Debug;
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct Interface {
     pub name: Identifier,
-    pub extends: Vec<Rc<Interface>>, // interfaces that this interface extends
-    pub subinterfaces: RefCell<Vec<Rc<Interface>>>, // interfaces that extend this interface
-    pub implemented: RefCell<Vec<Rc<Class>>>, // classes that implement this interface
-    pub members: Vec<Rc<InterfaceMember>>,
+    pub members: Vec<InterfaceMember>,
+
+    pub extends: Vec<Identifier>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum InterfaceMember {
-    Method(InterfaceMethod),
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct InterfaceMethod {
-    pub type_: Type,
-    pub name: Identifier,
-    pub parameters: Vec<Parameter>,
-    pub body: Option<Statement>,
-
+    DefaultMethod(Rc<Method>),
+    AbstractMethod(Rc<AbstractMethod>),
 }
 
 /// Searches for interface methods, with the name method_name.
 /// Suboptimal return of InterfaceMethods -- wrap in Rc
+/// Does it search for default or abstract?
 pub fn find_interface_method<'a>(
     method_name: &'a str,
-    members: &'a Vec<Rc<InterfaceMember>>,
-) -> Option<InterfaceMethod> {
-    members
-        .iter()
-        .find_map(|member| {
-            let InterfaceMember::Method(interface@InterfaceMethod{ name, body, .. }) = member.as_ref();
-            if name == method_name {
-                return Some(interface);
-            }
-            
-            None
-        })
-        .cloned()
+    members: &'a Vec<InterfaceMember>,
+) -> Option<InterfaceMember> {
+    members.iter().find_map(|member| match member {
+        InterfaceMember::DefaultMethod(method) if method.name == method_name => {
+            Some(member.clone())
+        }
+        InterfaceMember::AbstractMethod(abstract_method) if abstract_method.name == method_name => {
+            Some(member.clone())
+        }
+        _ => None,
+    })
 }
-
 
 impl Debug for Interface {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Interface")
             .field("name", &self.name)
-            .field("extends", &self.extends.iter().map(|interface| &interface.name).collect_vec())
-            .field("subinterfaces", &self.subinterfaces.borrow().iter().map(|interface| &interface.name).collect_vec())
-            .field("implemented", &self.implemented.borrow().iter().map(|interface| &interface.name).collect_vec())
             .field("members", &self.members)
+            .field("extends", &self.extends)
             .finish()
     }
 }

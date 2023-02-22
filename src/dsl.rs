@@ -2,7 +2,7 @@
 /// It can be used to reduce boilerplate code.
 use std::rc::Rc;
 
-use crate::syntax::{BinOp, Expression, Lit, RuntimeType, UnOp, Identifier};
+use crate::{syntax::{BinOp, Expression, Lit, RuntimeType, UnOp, Identifier}, positioned::SourcePos};
 
 /// Not the expression.
 /// e becomes !e
@@ -11,6 +11,7 @@ pub(crate) fn negate(expression: Rc<Expression>) -> Expression {
         un_op: UnOp::Negate,
         value: expression,
         type_: RuntimeType::BoolRuntimeType,
+        info: SourcePos::UnknownPosition
     }
 }
 
@@ -20,6 +21,7 @@ pub(crate) fn negative(expression: Rc<Expression>) -> Expression {
         un_op: UnOp::Negative,
         value: expression,
         type_: RuntimeType::BoolRuntimeType,
+        info: SourcePos::UnknownPosition
     }
 }
 
@@ -35,6 +37,7 @@ where
         true_: e1.into(),
         false_: e2.into(),
         type_: RuntimeType::ANYRuntimeType,
+        info: SourcePos::UnknownPosition
     }
 }
 
@@ -48,6 +51,7 @@ where
         lhs: e1.into(),
         rhs: e2.into(),
         type_,
+        info: SourcePos::UnknownPosition
     }
 }
 pub(crate) fn equal<E1, E2>(e1: E1, e2: E2) -> Expression
@@ -92,7 +96,7 @@ where
 
 
 pub(crate) fn size_of(var: Identifier) -> Expression {
-    Expression::SizeOf { var, type_: RuntimeType::IntRuntimeType }
+    Expression::SizeOf { var, type_: RuntimeType::IntRuntimeType, info: SourcePos::UnknownPosition }
 }
 
 
@@ -141,5 +145,6 @@ pub(crate) fn toIntExpr(int_value: i64) -> Expression {
     Expression::Lit {
         lit: Lit::IntLit { int_value },
         type_: RuntimeType::IntRuntimeType,
+        info: SourcePos::UnknownPosition
     }
 }

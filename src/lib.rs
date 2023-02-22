@@ -21,13 +21,21 @@ mod pretty_print;
 mod utils;
 
 mod concretization;
-mod symbolic_table;
+mod symbol_table;
 mod fold;
 mod exception_handler;
-
+mod typing;
+mod error;
+mod positioned;
 
 #[macro_use]
 extern crate pest_derive;
 
 
+use std::sync::Mutex;
+
+
+
 pub use z3_checker::playground;
+
+static FILE_NAMES: Mutex<String> = Mutex::new(String::new());

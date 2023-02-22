@@ -100,3 +100,7 @@ As a result of this you can't call this.foo(); in OOX even though this would be 
 // constructor:
 return this; is added to the CFG at some point (after parsing)
 in Analysis.hs @ 164
+
+
+// recursiveness
+in Rust there is no guaranteed tail call optimization, so some of the recursion in the original OOX has been implemented as loops

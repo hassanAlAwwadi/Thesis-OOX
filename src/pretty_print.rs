@@ -19,6 +19,7 @@ impl Debug for Expression {
                     lhs,
                     rhs,
                     type_,
+                    info
                 } => {
                     let op_str = match bin_op {
                         BinOp::Implies => "==>",
@@ -59,6 +60,7 @@ impl Debug for Expression {
                     un_op,
                     value,
                     type_,
+                    info
                 } => {
                     match un_op {
                         UnOp::Negative => write!(f, "-")?,
@@ -68,9 +70,9 @@ impl Debug for Expression {
                     helper(value, f)?;
                     write!(f, ")")?;
                 }
-                Expression::Var { var, type_ } => write!(f, "{}", var)?,
-                Expression::SymbolicVar { var, type_ } => write!(f, "${}", var)?,
-                Expression::Lit { lit, type_ } => match lit {
+                Expression::Var { var, type_, info } => write!(f, "{}", var)?,
+                Expression::SymbolicVar { var, type_, info } => write!(f, "${}", var)?,
+                Expression::Lit { lit, type_, info } => match lit {
                     Lit::NullLit => write!(f, "null")?,
                     Lit::BoolLit { bool_value } => write!(f, "{}", bool_value)?,
                     Lit::UIntLit { uint_value } => write!(f, "{}", uint_value)?,
@@ -80,13 +82,14 @@ impl Debug for Expression {
                     Lit::CharLit { char_value } => write!(f, "{}", char_value)?,
                 },
                 Expression::SizeOf { var, .. } => write!(f, "#{}", var)?,
-                Expression::Ref { ref_, type_ } => write!(f, "#{}", ref_)?,
-                Expression::SymbolicRef { var, type_ } => write!(f, "%{}", var)?,
+                Expression::Ref { ref_, type_, info } => write!(f, "#{}", ref_)?,
+                Expression::SymbolicRef { var, type_, info } => write!(f, "%{}", var)?,
                 Expression::Conditional {
                     guard,
                     true_,
                     false_,
                     type_,
+                    info
                 } => {
                     helper(guard, f)?;
                     write!(f, " ? ")?;
@@ -116,6 +119,7 @@ impl Debug for Expression {
                     domain,
                     formula,
                     type_,
+                    info
                 } => {
                     // exists elem, index : a : elem > 0
                     write!(f, "exists {}, {} : {} : ", elem, range, domain)?;
@@ -182,7 +186,7 @@ impl Display for RuntimeType {
             RuntimeType::UnknownRuntimeType => write!(f, "unknown"),
             RuntimeType::VoidRuntimeType => write!(f, "void"),
             RuntimeType::UIntRuntimeType => write!(f, "unsigned int"),
-            RuntimeType::IntRuntimeType => write!(f, "unsigned int"),
+            RuntimeType::IntRuntimeType => write!(f, "int"),
             RuntimeType::FloatRuntimeType => write!(f, "float"),
             RuntimeType::BoolRuntimeType => write!(f, "bool"),
             RuntimeType::StringRuntimeType => write!(f, "string"),
@@ -202,14 +206,15 @@ impl Display for RuntimeType {
 impl Display for Lhs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Lhs::LhsVar { var, type_ } => write!(f, "{}: {}", var, type_),
+            Lhs::LhsVar { var, type_, .. } => write!(f, "{}: {}", var, type_),
             Lhs::LhsField {
                 var,
                 var_type,
                 field,
                 type_,
+                ..
             } => write!(f, "{}.{}: {}.{}", var, field, var_type, type_),
-            Lhs::LhsElem { var, index, type_ } => {
+            Lhs::LhsElem { var, index, type_ , ..} => {
                 write!(f, "{}[{:?}]: {}", var, index, type_)
             }
         }
@@ -219,22 +224,24 @@ impl Display for Lhs {
 impl Display for Rhs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Rhs::RhsExpression { value, type_ } => {
+            Rhs::RhsExpression { value, type_, .. } => {
                 write!(f, "({:?}: {})", value, type_)
             }
-            Rhs::RhsField { var, field, type_ } => {
+            Rhs::RhsField { var, field, type_, .. } => {
                 write!(f, "{:?}.{} : {}", var, field, type_)
             }
-            Rhs::RhsElem { var, index, type_ } => {
+            Rhs::RhsElem { var, index, type_, .. } => {
                 write!(f, "{:?}[{:?}]: {}", var, index, type_)
             }
-            Rhs::RhsCall { invocation, type_ } => {
+            Rhs::RhsCall { invocation, type_, 
+                .. } => {
                 write!(f, "{}: {}", invocation, type_)
             }
             Rhs::RhsArray {
                 array_type,
                 sizes,
                 type_,
+                ..
             } => {
                 write!(f, "new {}", array_type.type_of())?;
                 for size in sizes {
@@ -286,6 +293,7 @@ impl Display for Invocation {
             Self::InvokeSuperConstructor {
                 arguments,
                 resolved,
+                ..
             } => {
                 write!(f, "super(")?;
                 for arg in arguments {
@@ -303,14 +311,17 @@ fn test() {
     let e = Expression::BinOp {
         bin_op: BinOp::Implies,
         lhs: Rc::new(Expression::Var {
-            var: "x".to_owned(),
+            var: "x".into(),
             type_: RuntimeType::ANYRuntimeType,
+            info: crate::positioned::SourcePos::UnknownPosition
         }),
         rhs: Rc::new(Expression::Var {
-            var: "y".to_owned(),
+            var: "y".into(),
             type_: RuntimeType::ANYRuntimeType,
+            info: crate::positioned::SourcePos::UnknownPosition
         }),
         type_: RuntimeType::ANYRuntimeType,
+        info: crate::positioned::SourcePos::UnknownPosition
     };
 
     let s = format!("{:?}", e);

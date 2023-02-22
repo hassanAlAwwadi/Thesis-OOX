@@ -52,9 +52,10 @@ pub fn concretizations<'a>(
     }
 }
 
+/// Replaces variables with their concretization in the expression.
 fn helper(
     expression: Rc<Expression>,
-    concretization: &HashMap<&String, &Rc<Expression>>,
+    concretization: &HashMap<&Identifier, &Rc<Expression>>,
 ) -> Rc<Expression> {
     match expression.as_ref() {
         Expression::SymbolicRef { var, .. } => concretization[&var].clone(),
@@ -63,20 +64,24 @@ fn helper(
             lhs,
             rhs,
             type_,
+            info
         } => Rc::new(Expression::BinOp {
             bin_op: bin_op.clone(),
             lhs: helper(lhs.clone(), concretization),
             rhs: helper(rhs.clone(), concretization),
             type_: type_.clone(),
+            info: *info,
         }),
         Expression::UnOp {
             un_op,
             value,
             type_,
+            info
         } => Rc::new(Expression::UnOp {
             un_op: un_op.clone(),
             value: helper(value.clone(), concretization),
             type_: type_.clone(),
+            info: *info
         }),
 
         Expression::Conditional {
@@ -84,11 +89,13 @@ fn helper(
             true_,
             false_,
             type_,
+            info 
         } => Rc::new(Expression::Conditional {
             guard: helper(guard.clone(), concretization),
             true_: helper(true_.clone(), concretization),
             false_: helper(false_.clone(), concretization),
             type_: type_.clone(),
+            info: *info
         }),
         Expression::Forall {
             elem,
@@ -96,6 +103,7 @@ fn helper(
             domain,
             formula,
             type_,
+            info
         } => todo!(),
         Expression::Exists {
             elem,
@@ -103,6 +111,7 @@ fn helper(
             domain,
             formula,
             type_,
+            info
         } => todo!(),
         Expression::Var { .. }
         | Expression::SymbolicVar { .. }
@@ -140,7 +149,7 @@ fn helper(
 //     node3, [5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6]
 // ]
 
-// alias_map.iter().fold(HashMap::new(), |mut a: HashMap<&String, Option<Box<dyn Iterator<Item = &Expression>>>>, x| {
+// alias_map.iter().fold(HashMap::new(), |mut a: HashMap<&Identifier, Option<Box<dyn Iterator<Item = &Expression>>>>, x| {
 
 //     if a.len() == 0 {
 //         a.insert(x.0, Some(Box::new(x.1.iter())));

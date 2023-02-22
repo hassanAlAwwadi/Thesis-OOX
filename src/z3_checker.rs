@@ -191,11 +191,11 @@ impl<'ctx> TryFrom<AstNode<'ctx>> for Int<'ctx> {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 enum NodeEntry<'a> {
     Lit(Lit),
-    Var(Cow<'a, Identifier>),
+    Var(Cow<'a, str>),
 }
 
 impl<'a> NodeEntry<'a> {
-    fn var(s: &'a String) -> NodeEntry {
+    fn var(s: &'a str) -> NodeEntry {
         NodeEntry::Var(Cow::Borrowed(s))
     }
 }
@@ -212,12 +212,12 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
         .into_iter()
         .map(|(id, type_)| match type_ {
             RuntimeType::BoolRuntimeType => (
-                NodeEntry::Var(Cow::Owned(id.clone())),
-                AstNode::Bool(Bool::new_const(ctx, id)),
+                NodeEntry::Var(Cow::Owned(id.clone().into())),
+                AstNode::Bool(Bool::new_const::<String>(ctx, id.into())),
             ),
             RuntimeType::IntRuntimeType => (
-                NodeEntry::Var(Cow::Owned(id.clone())),
-                AstNode::Int(Int::new_const(ctx, id)),
+                NodeEntry::Var(Cow::Owned(id.clone().into())),
+                AstNode::Int(Int::new_const::<String>(ctx, id.into())),
             ),
             _ => todo!(),
         })
@@ -237,7 +237,7 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
         vars: &HashMap<NodeEntry, AstNode<'ctx>>,
     ) -> AstNode<'ctx> {
         match expression {
-            Expression::SymbolicVar { var, type_ } => match type_ {
+            Expression::SymbolicVar { var, type_, info } => match type_ {
                 RuntimeType::BoolRuntimeType => vars.get(&NodeEntry::var(&var)).unwrap().clone(),
                 RuntimeType::IntRuntimeType => vars.get(&NodeEntry::var(&var)).unwrap().clone(),
                 _ => todo!(),
@@ -247,6 +247,7 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
                 lhs,
                 rhs,
                 type_,
+                info
             } => match bin_op {
                 BinOp::And => AstNode::and(helper(lhs, vars), helper(rhs, vars)).unwrap(),
                 BinOp::Or => AstNode::or(helper(lhs, vars), helper(rhs, vars)).unwrap(),
@@ -271,12 +272,13 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
                 un_op,
                 value,
                 type_,
+                info
             } => match un_op {
                 UnOp::Negative => todo!(),
                 UnOp::Negate => AstNode::negate(helper(&value, vars)).unwrap(),
             },
             Expression::Lit { lit, .. } => vars.get(&NodeEntry::Lit(lit.clone())).unwrap().clone(),
-            Expression::Ref { ref_, type_ } => {
+            Expression::Ref { ref_, type_, info } => {
                 // dbg!(*ref_);
                 vars.get(&NodeEntry::Lit(Lit::IntLit { int_value: *ref_ }))
                     .unwrap()
@@ -287,6 +289,7 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
                 true_,
                 false_,
                 type_,
+                info
             } => AstNode::conditional(
                 helper(guard, vars),
                 helper(true_, vars),
@@ -339,16 +342,16 @@ fn symbolic_variables(
                 helper(variables, literals, symbolic_refs, &true_);
                 helper(variables, literals, symbolic_refs, &false_);
             }
-            Expression::SymbolicVar { var, type_ } => {
+            Expression::SymbolicVar { var, type_, info } => {
                 variables.insert((var.clone(), type_.clone()));
             }
-            Expression::Lit { lit, type_ } => {
+            Expression::Lit { lit, type_, info } => {
                 literals.insert(lit.clone());
             } // Lits are handled elsewhere
-            Expression::Ref { ref_, type_ } => {
+            Expression::Ref { ref_, type_, info } => {
                 literals.insert(Lit::IntLit { int_value: *ref_ });
             }
-            Expression::SymbolicRef { var, type_ } => {
+            Expression::SymbolicRef { var, type_, info } => {
                 symbolic_refs.insert(var.to_owned());
             }
             _ => todo!("Yet to figure out: {:?}", expression),

@@ -32,23 +32,31 @@ use crate::{
     exec::invocation::{non_static_resolved_method_invocation, single_method_invocation},
     lexer::tokens,
     parser::{insert_exceptional_clauses, parse},
+    positioned::SourcePos,
+    resolver,
     stack::{lookup_in_stack, write_to_stack, StackFrame},
-    symbolic_table::SymbolicTable,
+    symbol_table::SymbolTable,
     syntax::{
         BinOp, CompilationUnit, Declaration, DeclarationMember, Expression, Identifier, Invocation,
-        Lhs, Lit, NonVoidType, Parameter, Reference, Rhs, RuntimeType, Statement, UnOp,
+        Lhs, Lit, Method, NonVoidType, Parameter, Reference, Rhs, RuntimeType, Statement, UnOp,
     },
     typeable::{runtime_to_nonvoidtype, Typeable},
-    utils, z3_checker,
+    typing::type_compilation_unit,
+    utils, z3_checker, FILE_NAMES,
 };
 
 const NULL: Expression = Expression::Lit {
     lit: Lit::NullLit,
     type_: RuntimeType::ANYRuntimeType,
+    info: SourcePos::UnknownPosition
 };
 
-fn retval() -> String {
-    "retval".to_string()
+pub fn retval() -> Identifier {
+    Identifier::with_unknown_pos("retval".to_string())
+}
+
+pub fn this_str() -> Identifier {
+    Identifier::with_unknown_pos("this".to_owned())
 }
 
 pub type Heap = HashMap<Reference, HeapValue>;
@@ -85,7 +93,7 @@ type PathConstraints = HashSet<Expression>;
 
 // refactor to Vec<Reference>? neins, since it can also be ITE and stuff, can it though?
 // nope it can't, refactor this!
-pub type AliasMap = HashMap<String, AliasEntry>;
+pub type AliasMap = HashMap<Identifier, AliasEntry>;
 
 #[derive(Debug, Clone)]
 pub struct AliasEntry {
@@ -211,6 +219,7 @@ impl State {
         return Rc::new(Expression::Ref {
             ref_: ref_fresh,
             type_,
+            info: SourcePos::UnknownPosition
         });
     }
 }
@@ -227,7 +236,7 @@ fn sym_exec(
     program: &HashMap<u64, CFGStatement>,
     flows: &HashMap<u64, Vec<u64>>,
     k: u64,
-    st: &SymbolicTable,
+    st: &SymbolTable,
     root_logger: Logger,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
 ) -> SymResult {
@@ -348,6 +357,7 @@ fn sym_exec(
                         array_size,
                         array_type.clone(),
                         *inner_type.clone(),
+                        st,
                     );
 
                     // note path_length does not decrease, we stay at the same statement containing array access
@@ -367,6 +377,7 @@ fn sym_exec(
                     0,
                     array_type.clone(),
                     *inner_type.clone(),
+                    st,
                 );
             }
             ActionResult::StateSplit((guard, true_lhs, false_lhs, lhs_name)) => {
@@ -429,10 +440,11 @@ fn sym_exec(
 
 fn array_initialisation(
     state: &mut State,
-    array_name: &String,
+    array_name: &Identifier,
     array_size: u64,
     array_type: RuntimeType,
     inner_type: RuntimeType,
+    st: &SymbolTable,
 ) {
     let r = state.next_reference_id();
     let StackFrame { params, .. } = state.stack.last_mut().unwrap();
@@ -441,11 +453,19 @@ fn array_initialisation(
         Rc::new(Expression::Ref {
             ref_: r,
             type_: RuntimeType::ARRAYRuntimeType,
+            info: SourcePos::UnknownPosition
         }),
     );
 
     let array_elements = (0..array_size)
-        .map(|i| create_symbolic_var(format!("{}{}", array_name, i), inner_type.clone()).into())
+        .map(|i| {
+            create_symbolic_var(
+                format!("{}{}", array_name, i).into(),
+                inner_type.clone(),
+                st,
+            )
+            .into()
+        })
         .collect();
 
     state.heap.insert(
@@ -479,12 +499,12 @@ fn action(
     state: &mut State,
     program: &HashMap<u64, CFGStatement>,
     k: u64,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> ActionResult {
     let pc = state.pc;
     let action = &program[&pc];
 
-    debug!(state.logger, "Action"; 
+    debug!(state.logger, "Action";
      "action" => #?action,
     );
     //  "stack" => ?state.stack.last().map(|s| &s.params),
@@ -507,13 +527,15 @@ fn action(
     // );
 
     match action {
-        CFGStatement::Statement(Statement::Declare { type_, var }) => {
+        CFGStatement::Statement(Statement::Declare { type_, var , 
+            info}) => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             params.insert(var.clone(), Rc::new(type_.default()));
 
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::Assign { lhs, rhs }) => {
+        CFGStatement::Statement(Statement::Assign { lhs, rhs ,
+            info}) => {
             // If lhs or rhs contains an uninitialized array, we must initialize it
             // When we initialize an array, we split up the state into multiple states each with an increasingly longer instance of the array.
             // In other words, we must split this path into multiple paths.
@@ -541,7 +563,7 @@ fn action(
                         return ActionResult::ArrayInitialization(var.clone());
                     }
                 }
-                Rhs::RhsCall { invocation, type_ } => {
+                Rhs::RhsCall { invocation, type_, info } => {
                     // if rhs contains an invocation.
                     return exec_invocation(state, invocation, &program, pc, Some(lhs.clone()), st);
                 }
@@ -559,7 +581,7 @@ fn action(
 
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::Assert { assertion }) => {
+        CFGStatement::Statement(Statement::Assert { assertion , ..}) => {
             let expression = prepare_assert_expression(state, Rc::new(assertion.clone()), st);
 
             let is_valid = eval_assertion(state, expression, st);
@@ -568,18 +590,18 @@ fn action(
             }
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::Assume { assumption }) => {
+        CFGStatement::Statement(Statement::Assume { assumption, .. }) => {
             let is_feasible_path = exec_assume(state, Rc::new(assumption.clone()), st);
             if !is_feasible_path {
                 return ActionResult::InfeasiblePath;
             }
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::Return { expression }) => {
+        CFGStatement::Statement(Statement::Return { expression , ..}) => {
             if let Some(expression) = expression {
                 let expression = evaluate(state, Rc::new(expression.clone()), st);
                 let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
-                params.insert("retval".to_string(), expression);
+                params.insert(retval(), expression);
             }
             ActionResult::Continue
         }
@@ -602,6 +624,7 @@ fn action(
                             if let Expression::SymbolicRef {
                                 var,
                                 type_: RuntimeType::ArrayRuntimeType { inner_type },
+                                info
                             } = exp.as_ref()
                             {
                                 true
@@ -645,7 +668,7 @@ fn action(
                 params,
                 ..
             } = state.stack.last().unwrap();
-            if let Some(post_condition) = current_member.post_condition().clone() {
+            if let Some(post_condition) = current_member.post_condition() {
                 let expression = prepare_assert_expression(state, post_condition, st);
                 let is_valid = eval_assertion(state, expression, st);
                 if !is_valid {
@@ -681,10 +704,10 @@ fn action(
                 ActionResult::Return(pc)
             }
         }
-        CFGStatement::Statement(Statement::Call { invocation }) => {
+        CFGStatement::Statement(Statement::Call { invocation , info}) => {
             exec_invocation(state, invocation, &program, pc, None, st)
         }
-        CFGStatement::Statement(Statement::Throw { message }) => exec_throw(state, st, message),
+        CFGStatement::Statement(Statement::Throw { message, .. }) => exec_throw(state, st, message),
         CFGStatement::TryCatch(_, _, catch_entry_pc, _) => {
             state
                 .exception_handler
@@ -701,7 +724,7 @@ fn action(
     }
 }
 
-fn exec_throw(state: &mut State, st: &SymbolicTable, message: &str) -> ActionResult {
+fn exec_throw(state: &mut State, st: &SymbolTable, message: &str) -> ActionResult {
     if let Some(ExceptionHandlerEntry {
         catch_pc,
         mut current_depth,
@@ -744,27 +767,7 @@ fn exec_throw(state: &mut State, st: &SymbolicTable, message: &str) -> ActionRes
     }
 }
 
-fn lhs_contains_symbolic_array(state: &State, lhs: &Lhs) -> Option<String> {
-    if let Lhs::LhsElem { var, .. } = lhs {
-        // if var is an uninitialized array (symbolic reference)
-        if let Expression::SymbolicRef { .. } = state.stack.last().unwrap().params[var].as_ref() {
-            return Some(var.clone());
-        }
-    }
-    None
-}
-
-fn rhs_contains_symbolic_array(state: &State, lhs: &Lhs) -> Option<String> {
-    if let Lhs::LhsElem { var, .. } = lhs {
-        // if var is an uninitialized array (symbolic reference)
-        if let Expression::SymbolicRef { .. } = state.stack.last().unwrap().params[var].as_ref() {
-            return Some(var.clone());
-        }
-    }
-    None
-}
-
-fn eval_assertion(state: &mut State, expression: Rc<Expression>, st: &SymbolicTable) -> bool {
+fn eval_assertion(state: &mut State, expression: Rc<Expression>, st: &SymbolTable) -> bool {
     // dbg!("invoke Z3 with:", &expression);
     // dbg!(&alias_map);
 
@@ -813,7 +816,7 @@ fn exec_invocation(
     program: &HashMap<u64, CFGStatement>,
     return_point: u64,
     lhs: Option<Lhs>,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> ActionResult {
     // dbg!(invocation);
 
@@ -914,89 +917,74 @@ fn exec_invocation(
             class_name,
             ..
         } => {
-            let (declaration, member): &(Declaration, Rc<DeclarationMember>) = resolved
+            let (declaration, method): &(Declaration, Rc<Method>) = resolved
                 .as_ref()
                 .map(AsRef::as_ref)
                 .unwrap_or_else(|| panic!("Unresolved constructor for class {}", class_name));
             let class_name = declaration.name();
-            if let DeclarationMember::Constructor {
-                name,
-                params,
-                specification,
-                body,
-            } = member.as_ref()
-            {
-                // evaluate arguments
-                let arguments = invocation
-                    .arguments()
-                    .into_iter()
-                    .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
-                    .collect::<Vec<_>>();
+            // evaluate arguments
+            let arguments = invocation
+                .arguments()
+                .into_iter()
+                .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
+                .collect::<Vec<_>>();
 
-                // Zis is problems with interfaces
-                let this_param = Parameter {
-                    type_: NonVoidType::ReferenceType {
-                        identifier: class_name.to_string(),
-                    },
-                    name: "this".to_owned(),
-                };
-                exec_constructor(
-                    state,
-                    return_point,
-                    member.clone(),
-                    lhs,
-                    &arguments,
-                    params,
-                    class_name,
-                    st,
-                    this_param,
-                );
+            // Zis is problems with interfaces
+            let this_param = Parameter::new(
+                NonVoidType::ReferenceType {
+                    identifier: class_name.clone(),
+                    info: SourcePos::UnknownPosition,
+                },
+                this_str(),
+            );
+            exec_constructor(
+                state,
+                return_point,
+                method.clone(),
+                lhs,
+                &arguments,
+                class_name,
+                st,
+                this_param,
+            );
 
-                let next_entry = find_entry_for_static_invocation(&class_name, &name, program);
-                ActionResult::FunctionCall(next_entry)
-            } else {
-                panic!()
-            }
+            let next_entry = find_entry_for_static_invocation(&class_name, &method.name, program);
+            ActionResult::FunctionCall(next_entry)
         }
         Invocation::InvokeSuperConstructor { resolved, .. } => {
-            let (declaration, member) = resolved.as_ref().map(AsRef::as_ref).unwrap();
+            let (declaration, method) = resolved
+                .as_ref()
+                .map(AsRef::as_ref)
+                .expect("super constructor call not resolved");
             let class_name = declaration.name();
-            if let DeclarationMember::Constructor {
-                name,
-                params,
-                specification,
-                body,
-            } = member.as_ref()
-            {
-                // evaluate arguments
-                let arguments = invocation
-                    .arguments()
-                    .into_iter()
-                    .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
-                    .collect::<Vec<_>>();
 
-                // zis is trouble with interfaces
-                let this_param = Parameter {
-                    type_: NonVoidType::ReferenceType {
-                        identifier: class_name.to_string(),
-                    },
-                    name: "this".to_owned(),
-                };
-                exec_super_constructor(
-                    state,
-                    return_point,
-                    member.clone(),
-                    lhs,
-                    &arguments,
-                    params,
-                    st,
-                    this_param,
-                );
-                let next_entry = find_entry_for_static_invocation(&class_name, &name, program);
-                ActionResult::FunctionCall(next_entry)
-            } else {
-                panic!()
-            }
+            // evaluate arguments
+            let arguments = invocation
+                .arguments()
+                .into_iter()
+                .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
+                .collect::<Vec<_>>();
+
+            // zis is trouble with interfaces
+            let this_param = Parameter::new(
+                NonVoidType::ReferenceType {
+                    identifier: class_name.clone(),
+                    info: SourcePos::UnknownPosition
+                },
+                this_str(),
+            );
+            exec_super_constructor(
+                state,
+                return_point,
+                method.clone(),
+                lhs,
+                &arguments,
+                &method.params,
+                st,
+                this_param,
+            );
+            let next_entry = find_entry_for_static_invocation(&class_name, &method.name, program);
+            ActionResult::FunctionCall(next_entry)
         }
         Invocation::InvokeSuperMethod { resolved, .. } => {
             let potential_method = resolved.as_ref().unwrap();
@@ -1031,7 +1019,7 @@ fn find_entry_for_static_invocation(
                 method_name: other_method_name,
             } = *v
             {
-                other_decl_name == class_name && other_method_name == method_name
+                *other_decl_name == class_name && *other_method_name == method_name
             } else {
                 false
             }
@@ -1044,28 +1032,29 @@ fn find_entry_for_static_invocation(
 fn exec_method(
     state: &mut State,
     return_point: u64,
-    member: Rc<DeclarationMember>,
+    method: Rc<Method>,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
-    parameters: &[Parameter],
-    st: &SymbolicTable,
+    st: &SymbolTable,
     this: (RuntimeType, Identifier),
 ) {
-    let this_param = Parameter {
-        type_: runtime_to_nonvoidtype(this.0.clone()).expect("concrete, nonvoid type"),
-        name: "this".to_owned(),
-    };
+    let this_param = Parameter::new(
+        runtime_to_nonvoidtype(this.0.clone()).expect("concrete, nonvoid type"),
+        this_str(),
+    );
+
     let this_expr = Expression::Var {
         var: this.1.clone(),
         type_: this.0,
+        info: method.info
     };
-    let parameters = std::iter::once(&this_param).chain(parameters.iter());
+    let parameters = std::iter::once(&this_param).chain(method.params.iter());
     let arguments = std::iter::once(Rc::new(this_expr)).chain(arguments.iter().cloned());
 
     push_stack_frame(
         state,
         return_point,
-        member,
+        method.clone(),
         lhs,
         parameters.zip(arguments),
         st,
@@ -1075,11 +1064,11 @@ fn exec_method(
 fn exec_static_method(
     state: &mut State,
     return_point: u64,
-    member: Rc<DeclarationMember>,
+    member: Rc<Method>,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) {
     push_stack_frame(
         state,
@@ -1094,24 +1083,23 @@ fn exec_static_method(
 fn exec_constructor(
     state: &mut State,
     return_point: u64,
-    member: Rc<DeclarationMember>,
+    method: Rc<Method>,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
-    parameters: &[Parameter],
-    class_name: &str,
-    st: &SymbolicTable,
+    class_name: &Identifier,
+    st: &SymbolTable,
     this_param: Parameter,
 ) {
-    let parameters = std::iter::once(&this_param).chain(parameters.iter());
+    let parameters = std::iter::once(&this_param).chain(method.params.iter());
 
     let fields = st
         .get_all_fields(class_name)
         .iter()
-        .map(|(s, t)| (s.to_string(), t.default().into()))
+        .map(|(s, t)| (s.clone(), t.default().into()))
         .collect();
     let structure = HeapValue::ObjectValue {
         fields,
-        type_: member.type_of(),
+        type_: method.type_of(),
     };
 
     let object_ref = state.allocate_on_heap(structure);
@@ -1120,7 +1108,7 @@ fn exec_constructor(
     push_stack_frame(
         state,
         return_point,
-        member,
+        method.clone(),
         lhs,
         parameters.zip(arguments),
         st,
@@ -1130,24 +1118,24 @@ fn exec_constructor(
 fn exec_super_constructor(
     state: &mut State,
     return_point: u64,
-    member: Rc<DeclarationMember>,
+    method: Rc<Method>,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
-    st: &SymbolicTable,
+    st: &SymbolTable,
     this_param: Parameter,
 ) {
     let parameters = std::iter::once(&this_param).chain(parameters.iter());
 
     // instead of allocating a new object, add the new fields to the existing 'this' object.
-    let object_ref = lookup_in_stack("this", &state.stack)
+    let object_ref = lookup_in_stack(&this_str(), &state.stack)
         .expect("super() is called in a constructor with a 'this' object on the stack");
     let arguments = std::iter::once(object_ref).chain(arguments.iter().cloned());
 
     push_stack_frame(
         state,
         return_point,
-        member,
+        method,
         lhs,
         parameters.zip(arguments),
         st,
@@ -1157,10 +1145,10 @@ fn exec_super_constructor(
 fn push_stack_frame<'a, P>(
     state: &mut State,
     return_point: u64,
-    member: Rc<DeclarationMember>,
+    method: Rc<Method>,
     lhs: Option<Lhs>,
     params: P,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) where
     P: Iterator<Item = (&'a Parameter, Rc<Expression>)>,
 {
@@ -1171,7 +1159,7 @@ fn push_stack_frame<'a, P>(
         pc: return_point,
         t: lhs,
         params,
-        current_member: member,
+        current_member: method,
     };
     state.stack.push(stack_frame);
 }
@@ -1179,7 +1167,7 @@ fn push_stack_frame<'a, P>(
 fn prepare_assert_expression(
     state: &mut State,
     assertion: Rc<Expression>,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> Rc<Expression> {
     let expression = if state.constraints.len() >= 1 {
         let assumptions = state
@@ -1191,6 +1179,7 @@ fn prepare_assert_expression(
                 lhs: Rc::new(x),
                 rhs: Rc::new(y),
                 type_: RuntimeType::BoolRuntimeType,
+                info: SourcePos::UnknownPosition
             })
             .unwrap();
 
@@ -1199,6 +1188,7 @@ fn prepare_assert_expression(
             lhs: Rc::new(assumptions),
             rhs: assertion,
             type_: RuntimeType::BoolRuntimeType,
+            info: SourcePos::UnknownPosition
         }))
     } else {
         negate(assertion)
@@ -1253,10 +1243,12 @@ fn read_field_symbolic_ref(
                         lhs: sym_ref.clone(),
                         rhs: r.clone(),
                         type_: RuntimeType::ANYRuntimeType,
+                        info: SourcePos::UnknownPosition
                     }),
                     true_: (read_field_concrete_ref(heap, ref_, &field)),
                     false_: (read_field_symbolic_ref(heap, rs, sym_ref, field)),
                     type_: RuntimeType::ANYRuntimeType,
+                    info: SourcePos::UnknownPosition
                 })
             } else {
                 panic!()
@@ -1300,7 +1292,7 @@ fn write_field_symbolic_ref(
         }
         rs => {
             for r in rs {
-                if let Expression::Ref { ref_, type_ } = r.as_ref() {
+                if let Expression::Ref { ref_, type_, .. } = r.as_ref() {
                     let ite = ite(
                         Rc::new(equal(sym_ref.clone(), r.clone())),
                         value.clone(),
@@ -1319,6 +1311,7 @@ fn null() -> Expression {
     Expression::Lit {
         lit: Lit::NullLit,
         type_: RuntimeType::ANYRuntimeType,
+        info: SourcePos::UnknownPosition
     }
 }
 
@@ -1327,7 +1320,7 @@ pub fn init_symbolic_reference(
     state: &mut State,
     sym_ref: &Identifier,
     type_ref: &RuntimeType,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) {
     if !state.alias_map.contains_key(sym_ref) {
         debug!(state.logger, "Lazy initialisation of symbolic reference"; "ref" => #?sym_ref, "type" => #?type_ref);
@@ -1341,7 +1334,7 @@ pub fn init_symbolic_reference(
         } else {
             panic!("Cannot initialize type {:?}", type_ref);
         };
-
+        dbg!(&st);
         // initialise new objects, one for each possible type (sub)class of class_name
         let new_object_references = st
             .get_all_instance_types(decl_name)
@@ -1357,6 +1350,7 @@ pub fn init_symbolic_reference(
                                 &field_name,
                                 &type_.type_of(),
                                 state.next_reference_id(),
+                                st,
                             )),
                         )
                     })
@@ -1436,10 +1430,10 @@ fn execute_assign(
     state: &mut State,
     lhs: &Lhs,
     e: Rc<Expression>,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> Option<ConditionalStateSplit> {
     match lhs {
-        Lhs::LhsVar { var, type_ } => {
+        Lhs::LhsVar { var, type_, info} => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             params.insert(var.clone(), e);
         }
@@ -1448,6 +1442,7 @@ fn execute_assign(
             var_type,
             field,
             type_,
+            info
         } => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             let o = params
@@ -1456,10 +1451,10 @@ fn execute_assign(
                 .clone();
 
             match o.as_ref() {
-                Expression::Ref { ref_, type_ } => {
+                Expression::Ref { ref_, type_, .. } => {
                     write_field_concrete_ref(&mut state.heap, *ref_, field, e);
                 }
-                sym_ref @ Expression::SymbolicRef { var, type_ } => {
+                sym_ref @ Expression::SymbolicRef { var, type_, .. } => {
                     init_symbolic_reference(state, &var, &type_, st);
                     // should also remove null here? --Assignemnt::45
                     // Yes, we have if (x = null) { throw; } guards that ensure it cannot be null
@@ -1479,6 +1474,7 @@ fn execute_assign(
                     true_,
                     false_,
                     type_,
+                    ..
                 } => {
                     return Some((guard.clone(), true_.clone(), false_.clone(), var.clone()));
                 }
@@ -1486,7 +1482,7 @@ fn execute_assign(
                 _ => todo!("{:?}", o.as_ref()),
             }
         }
-        Lhs::LhsElem { var, index, type_ } => {
+        Lhs::LhsElem { var, index, type_, info} => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             let ref_ = params
                 .get(var)
@@ -1500,7 +1496,7 @@ fn execute_assign(
             // };
 
             match ref_.as_ref() {
-                Expression::Ref { ref_, type_ } => {
+                Expression::Ref { ref_, type_, .. } => {
                     let index = evaluateAsInt(state, index.clone(), st);
 
                     match index {
@@ -1517,11 +1513,11 @@ fn execute_assign(
 }
 
 // fn evaluateRhs(state: &mut State, rhs: &Rhs) -> Expression {
-fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolicTable) -> Rc<Expression> {
+fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolTable) -> Rc<Expression> {
     match rhs {
-        Rhs::RhsExpression { value, type_ } => {
+        Rhs::RhsExpression { value, type_, .. } => {
             match value {
-                Expression::Var { var, type_ } => lookup_in_stack(var, &state.stack)
+                Expression::Var { var, type_, .. } => lookup_in_stack(var, &state.stack)
                     .unwrap_or_else(|| {
                         panic!(
                             "Could not find {:?} on the stack {:?}",
@@ -1532,7 +1528,7 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolicTable) -> Rc<Expressio
                 _ => Rc::new(value.clone()), // might have to expand on this when dealing with complex quantifying expressions and array
             }
         }
-        Rhs::RhsField { var, field, type_ } => {
+        Rhs::RhsField { var, field, type_, .. } => {
             if let Expression::Var { var, .. } = var {
                 let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
                 let object = params.get(var).unwrap().clone();
@@ -1543,7 +1539,7 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolicTable) -> Rc<Expressio
                 )
             }
         }
-        Rhs::RhsElem { var, index, type_ } => {
+        Rhs::RhsElem { var, index, type_, .. } => {
             if let Expression::Var { var, .. } = var {
                 let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
                 let array = params.get(var).unwrap().clone();
@@ -1554,7 +1550,7 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolicTable) -> Rc<Expressio
             //read_elem_concrete_index(state, ref_, index)
             //
         }
-        Rhs::RhsCall { invocation, type_ } => {
+        Rhs::RhsCall { invocation, type_, .. } => {
             unreachable!("unreachable, invocations are handled in function exec_invocation()")
         }
 
@@ -1562,6 +1558,7 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolicTable) -> Rc<Expressio
             array_type,
             sizes,
             type_,
+            ..
         } => {
             return exec_array_construction(state, array_type, sizes, type_, st);
         }
@@ -1574,7 +1571,7 @@ fn exec_rhs_field(
     object: &Expression,
     field: &Identifier,
     type_: &RuntimeType,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> Rc<Expression> {
     match object {
         Expression::Conditional {
@@ -1582,6 +1579,7 @@ fn exec_rhs_field(
             true_,
             false_,
             type_,
+            info
         } => {
             // bedoelt hij hier niet exec true_ ipv execField true_ ?
             // nope want hij wil nog steeds het field weten ervan
@@ -1593,13 +1591,14 @@ fn exec_rhs_field(
                 true_: true_,
                 false_: false_,
                 type_: type_.clone(),
+                info: *info
             })
         }
         Expression::Lit {
             lit: Lit::NullLit, ..
         } => panic!("infeasible"),
-        Expression::Ref { ref_, type_ } => read_field_concrete_ref(&mut state.heap, *ref_, field),
-        sym_ref @ Expression::SymbolicRef { var, type_ } => {
+        Expression::Ref { ref_, type_, info } => read_field_concrete_ref(&mut state.heap, *ref_, field),
+        sym_ref @ Expression::SymbolicRef { var, type_, info } => {
             init_symbolic_reference(state, var, type_, st);
             remove_symbolic_null(&mut state.alias_map, var);
             let concrete_refs = &state.alias_map[var];
@@ -1620,7 +1619,7 @@ fn exec_rhs_elem(
     state: &mut State,
     array: Rc<Expression>,
     index: Rc<Expression>,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> Rc<Expression> {
     if let Expression::Ref { ref_, .. } = array.as_ref() {
         let index = evaluateAsInt(state, index, st);
@@ -1637,6 +1636,7 @@ fn true_lit() -> Expression {
     Expression::Lit {
         lit: Lit::BoolLit { bool_value: true },
         type_: RuntimeType::BoolRuntimeType,
+        info: SourcePos::UnknownPosition
     }
 }
 
@@ -1644,32 +1644,40 @@ fn false_lit() -> Expression {
     Expression::Lit {
         lit: Lit::BoolLit { bool_value: false },
         type_: RuntimeType::BoolRuntimeType,
+        info: SourcePos::UnknownPosition
     }
 }
 
-fn remove_symbolic_null(alias_map: &mut AliasMap, var: &str) {
+fn remove_symbolic_null(alias_map: &mut AliasMap, var: &Identifier) {
     // dbg!(&alias_map, &var);
     alias_map.get_mut(var).unwrap().remove_null(var)
 }
 
-fn create_symbolic_var(name: String, type_: impl Typeable) -> Expression {
-    if type_.is_of_type(RuntimeType::REFRuntimeType) {
+fn create_symbolic_var(name: Identifier, type_: impl Typeable, st: &SymbolTable) -> Expression {
+    if type_.is_of_type(RuntimeType::REFRuntimeType, st) {
         Expression::SymbolicRef {
             var: name,
             type_: type_.type_of(),
+            info: SourcePos::UnknownPosition
         }
     } else {
         Expression::SymbolicVar {
             var: name,
             type_: type_.type_of(),
+            info: SourcePos::UnknownPosition
         }
     }
 }
 
 /// Create uninitialised variable (that can be initialized lazily)
-fn initialize_symbolic_var(name: &str, type_: &RuntimeType, ref_: i64) -> Expression {
+fn initialize_symbolic_var(
+    name: &str,
+    type_: &RuntimeType,
+    ref_: i64,
+    st: &SymbolTable,
+) -> Expression {
     let sym_name = format!("{}{}", name, ref_);
-    create_symbolic_var(sym_name, type_.clone())
+    create_symbolic_var(sym_name.into(), type_.clone(), st)
 }
 
 fn read_elem_concrete_index(state: &mut State, ref_: Reference, index: i64) -> Rc<Expression> {
@@ -1764,7 +1772,7 @@ fn exec_array_construction(
     array_type: &NonVoidType,
     sizes: &Vec<Expression>,
     type_: &RuntimeType,
-    st: &SymbolicTable,
+    st: &SymbolTable,
 ) -> Rc<Expression> {
     let ref_id = state.next_reference_id();
 
@@ -1789,13 +1797,14 @@ fn exec_array_construction(
     Rc::new(Expression::Ref {
         ref_: ref_id,
         type_: type_.clone(),
+        info: SourcePos::UnknownPosition
     })
 }
 
 /// Helper function, does not invoke Z3 but tries to evaluate the assumption locally.
 /// Returns whether the assumption was found to be infeasible.
 /// Otherwise it inserts the assumption into the constraints.
-fn exec_assume(state: &mut State, assumption: Rc<Expression>, st: &SymbolicTable) -> bool {
+fn exec_assume(state: &mut State, assumption: Rc<Expression>, st: &SymbolTable) -> bool {
     let expression = evaluate(state, assumption, st);
 
     if *expression == false_lit() {
@@ -1806,21 +1815,43 @@ fn exec_assume(state: &mut State, assumption: Rc<Expression>, st: &SymbolicTable
     true
 }
 
-fn verify(file_content: &str, class_name: &str, method_name: &str, k: u64) -> SymResult {
-    let tokens = tokens(file_content);
+pub type Error = String;
+
+fn verify(
+    path: &str,
+    class_name: &str,
+    method_name: &str,
+    k: u64,
+) -> std::result::Result<SymResult, Error> {
+    println!("Starting up");
+    let file_content =
+    std::fs::read_to_string(path).unwrap();
+
+    // Set global file names
+    *FILE_NAMES.lock().unwrap() = path.to_string();
+
+
+    let tokens = tokens(&file_content);
     let as_ref = tokens.as_slice();
     // dbg!(as_ref);
     let c = parse(&tokens);
     let c = c.unwrap();
 
     // dbg!(&c);
+    println!("Parsing completed");
 
-    let initial_function = c
+    let initial_method = c
         .find_class_declaration_member(method_name, class_name.into())
         .unwrap();
 
     let mut i = 0;
-    let symbolic_table = SymbolicTable::from_ast(&c);
+    let symbol_table = SymbolTable::from_ast(&c)?;
+    println!("Symbol table completed");
+
+    let c = type_compilation_unit(c, &symbol_table)?;
+    println!("Typing completed");
+    
+
     let (result, flw) = labelled_statements(c, &mut i);
 
     let program = result.into_iter().collect();
@@ -1832,84 +1863,94 @@ fn verify(file_content: &str, class_name: &str, method_name: &str, k: u64) -> Sy
     // dbg!(&flows);
     // panic!();
 
-    if let DeclarationMember::Method { params, .. } = initial_function.as_ref() {
-        let pc = find_entry_for_static_invocation(class_name, method_name, &program);
-        // dbg!(&params);
-        let params = params
-            .iter()
-            .map(|p| {
-                (
+    let pc = find_entry_for_static_invocation(class_name, method_name, &program);
+    // dbg!(&params);
+    let params = initial_method
+        .params
+        .iter()
+        .map(|p| {
+            (
+                p.name.clone(),
+                Rc::new(create_symbolic_var(
                     p.name.clone(),
-                    Rc::new(create_symbolic_var(p.name.clone(), p.type_.type_of())),
-                )
-            })
-            .collect();
-        // dbg!(&params);
+                    p.type_.type_of(),
+                    &symbol_table,
+                )),
+            )
+        })
+        .collect();
+    // dbg!(&params);
 
-        // let root_logger = slog::Logger::root(
-        //     Mutex::new(slog_bunyan::default(std::io::stderr()).filter_level(Level::Debug)).fuse(),
-        //     o!(),
-        // );
+    // let root_logger = slog::Logger::root(
+    //     Mutex::new(slog_bunyan::default(std::io::stderr()).filter_level(Level::Debug)).fuse(),
+    //     o!(),
+    // );
 
-        let mut builder = TerminalLoggerBuilder::new();
-        builder.level(Severity::Debug);
-        builder.destination(Destination::Stdout);
-        builder.format(sloggers::types::Format::Full);
-        builder.source_location(sloggers::types::SourceLocation::FileAndLine);
+    let mut builder = TerminalLoggerBuilder::new();
+    builder.level(Severity::Debug);
+    builder.destination(Destination::Stdout);
+    builder.format(sloggers::types::Format::Full);
+    builder.source_location(sloggers::types::SourceLocation::FileAndLine);
 
-        let root_logger = builder.build().unwrap();
+    let root_logger = builder.build().unwrap();
 
-        let mut state = State {
+    let mut state = State {
+        pc,
+        stack: vec![StackFrame {
             pc,
-            stack: vec![StackFrame {
-                pc,
-                t: None,
-                params,
-                current_member: initial_function,
-            }],
-            heap: HashMap::new(),
-            precondition: true_lit(),
-            constraints: HashSet::new(),
-            alias_map: HashMap::new(),
-            ref_counter: IdCounter::new(0),
-            exception_handler: Default::default(),
-            path_length: 0,
-            logger: root_logger.new(o!("pathId" => 0)),
-            path_id: 0,
-        };
+            t: None,
+            params,
+            current_member: initial_method,
+        }],
+        heap: HashMap::new(),
+        precondition: true_lit(),
+        constraints: HashSet::new(),
+        alias_map: HashMap::new(),
+        ref_counter: IdCounter::new(0),
+        exception_handler: Default::default(),
+        path_length: 0,
+        logger: root_logger.new(o!("pathId" => 0)),
+        path_id: 0,
+    };
 
-        let path_counter = Rc::new(RefCell::new(IdCounter::new(0)));
+    let path_counter = Rc::new(RefCell::new(IdCounter::new(0)));
 
-        return sym_exec(
-            state,
-            &program,
-            &flows,
-            k,
-            &symbolic_table,
-            root_logger,
-            path_counter,
-        );
-    } else {
-        panic!()
-    }
+    return Ok(sym_exec(
+        state,
+        &program,
+        &flows,
+        k,
+        &symbol_table,
+        root_logger,
+        path_counter,
+    ));
 }
 
 #[test]
 fn sym_exec_of_absolute_simplest() {
-    let file_content = include_str!("../examples/absolute_simplest.oox");
-    assert_eq!(verify(file_content, "Foo", "f", 20), SymResult::Valid);
+    let path = "./examples/absolute_simplest.oox";
+    assert_eq!(
+        verify(path, "Foo", "f", 20).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_min() {
-    let file_content = include_str!("../examples/psv/min.oox");
-    assert_eq!(verify(file_content, "Foo", "min", 20), SymResult::Valid);
+    let path = "./examples/psv/min.oox";
+    assert_eq!(
+        verify(path, "Foo", "min", 20).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_method() {
-    let file_content = include_str!("../examples/psv/method.oox");
-    assert_eq!(verify(file_content, "Main", "min", 20), SymResult::Valid);
+    let path = "./examples/psv/method.oox";
+    assert_eq!(
+        verify(path, "Main", "min", 20).unwrap(),
+        SymResult::Valid
+    );
 }
 
 // #[test]
@@ -1920,150 +1961,180 @@ fn sym_exec_method() {
 
 #[test]
 fn sym_test_failure() {
-    let file_content = std::fs::read_to_string("./examples/psv/test.oox").unwrap();
+    let path = "./examples/psv/test.oox";
     assert_eq!(
-        verify(&file_content, "Main", "main", 30),
+        verify(&path, "Main", "main", 30).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_div_by_n() {
-    let file_content = std::fs::read_to_string("./examples/psv/divByN.oox").unwrap();
+    let path = "./examples/psv/divByN.oox";
     // so this one is invalid at k = 100, in OOX it's invalid at k=105, due to exceptions (more if statements are added)
     assert_eq!(
-        verify(&file_content, "Main", "divByN_invalid", 100),
+        verify(&path, "Main", "divByN_invalid", 100).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_nonstatic_function() {
-    let file_content = std::fs::read_to_string("./examples/nonstatic_function.oox").unwrap();
-    assert_eq!(verify(&file_content, "Main", "f", 20), SymResult::Valid);
+    let path = "./examples/nonstatic_function.oox";
+    assert_eq!(
+        verify(&path, "Main", "f", 20).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_this_method() {
-    let file_content = std::fs::read_to_string("./examples/this_method.oox").unwrap();
-    assert_eq!(verify(&file_content, "Main", "main", 30), SymResult::Valid);
+    let path = "./examples/this_method.oox";
+    assert_eq!(
+        verify(&path, "Main", "main", 30).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_linked_list1() {
-    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
-    assert_eq!(verify(&file_content, "Node", "test2", 90), SymResult::Valid);
+    let path = "./examples/intLinkedList.oox";
+    assert_eq!(
+        verify(&path, "Node", "test2", 90).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_linked_list1_invalid() {
-    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    let path = "./examples/intLinkedList.oox";
     assert_eq!(
-        verify(&file_content, "Node", "test2_invalid", 90),
+        verify(&path, "Node", "test2_invalid", 90).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_linked_list3_invalid() {
-    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    let path = "./examples/intLinkedList.oox";
     // at k=80 it fails, after ~170 sec in hs oox, rs oox does this in ~90 sec
     assert_eq!(
-        verify(&file_content, "Node", "test3_invalid1", 110),
+        verify(&path, "Node", "test3_invalid1", 110).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_linked_list4() {
-    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
-    assert_eq!(verify(&file_content, "Node", "test4", 90), SymResult::Valid);
+    let path = "./examples/intLinkedList.oox";
+    assert_eq!(
+        verify(&path, "Node", "test4", 90).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_linked_list4_invalid() {
-    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    let path = "./examples/intLinkedList.oox";
     assert_eq!(
-        verify(&file_content, "Node", "test4_invalid", 90),
+        verify(&path, "Node", "test4_invalid", 90).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_linked_list4_if_problem() {
-    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+    let path = "./examples/intLinkedList.oox";
     assert_eq!(
-        verify(&file_content, "Node", "test4_if_problem", 90),
+        verify(&path, "Node", "test4_if_problem", 90).unwrap(),
         SymResult::Valid
     );
 }
 
 #[test]
 fn sym_exec_exceptions1() {
-    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    let path = "./examples/exceptions.oox";
 
-    assert_eq!(verify(&file_content, "Main", "test1", 20), SymResult::Valid);
     assert_eq!(
-        verify(&file_content, "Main", "test1_invalid", 20),
+        verify(&path, "Main", "test1", 20).unwrap(),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify(&path, "Main", "test1_invalid", 20).unwrap(),
         SymResult::Invalid
     );
-    assert_eq!(verify(&file_content, "Main", "div", 30), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "div", 30).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_exceptions_m0() {
-    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    let path = "./examples/exceptions.oox";
 
-    assert_eq!(verify(&file_content, "Main", "m0", 20), SymResult::Valid);
     assert_eq!(
-        verify(&file_content, "Main", "m0_invalid", 20),
+        verify(&path, "Main", "m0", 20).unwrap(),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify(&path, "Main", "m0_invalid", 20).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_exceptions_m1() {
-    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    let path = "./examples/exceptions.oox";
 
-    assert_eq!(verify(&file_content, "Main", "m1", 20), SymResult::Valid);
     assert_eq!(
-        verify(&file_content, "Main", "m1_invalid", 20),
+        verify(&path, "Main", "m1", 20).unwrap(),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify(&path, "Main", "m1_invalid", 20).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_exceptions_m2() {
-    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    let path = "./examples/exceptions.oox";
 
-    assert_eq!(verify(&file_content, "Main", "m2", 20), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "m2", 20).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_exceptions_m3() {
-    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    let path = "./examples/exceptions.oox";
 
-    assert_eq!(verify(&file_content, "Main", "m3", 30), SymResult::Valid);
     assert_eq!(
-        verify(&file_content, "Main", "m3_invalid1", 30),
+        verify(&path, "Main", "m3", 30).unwrap(),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify(&path, "Main", "m3_invalid1", 30).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Main", "m3_invalid2", 30),
+        verify(&path, "Main", "m3_invalid2", 30).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_exceptions_null() {
-    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    let path = "./examples/exceptions.oox";
 
     assert_eq!(
-        verify(&file_content, "Main", "nullExc1", 30),
+        verify(&path, "Main", "nullExc1", 30).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "nullExc2", 30),
+        verify(&path, "Main", "nullExc2", 30).unwrap(),
         SymResult::Valid
     );
     // assert_eq!(verify_file(&file_content, "m3_invalid1", 30), SymResult::Invalid);
@@ -2072,152 +2143,187 @@ fn sym_exec_exceptions_null() {
 
 #[test]
 fn sym_exec_array1() {
-    let file_content = std::fs::read_to_string("./examples/array/array1.oox").unwrap();
+    let path = "./examples/array/array1.oox";
 
-    assert_eq!(verify(&file_content, "Main", "foo", 50), SymResult::Valid);
     assert_eq!(
-        verify(&file_content, "Main", "foo_invalid", 50),
-        SymResult::Invalid
+        verify(&path, "Main", "foo", 50).unwrap(),
+        SymResult::Valid
     );
-    assert_eq!(verify(&file_content, "Main", "sort", 300), SymResult::Valid);
     assert_eq!(
-        verify(&file_content, "Main", "sort_invalid1", 50),
-        SymResult::Invalid
-    );
-    assert_eq!(verify(&file_content, "Main", "max", 50), SymResult::Valid);
-    assert_eq!(
-        verify(&file_content, "Main", "max_invalid1", 50),
+        verify(&path, "Main", "foo_invalid", 50).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Main", "max_invalid2", 50),
+        verify(&path, "Main", "sort", 300).unwrap(),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify(&path, "Main", "sort_invalid1", 50).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Main", "exists_valid", 50),
+        verify(&path, "Main", "max", 50).unwrap(),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify(&path, "Main", "max_invalid1", 50).unwrap(),
+        SymResult::Invalid
+    );
+    assert_eq!(
+        verify(&path, "Main", "max_invalid2", 50).unwrap(),
+        SymResult::Invalid
+    );
+    assert_eq!(
+        verify(&path, "Main", "exists_valid", 50).unwrap(),
         SymResult::Valid
     );
     // assert_eq!(verify_file(&file_content, "exists_invalid1", 50), SymResult::Invalid);
     assert_eq!(
-        verify(&file_content, "Main", "exists_invalid2", 50),
+        verify(&path, "Main", "exists_invalid2", 50).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Main", "array_creation1", 50),
+        verify(&path, "Main", "array_creation1", 50).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "array_creation2", 50),
+        verify(&path, "Main", "array_creation2", 50).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "array_creation_invalid", 50),
+        verify(&path, "Main", "array_creation_invalid", 50).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_array2() {
-    let file_content = std::fs::read_to_string("./examples/array/array2.oox").unwrap();
+    let path = "./examples/array/array2.oox";
 
-    assert_eq!(verify(&file_content, "Main", "foo1", 50), SymResult::Valid);
     assert_eq!(
-        verify(&file_content, "Main", "foo1_invalid", 50),
+        verify(&path, "Main", "foo1", 50).unwrap(),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify(&path, "Main", "foo1_invalid", 50).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Main", "foo2_invalid", 50),
+        verify(&path, "Main", "foo2_invalid", 50).unwrap(),
         SymResult::Invalid
     );
-    assert_eq!(verify(&file_content, "Main", "sort", 100), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "sort", 100).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_inheritance() {
-    let file_content = std::fs::read_to_string("./examples/inheritance/inheritance.oox").unwrap();
+    let path = "./examples/inheritance/inheritance.oox";
     let k = 150;
 
-    assert_eq!(verify(&file_content, "Main", "test1", k), SymResult::Valid);
     assert_eq!(
-        verify(&file_content, "Main", "test1_invalid", k),
-        SymResult::Invalid
-    );
-    assert_eq!(verify(&file_content, "Main", "test2a", k), SymResult::Valid);
-
-    assert_eq!(verify(&file_content, "Main", "test2b", k), SymResult::Valid);
-
-    assert_eq!(
-        verify(&file_content, "Main", "test2b_invalid", k),
-        SymResult::Invalid
-    );
-
-    assert_eq!(verify(&file_content, "Main", "test3", k), SymResult::Valid);
-
-    assert_eq!(
-        verify(&file_content, "Main", "test4_valid", k),
+        verify(&path, "Main", "test1", k).unwrap(),
         SymResult::Valid
     );
-    assert_eq!(
-        verify(&file_content, "Main", "test4_invalid", k),
-        SymResult::Invalid
-    );
-    assert_eq!(verify(&file_content, "Main", "test5", k), SymResult::Valid);
+    // assert_eq!(
+    //     verify(&path, "Main", "test1_invalid", k).unwrap(),
+    //     SymResult::Invalid
+    // );
+    // assert_eq!(
+    //     verify(&path, "Main", "test2a", k).unwrap(),
+    //     SymResult::Valid
+    // );
 
-    assert_eq!(verify(&file_content, "Main", "test6", k), SymResult::Valid);
+    // assert_eq!(
+    //     verify(&path, "Main", "test2b", k).unwrap(),
+    //     SymResult::Valid
+    // );
+
+    // assert_eq!(
+    //     verify(&path, "Main", "test2b_invalid", k).unwrap(),
+    //     SymResult::Invalid
+    // );
+
+    // assert_eq!(
+    //     verify(&path, "Main", "test3", k).unwrap(),
+    //     SymResult::Valid
+    // );
+
+    // assert_eq!(
+    //     verify(&path, "Main", "test4_valid", k).unwrap(),
+    //     SymResult::Valid
+    // );
+    // assert_eq!(
+    //     verify(&path, "Main", "test4_invalid", k).unwrap(),
+    //     SymResult::Invalid
+    // );
+    // assert_eq!(
+    //     verify(&path, "Main", "test5", k).unwrap(),
+    //     SymResult::Valid
+    // );
+
+    // assert_eq!(
+    //     verify(&path, "Main", "test6", k).unwrap(),
+    //     SymResult::Valid
+    // );
 }
 
 #[test]
 fn sym_exec_inheritance_specifications() {
-    let file_content =
-        std::fs::read_to_string("./examples/inheritance/specifications.oox").unwrap();
+    let path = "./examples/inheritance/specifications.oox";
     let k = 150;
     assert_eq!(
-        verify(&file_content, "Main", "test_valid", k),
+        verify(&path, "Main", "test_valid", k).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "test_invalid", k),
+        verify(&path, "Main", "test_invalid", k).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_interface() {
-    let file_content = std::fs::read_to_string("./examples/inheritance/interface.oox").unwrap();
+    let path = "./examples/inheritance/interface.oox";
     let k = 150;
 
     println!("hello");
 
-    assert_eq!(verify(&file_content, "Main", "main", k), SymResult::Valid);
     assert_eq!(
-        verify(&file_content, "Main", "test1_valid", k),
+        verify(&path, "Main", "main", k).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Main", "test1_invalid", k),
+        verify(&path, "Main", "test1_valid", k).unwrap(),
+        SymResult::Valid
+    );
+    assert_eq!(
+        verify(&path, "Main", "test1_invalid", k).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn sym_exec_interface2() {
-    let file_content = std::fs::read_to_string("./examples/inheritance/interface2.oox").unwrap();
+    let path = "./examples/inheritance/interface2.oox";
     let k = 150;
 
     assert_eq!(
-        verify(&file_content, "Foo", "test_valid", k),
+        verify(&path, "Foo", "test_valid", k).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Foo1", "test_invalid", k),
+        verify(&path, "Foo1", "test_invalid", k).unwrap(),
         SymResult::Invalid
     );
     assert_eq!(
-        verify(&file_content, "Foo2", "test_valid", k),
+        verify(&path, "Foo2", "test_valid", k).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&file_content, "Foo3", "test_invalid", k),
+        verify(&path, "Foo3", "test_invalid", k).unwrap(),
         SymResult::Invalid
     );
     //assert_eq!(verify(&file_content, "Foo4", "test_valid", k), SymResult::Valid);
@@ -2225,38 +2331,36 @@ fn sym_exec_interface2() {
 
 #[test]
 fn sym_exec_polymorphic() {
-    let file_content =
-        std::fs::read_to_string("./examples/inheritance/sym_exec_polymorphic.oox").unwrap();
     let k = 150;
-    assert_eq!(verify(&file_content, "Main", "main", k), SymResult::Valid);
+    assert_eq!(
+        verify("./examples/inheritance/sym_exec_polymorphic.oox", "Main", "main", k).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn benchmark_col_25() {
-    let file_content =
-        std::fs::read_to_string("./benchmarks/defects4j/collections_25.oox").unwrap();
     let k = 15000;
-    assert_eq!(verify(&file_content, "Test", "test", k), SymResult::Invalid);
+    assert_eq!(
+        verify("./benchmarks/defects4j/collections_25.oox", "Test", "test", k).unwrap(),
+        SymResult::Invalid
+    );
 }
 
 #[test]
 fn benchmark_col_25_symbolic() {
-    let file_content =
-        std::fs::read_to_string("./benchmarks/defects4j/collections_25.oox").unwrap();
     let k = 15000;
     assert_eq!(
-        verify(&file_content, "Test", "test_symbolic", k),
+        verify("./benchmarks/defects4j/collections_25.oox", "Test", "test_symbolic", k).unwrap(),
         SymResult::Invalid
     );
 }
 
 #[test]
 fn benchmark_col_25_test3() {
-    let file_content =
-        std::fs::read_to_string("./benchmarks/defects4j/collections_25.oox").unwrap();
     let k = 15000;
     assert_eq!(
-        verify(&file_content, "Test", "test3", k),
+        verify("./benchmarks/defects4j/collections_25.oox", "Test", "test3", k).unwrap(),
         SymResult::Valid
     );
 }

@@ -67,6 +67,7 @@ where
                 domain,
                 formula,
                 type_,
+                info
             } => R::default(),
             Expression::Exists {
                 elem,
@@ -74,29 +75,33 @@ where
                 domain,
                 formula,
                 type_,
+                info
             } => R::default(),
             Expression::BinOp {
                 bin_op,
                 lhs,
                 rhs,
                 type_,
+                info
             } => Self::fold_binop(bin_op, lhs, rhs, type_),
             Expression::UnOp {
                 un_op,
                 value,
                 type_,
+                info
             } => Self::fold_unop(un_op, value, type_),
-            Expression::Var { var, type_ } => Self::fold_var(var, type_),
-            Expression::SymbolicVar { var, type_ } => Self::fold_sym_var(var, type_),
-            Expression::Lit { lit, type_ } => Self::fold_lit(lit, type_),
-            Expression::SizeOf { var, type_ } => Self::fold_size_of(var, type_),
-            Expression::Ref { ref_, type_ } => Self::fold_ref(ref_, type_),
-            Expression::SymbolicRef { var, type_ } => Self::fold_sym_ref(var, type_),
+            Expression::Var { var, type_, info} => Self::fold_var(var, type_),
+            Expression::SymbolicVar { var, type_, info } => Self::fold_sym_var(var, type_),
+            Expression::Lit { lit, type_, info } => Self::fold_lit(lit, type_),
+            Expression::SizeOf { var, type_, info } => Self::fold_size_of(var, type_),
+            Expression::Ref { ref_, type_, info } => Self::fold_ref(ref_, type_),
+            Expression::SymbolicRef { var, type_, info } => Self::fold_sym_ref(var, type_),
             Expression::Conditional {
                 guard,
                 true_,
                 false_,
                 type_,
+                 info
             } => Self::fold_cond(guard, true_, false_, type_),
         }
     }
