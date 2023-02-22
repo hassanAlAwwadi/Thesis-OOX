@@ -34,18 +34,18 @@ fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit> {
 }
 
 fn declaration<'a>() -> Parser<'a, Token<'a>, Declaration> {
-    let class = ((keyword("class") * identifier())
+    let class = ((keyword("class") + identifier())
         + extends1().opt()
         + implements().opt()
         + (punct("{") * member().repeat(0..) - punct("}")))
-    .map(|(((name, extends), implements), members)| {
+    .map(|((((class_token, name), extends), implements), members)| {
         Declaration::Class(
             Class {
                 name,
                 members,
                 extends,
                 implements: implements.unwrap_or(Vec::new()),
-                info: SourcePos::UnknownPosition,
+                info: class_token.get_position(),
             }
             .into(),
         )
@@ -62,7 +62,7 @@ fn member<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
 
 fn field<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     (nonvoidtype() + identifier() - punct(";"))
-        .map(|(type_, name)| DeclarationMember::Field { type_, name, info: SourcePos::UnknownPosition })
+        .map(|(type_, name)| DeclarationMember::Field { info: type_.get_position(), type_, name  })
 }
 
 fn method<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
@@ -71,18 +71,16 @@ fn method<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     (is_static + type_() + identifier() + parameters() + specification() + body()).map(
         |(((((is_static, return_type), name), params), specification), body)| {
             DeclarationMember::Method(Method {
+                info: name.get_position(),
                 is_static,
                 return_type,
                 name,
                 params,
                 specification,
                 body: body.into(),
-                info: SourcePos::UnknownPosition
             }.into())
         },
     )
-
-    // todo!()
 }
 
 fn constructor<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
