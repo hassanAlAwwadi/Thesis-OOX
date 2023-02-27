@@ -3,7 +3,7 @@ use ordered_float::NotNan;
 use pom::parser::*;
 
 use std::collections::HashSet;
-use std::rc::{Rc, Weak};
+use std::rc::{Rc};
 use std::str::{self, FromStr};
 
 use std::iter::Extend;
@@ -11,7 +11,6 @@ use std::iter::Extend;
 use crate::dsl::{equal, greater_than_equal, less_than, negate, ors, size_of};
 use crate::exec::this_str;
 use crate::positioned::{SourcePos, WithPosition};
-use crate::resolver;
 use crate::syntax::*;
 
 use crate::lexer::*;
@@ -21,7 +20,7 @@ use self::interface::interface;
 mod interface;
 
 pub fn parse<'a>(tokens: &[Token<'a>]) -> Result<CompilationUnit, pom::Error> {
-    (program() - end()).parse(tokens).map(|mut c| {
+    (program() - end()).parse(tokens).map(|c| {
         let c = insert_exceptional_clauses(c);
         c
     })
@@ -272,24 +271,24 @@ fn expression1<'a>() -> Parser<'a, Token<'a>, Expression> {
 }
 
 fn verification_expression<'a>() -> Parser<'a, Token<'a>, Expression> {
-    let forall = (keyword("forall") * identifier() - punct(",") + identifier() - punct(":")
+    let forall = (keyword("forall") + identifier() - punct(",") + identifier() - punct(":")
         + identifier()
         - punct(":")
         + call(expression1))
-    .map(|(((elem, range), domain), formula)| Expression::Forall {
-        info: elem.get_position(),
+    .map(|((((forall_token, elem), range), domain), formula)| Expression::Forall {
+        info: forall_token.get_position(),
         elem,
         range,
         domain,
         formula: Box::new(formula),
         type_: RuntimeType::UnknownRuntimeType,
     });
-    let exists = (keyword("exists") * identifier() - punct(",") + identifier() - punct(":")
+    let exists = (keyword("exists") + identifier() - punct(",") + identifier() - punct(":")
         + identifier()
         - punct(":")
         + call(expression1))
-    .map(|(((elem, range), domain), formula)| Expression::Exists {
-        info: elem.get_position(),
+    .map(|((((exists_token, elem), range), domain), formula)| Expression::Exists {
+        info: exists_token.get_position(),
         elem,
         range,
         domain,
@@ -543,15 +542,15 @@ fn expression7<'a>() -> Parser<'a, Token<'a>, Expression> {
 }
 
 fn expression8<'a>() -> Parser<'a, Token<'a>, Expression> {
-    let negative = (punct("-") * call(expression8)).map(|value| Expression::UnOp {
-        info: value.get_position(),
+    let negative = (punct("-") + call(expression8)).map(|(token, value)| Expression::UnOp {
+        info: token.get_position(),
         un_op: UnOp::Negative,
         value: Rc::new(value),
         type_: RuntimeType::UnknownRuntimeType,
     });
 
-    let negate = (punct("!") * call(expression8)).map(|value| Expression::UnOp {
-        info: value.get_position(),
+    let negate = (punct("!") + call(expression8)).map(|(token, value)| Expression::UnOp {
+        info: token.get_position(),
         un_op: UnOp::Negate,
         value: Rc::new(value),
         type_: RuntimeType::UnknownRuntimeType,
@@ -1115,7 +1114,7 @@ where
 fn class_with_constructor() {
     let file_content = include_str!("../examples/class_with_constructor.oox");
 
-    let tokens = tokens(file_content);
+    let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = program().parse(&as_ref).unwrap(); // should not panic;
@@ -1126,7 +1125,7 @@ fn class_with_constructor() {
 fn test_statement() {
     let file_content = "int p; p := 0;";
 
-    let tokens = tokens(file_content);
+    let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
@@ -1137,7 +1136,7 @@ fn test_statement() {
 fn class_with_methods() {
     let file_content = include_str!("../examples/class_with_methods.oox");
 
-    let tokens = tokens(file_content);
+    let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
@@ -1152,7 +1151,7 @@ fn class_with_methods() {
 fn bsort_test() {
     let file_content = include_str!("../examples/bsort.oox");
 
-    let tokens = tokens(file_content);
+    let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
@@ -1167,7 +1166,7 @@ fn bsort_test() {
 fn this_dot() {
     let file_content = "p := this.value;";
 
-    let tokens = tokens(file_content);
+    let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
@@ -1184,7 +1183,7 @@ fn ite() {
         bool b := n.member(x) ;
         return b ;
     }";
-    let tokens = tokens(file_content);
+    let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
     //dbg!(&as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
@@ -1194,7 +1193,7 @@ fn ite() {
 #[test]
 fn boolean() {
     let file_content = "true";
-    let tokens = tokens(file_content);
+    let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
@@ -1207,7 +1206,7 @@ fn test_statement2() {
     bool b;
     b := n.member(x) ;
     return b;";
-    let tokens = tokens(file_content);
+    let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
@@ -1217,7 +1216,7 @@ fn test_statement2() {
 #[test]
 fn forall() {
     let file_content = "(forall x, i : a : i<k ==> (forall x, i : a : i<k ==> true))";
-    let tokens = tokens(file_content);
+    let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
@@ -1227,7 +1226,7 @@ fn forall() {
 fn absolute_simplest() {
     let file_content = include_str!("../examples/absolute_simplest.oox");
 
-    let tokens = tokens(file_content);
+    let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
@@ -1239,7 +1238,7 @@ fn absolute_simplest() {
 fn parsing_empty_function() {
     let file_content = "class X { static int fib(int n) {  } }";
 
-    let tokens = tokens(&file_content);
+    let tokens = tokens(&file_content).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
@@ -1266,7 +1265,7 @@ fn parsing_else_if() {
     ";
 
 
-    let tokens = tokens(&file_content);
+    let tokens = tokens(&file_content).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     // let c = (pite() - end()).parse(&as_ref);
@@ -1283,7 +1282,7 @@ fn parsing_while() {
         total := total ;
        }";
 
-    let tokens = tokens(&file_content);
+    let tokens = tokens(&file_content).unwrap();
     //dbg!(&tokens);
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
@@ -1296,7 +1295,7 @@ fn parsing_while() {
 fn parsing_fib() {
     let file_content = std::fs::read_to_string("./examples/psv/fib.oox").unwrap();
 
-    let tokens = tokens(&file_content);
+    let tokens = tokens(&file_content).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
@@ -1308,7 +1307,7 @@ fn parsing_fib() {
 fn parse_capital_variable() {
     let file_content = "int N := 10;";
 
-    let tokens = tokens(&file_content);
+    let tokens = tokens(&file_content).unwrap();
     dbg!(&tokens);
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
@@ -1323,7 +1322,7 @@ fn parse_while_loop() {
     while (i<N)
         i := i+1 ;";
 
-    let tokens = tokens(&file_content);
+    let tokens = tokens(&file_content).unwrap();
     dbg!(&tokens);
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
@@ -1336,7 +1335,7 @@ fn parse_while_loop() {
 fn parsing_linked_list() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
 
-    let tokens = tokens(&file_content);
+    let tokens = tokens(&file_content).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
@@ -1348,7 +1347,7 @@ fn parsing_linked_list() {
 fn parsing_exceptions() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
-    let tokens = tokens(&file_content);
+    let tokens = tokens(&file_content).unwrap();
     let as_ref = tokens.as_slice();
     dbg!(as_ref);
     let c = parse(&as_ref).unwrap();
@@ -1359,7 +1358,7 @@ fn parsing_exceptions() {
 fn parse_array_elem_assign() {
     let file_content = "a[0] := 1;";
 
-    let tokens = tokens(&file_content);
+    let tokens = tokens(&file_content).unwrap();
     dbg!(&tokens);
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
@@ -1372,7 +1371,7 @@ fn parse_array_elem_assign() {
 fn parsing_array1() {
     let file_content = std::fs::read_to_string("./examples/array/array1.oox").unwrap();
 
-    let tokens = tokens(&file_content);
+    let tokens = tokens(&file_content).unwrap();
     let as_ref = tokens.as_slice();
     dbg!(as_ref);
     let c = parse(&as_ref).unwrap();

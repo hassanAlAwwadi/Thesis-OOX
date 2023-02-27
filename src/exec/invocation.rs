@@ -169,7 +169,7 @@ pub(super) fn multiple_method_invocation(
                     );
                     return ActionResult::FunctionCall(next_entry);
                 }
-                dbg!(resulting_alias.keys());
+                //dbg!(resulting_alias.keys());
 
                 // We need to split states such that each resulting path has a single type for the object in the alias map.
                 return ActionResult::StateSplitObjectTypes { symbolic_object_ref: var.clone(), resulting_alias }

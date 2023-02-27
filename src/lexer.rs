@@ -52,15 +52,18 @@ impl<'a> Display for Token<'a> {
 
 
 // pub fn tokens(file: &str) -> Vec<(Token, (usize, usize))> {
-pub fn tokens<'a>(file: &'a str) -> Vec<Token<'a>> {
+pub fn tokens<'a>(file: &'a str) -> Result<Vec<Token<'a>>, (usize, usize)> {
     let file = OOXLexer::parse(Rule::input, file)
-        .expect("unsuccessful parse") // unwrap the parse result
+        .map_err(|error| match error.line_col {
+            pest::error::LineColLocation::Pos((line, col)) => (line, col),
+            pest::error::LineColLocation::Span((start_line, start_col), _) => (start_line, start_col),
+        })? // unwrap the parse result
         .next()
         .unwrap(); // get and unwrap the `file` rule; never fails
 
     // //dbg!(&file);
 
-    file.into_inner()
+    let tokens = file.into_inner()
         .filter_map(|record| {
             if record.as_rule() == Rule::section {
                 Some(record)
@@ -88,5 +91,6 @@ pub fn tokens<'a>(file: &'a str) -> Vec<Token<'a>> {
                     token
                 })
         })
-        .collect::<Vec<_>>()
+        .collect::<Vec<_>>();
+    Ok(tokens)
 }

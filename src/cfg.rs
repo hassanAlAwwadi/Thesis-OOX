@@ -556,7 +556,7 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
 fn cfg_for_min() {
     let file_content = include_str!("../examples/psv/min.oox");
 
-    let tokens = tokens(file_content);
+    let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
 
     let c = parse(&tokens);
@@ -590,7 +590,7 @@ fn cfg_for_min() {
 fn cfg_for_try_catch() {
     let file_content = include_str!("../examples/simple_try_catch.oox");
 
-    let tokens = tokens(file_content);
+    let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
 
     let c = parse(&tokens);

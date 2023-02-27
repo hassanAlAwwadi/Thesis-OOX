@@ -5,12 +5,18 @@ use crate::syntax::{NonVoidType, Expression, Rhs, Lhs, Invocation, Method};
 
 
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum SourcePos {
     UnknownPosition,
     SourcePos {
         line: usize,
         col: usize,
+    }
+}
+
+impl SourcePos {
+    pub fn new(line: usize, col: usize) -> SourcePos {
+        SourcePos::SourcePos { line, col }
     }
 }
 

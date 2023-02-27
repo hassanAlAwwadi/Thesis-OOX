@@ -31,7 +31,7 @@ use crate::{
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
     lexer::tokens,
     parser::{insert_exceptional_clauses, parse},
-    positioned::SourcePos,
+    positioned::{SourcePos, WithPosition},
     resolver,
     stack::{lookup_in_stack, write_to_stack, StackFrame},
     symbol_table::SymbolTable,
@@ -230,7 +230,7 @@ impl State {
 #[derive(Debug, PartialEq, Eq)]
 enum SymResult {
     Valid,
-    Invalid,
+    Invalid(SourcePos),
 }
 
 /// The main function for the symbolic execution, any path splitting due to the control flow graph or array initialization happens here.
@@ -303,7 +303,7 @@ fn sym_exec(
                     }
                 } else {
                     // Function exit of the main function under verification
-                    if let CFGStatement::FunctionExit { .. } = &program[&state.pc] {
+                    if let CFGStatement::FunctionExit { decl_name, .. } = &program[&state.pc] {
                         // Valid program exit, continue
                         statistics.measure_finish();
                         if let Some(next_state) = remaining_states.pop() {
@@ -313,12 +313,13 @@ fn sym_exec(
                             return SymResult::Valid;
                         }
                     } else {
-                        return SymResult::Invalid;
+                        // Unexpected end of CFG
+                        panic!("Unexpected end of CFG");
                     }
                 }
             }
-            ActionResult::InvalidAssertion => {
-                return SymResult::Invalid;
+            ActionResult::InvalidAssertion(info) => {
+                return SymResult::Invalid(info);
             }
             ActionResult::InfeasiblePath => {
                 // Finish this branch
@@ -491,14 +492,14 @@ fn array_initialisation(
         .into(),
     );
 
-    dbg!("after array initialization", &state.heap, &state.alias_map);
+    // dbg!("after array initialization", &state.heap, &state.alias_map);
 }
 
 enum ActionResult {
     Continue,
     Return(u64),
     FunctionCall(u64),
-    InvalidAssertion,
+    InvalidAssertion(SourcePos),
     InfeasiblePath,
     Finish,
     ArrayInitialization(Identifier),
@@ -605,7 +606,7 @@ fn action(
 
             let is_valid = eval_assertion(state, expression, st, statistics);
             if !is_valid {
-                return ActionResult::InvalidAssertion;
+                return ActionResult::InvalidAssertion(assertion.get_position());
             }
             ActionResult::Continue
         }
@@ -666,10 +667,10 @@ fn action(
                     }
                 } else {
                     // Assert that requires is true
-                    let requires = prepare_assert_expression(state, requires, st);
-                    let is_valid = eval_assertion(state, requires.clone(), st, statistics);
+                    let assertion = prepare_assert_expression(state, requires.clone(), st);
+                    let is_valid = eval_assertion(state, assertion.clone(), st, statistics);
                     if !is_valid {
-                        return ActionResult::InvalidAssertion;
+                        return ActionResult::InvalidAssertion(requires.get_position());
                     }
                     state.constraints.insert(requires.deref().clone());
                 }
@@ -690,11 +691,11 @@ fn action(
                 ..
             } = state.stack.last().unwrap();
             if let Some(post_condition) = current_member.post_condition() {
-                let expression = prepare_assert_expression(state, post_condition, st);
+                let expression = prepare_assert_expression(state, post_condition.clone(), st);
                 let is_valid = eval_assertion(state, expression, st, statistics);
                 if !is_valid {
                     // postcondition invalid
-                    return ActionResult::InvalidAssertion;
+                    return ActionResult::InvalidAssertion(post_condition.get_position());
                 }
             }
             if state.stack.len() == 1 {
@@ -758,12 +759,12 @@ fn exec_throw(state: &mut State, st: &SymbolTable, message: &str, statistics: &m
                 .unwrap_or_else(|| panic!("Unexpected empty stack"));
 
             if let Some(exceptional) = stack_frame.current_member.exceptional() {
-                let assertion = prepare_assert_expression(state, exceptional, st);
+                let assertion = prepare_assert_expression(state, exceptional.clone(), st);
                 //dbg!(&assertion);
-                let is_valid = eval_assertion(state, assertion, st, statistics);
+                let is_valid = eval_assertion(state, assertion.clone(), st, statistics);
                 if !is_valid {
                     error!(state.logger, "Exceptional error: {:?}", message);
-                    return ActionResult::InvalidAssertion;
+                    return ActionResult::InvalidAssertion(exceptional.get_position());
                 }
             }
             current_depth -= 1;
@@ -773,12 +774,12 @@ fn exec_throw(state: &mut State, st: &SymbolTable, message: &str, statistics: &m
     } else {
         while let Some(stack_frame) = state.stack.last() {
             if let Some(exceptional) = stack_frame.current_member.exceptional() {
-                let assertion = prepare_assert_expression(state, exceptional, st);
+                let assertion = prepare_assert_expression(state, exceptional.clone(), st);
                 //dbg!(&assertion);
-                let is_valid = eval_assertion(state, assertion, st, statistics);
+                let is_valid = eval_assertion(state, assertion.clone(), st, statistics);
                 if !is_valid {
                     error!(state.logger, "Exceptional error: {:?}", message);
-                    return ActionResult::InvalidAssertion;
+                    return ActionResult::InvalidAssertion(exceptional.get_position());
                 }
             }
             state.stack.pop();
@@ -892,55 +893,6 @@ fn exec_invocation(
                 );
             }
         }
-        // (Invocation::InvokeMethod { resolved: Some((DeclarationMember::Method {
-        //     is_static: false,
-        //     return_type,
-        //     name,
-        //     params,
-        //     specification,
-        //     body,
-        // })), .. }) => {
-        //     // evaluate arguments
-        //     let arguments = invocation
-        //         .arguments()
-        //         .into_iter()
-        //         .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
-        //         .collect::<Vec<_>>();
-
-        //     let invocation_lhs = if let Invocation::InvokeMethod { lhs, .. } = invocation {
-        //         lhs
-        //     } else {
-        //         panic!("expected invokemethod");
-        //     };
-        //     dbg!(invocation_lhs);
-        //     let object = lookup_in_stack(invocation_lhs, &state.stack).unwrap();
-        //     // object can be either a concrete reference to a heap object, or a symbolic object
-        //     // the latter means that we have to split states here, one path for every alias object types,
-        //     // if there is only one possible then we can also continue with that path
-        //     let type_ = match object.as_ref() {
-        //         Expression::Ref { ref_, type_ } => type_,
-        //         Expression::SymbolicRef { var, type_ } => todo!(),
-        //         _ => unreachable!(),
-        //     };
-
-        //     let this = (type_.clone(), invocation_lhs.to_owned());
-
-        //     exec_method(
-        //         state,
-        //         return_point,
-        //         member.clone(),
-        //         lhs,
-        //         &arguments,
-        //         &params,
-        //         st,
-        //         this,
-        //     );
-        //     // TODO: add lookup for overrides, in case of an object with superclasses
-        //     let next_entry =
-        //         find_entry_for_static_invocation(class_name, invocation.identifier(), program);
-
-        //     ActionResult::FunctionCall(next_entry)
-        // }
         Invocation::InvokeConstructor {
             resolved,
             class_name,
@@ -1864,7 +1816,7 @@ fn verify(
     *FILE_NAMES.lock().unwrap() = path.to_string();
 
 
-    let tokens = tokens(&file_content);
+    let tokens = tokens(&file_content).map_err(|(line, col)| format!("Lexer error at {}:{}:{}", path.to_string(), line, col))?;
     let as_ref = tokens.as_slice();
     // dbg!(as_ref);
     let c = parse(&tokens);
@@ -1961,8 +1913,14 @@ fn verify(
         &mut statistics,
     );
 
+    let result_text = match sym_result {
+        SymResult::Valid => "VALID".to_string(),
+        SymResult::Invalid(SourcePos::SourcePos { line, col }) => format!("INVALID at {}:{}:{}", path, line, col),
+        SymResult::Invalid(SourcePos::UnknownPosition) => "INVALID at unknown position".to_string()
+    };
+
     println!("Statistics");
-    println!("  Final result:     {}", if sym_result == SymResult::Valid { "VALID" } else { "INVALID "});
+    println!("  Final result:     {}", result_text);
     println!("  #branches:        {}", statistics.number_of_branches);
     println!("  #prunes:          {}", statistics.number_of_prunes);
     println!("  #complete_paths:  {}", statistics.number_of_complete_paths);
@@ -2011,7 +1969,7 @@ fn sym_test_failure() {
     let path = "./examples/psv/test.oox";
     assert_eq!(
         verify(&path, "Main", "main", 30).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::SourcePos { line: 10, col: 24 })
     );
 }
 
@@ -2021,7 +1979,7 @@ fn sym_exec_div_by_n() {
     // so this one is invalid at k = 100, in OOX it's invalid at k=105, due to exceptions (more if statements are added)
     assert_eq!(
         verify(&path, "Main", "divByN_invalid", 100).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(73, 16))
     );
 }
 
@@ -2057,7 +2015,7 @@ fn sym_exec_linked_list1_invalid() {
     let path = "./examples/intLinkedList.oox";
     assert_eq!(
         verify(&path, "Node", "test2_invalid", 90).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(109, 16))
     );
 }
 
@@ -2067,7 +2025,7 @@ fn sym_exec_linked_list3_invalid() {
     // at k=80 it fails, after ~170 sec in hs oox, rs oox does this in ~90 sec
     assert_eq!(
         verify(&path, "Node", "test3_invalid1", 110).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(141, 18))
     );
 }
 
@@ -2085,7 +2043,7 @@ fn sym_exec_linked_list4_invalid() {
     let path = "./examples/intLinkedList.oox";
     assert_eq!(
         verify(&path, "Node", "test4_invalid", 90).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(11, 21))
     );
 }
 
@@ -2108,7 +2066,7 @@ fn sym_exec_exceptions1() {
     );
     assert_eq!(
         verify(&path, "Main", "test1_invalid", 20).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(15, 21))
     );
     assert_eq!(
         verify(&path, "Main", "div", 30).unwrap(),
@@ -2126,7 +2084,7 @@ fn sym_exec_exceptions_m0() {
     );
     assert_eq!(
         verify(&path, "Main", "m0_invalid", 20).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(49, 17))
     );
 }
 
@@ -2140,7 +2098,7 @@ fn sym_exec_exceptions_m1() {
     );
     assert_eq!(
         verify(&path, "Main", "m1_invalid", 20).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(68, 17))
     );
 }
 
@@ -2164,11 +2122,11 @@ fn sym_exec_exceptions_m3() {
     );
     assert_eq!(
         verify(&path, "Main", "m3_invalid1", 30).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(94, 17))
     );
     assert_eq!(
         verify(&path, "Main", "m3_invalid2", 30).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(102, 21))
     );
 }
 
@@ -2198,7 +2156,7 @@ fn sym_exec_array1() {
     );
     assert_eq!(
         verify(&path, "Main", "foo_invalid", 50).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(33, 16))
     );
     assert_eq!(
         verify(&path, "Main", "sort", 300).unwrap(),
@@ -2206,7 +2164,7 @@ fn sym_exec_array1() {
     );
     assert_eq!(
         verify(&path, "Main", "sort_invalid1", 50).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(62, 17))
     );
     assert_eq!(
         verify(&path, "Main", "max", 50).unwrap(),
@@ -2214,11 +2172,11 @@ fn sym_exec_array1() {
     );
     assert_eq!(
         verify(&path, "Main", "max_invalid1", 50).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(104, 21))
     );
     assert_eq!(
         verify(&path, "Main", "max_invalid2", 50).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(120, 17))
     );
     assert_eq!(
         verify(&path, "Main", "exists_valid", 50).unwrap(),
@@ -2227,7 +2185,7 @@ fn sym_exec_array1() {
     // assert_eq!(verify_file(&file_content, "exists_invalid1", 50), SymResult::Invalid);
     assert_eq!(
         verify(&path, "Main", "exists_invalid2", 50).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(160, 17))
     );
     assert_eq!(
         verify(&path, "Main", "array_creation1", 50).unwrap(),
@@ -2239,7 +2197,7 @@ fn sym_exec_array1() {
     );
     assert_eq!(
         verify(&path, "Main", "array_creation_invalid", 50).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(193, 17))
     );
 }
 
@@ -2253,11 +2211,11 @@ fn sym_exec_array2() {
     );
     assert_eq!(
         verify(&path, "Main", "foo1_invalid", 50).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(37, 15))
     );
     assert_eq!(
         verify(&path, "Main", "foo2_invalid", 50).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(51, 18))
     );
     assert_eq!(
         verify(&path, "Main", "sort", 100).unwrap(),
@@ -2276,7 +2234,7 @@ fn sym_exec_inheritance() {
     );
     assert_eq!(
         verify(&path, "Main", "test1_invalid", k).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(25, 16))
     );
     assert_eq!(
         verify(&path, "Main", "test2a", k).unwrap(),
@@ -2290,7 +2248,7 @@ fn sym_exec_inheritance() {
 
     assert_eq!(
         verify(&path, "Main", "test2b_invalid", k).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(68, 16))
     );
 
     assert_eq!(
@@ -2304,7 +2262,7 @@ fn sym_exec_inheritance() {
     );
     assert_eq!(
         verify(&path, "Main", "test4_invalid", k).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(25, 16))
     );
     assert_eq!(
         verify(&path, "Main", "test5", k).unwrap(),
@@ -2327,7 +2285,7 @@ fn sym_exec_inheritance_specifications() {
     );
     assert_eq!(
         verify(&path, "Main", "test_invalid", k).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(3, 18))
     );
 }
 
@@ -2348,7 +2306,7 @@ fn sym_exec_interface() {
     );
     assert_eq!(
         verify(&path, "Main", "test1_invalid", k).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(35, 12))
     );
 }
 
@@ -2363,7 +2321,7 @@ fn sym_exec_interface2() {
     );
     assert_eq!(
         verify(&path, "Foo1", "test_invalid", k).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(3, 16))
     );
     assert_eq!(
         verify(&path, "Foo2", "test_valid", k).unwrap(),
@@ -2371,7 +2329,7 @@ fn sym_exec_interface2() {
     );
     assert_eq!(
         verify(&path, "Foo3", "test_invalid", k).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(37, 16))
     );
     //assert_eq!(verify(&file_content, "Foo4", "test_valid", k), SymResult::Valid);
 }
@@ -2390,7 +2348,7 @@ fn benchmark_col_25() {
     let k = 15000;
     assert_eq!(
         verify("./benchmarks/defects4j/collections_25.oox", "Test", "test", k).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(352, 21))
     );
 }
 
@@ -2399,7 +2357,7 @@ fn benchmark_col_25_symbolic() {
     let k = 15000;
     assert_eq!(
         verify("./benchmarks/defects4j/collections_25.oox", "Test", "test_symbolic", k).unwrap(),
-        SymResult::Invalid
+        SymResult::Invalid(SourcePos::new(395, 21))
     );
 }
 
