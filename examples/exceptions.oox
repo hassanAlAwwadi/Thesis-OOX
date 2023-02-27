@@ -79,6 +79,7 @@ class Main
         int a := Main.div(1, 0);
     }
 
+    // program can only run successfully if x < 9
     static void m3(int x) // valid spec:
         ensures(x < 9)
         exceptional(x >= 9)

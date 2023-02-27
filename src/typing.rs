@@ -603,7 +603,7 @@ fn type_invocation(
         } => {
             let arguments = arguments
                 .into_iter()
-                .map(|arg| type_expression(arg.into(), env, st))
+                .map(|arg| type_expression(arg.into(), env, st).map(Rc::new))
                 .collect::<Result<Vec<_>, _>>()?;
             // if lhs is not found as a variable, assume this is a static invocation.
             let lhs_type = env.get_var_type(&lhs).ok();
@@ -612,7 +612,7 @@ fn type_invocation(
                 let mut arg_types = lhs_type
                     .as_ref()
                     .map_or(Vec::new(), |lhs_type| vec![lhs_type.clone()]);
-                arg_types.extend(arguments.iter().map(Typeable::type_of));
+                arg_types.extend(arguments.iter().map(AsRef::as_ref).map(Typeable::type_of));
                 arg_types
             }; // argument types can be used when we support multiple methods with the same name, currently argument types are not checked.
 
@@ -622,6 +622,10 @@ fn type_invocation(
                 .unwrap_or(&lhs);
 
             let resolved = resolver::resolve_method(class_name, &rhs, st);
+
+            if resolved.len() == 0 {
+                return Err(error::could_not_resolve_method(&rhs, info))
+            }
 
             Ok(Invocation::InvokeMethod {
                 lhs,
@@ -653,7 +657,8 @@ fn type_invocation(
             info,
             ..
         } => {
-            let resolved = resolver::resolve_constructor(&class_name, st);
+            let arguments = arguments.into_iter().map(|arg| type_expression(arg, env, st).map(Rc::new)).collect::<Result<Vec<_>, _>>()?;
+            let resolved = resolver::resolve_constructor(&class_name, &arguments,  st)?;
             Ok(Invocation::InvokeConstructor {
                 class_name,
                 arguments,

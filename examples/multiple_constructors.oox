@@ -1,0 +1,27 @@
+class Foo {
+    int x;
+    int y;
+
+    Foo() {}
+
+    Foo(int x) { this.x := x; }
+
+    Foo(int x, int y) { this.x := x; this.y := y; }
+
+    static void test() {
+        Foo a := new Foo();
+        int aX := a.x;
+        int aY := a.y;
+        assert aX == 0 && aY == 0;
+
+        Foo b := new Foo(42);
+        int bX := b.x; 
+        int bY := b.y;
+        assert bX == 42 && bY == 0;
+
+        Foo c := new Foo(1, 2);
+        int cX := c.x;
+        int cY := c.y;
+        assert cX == 1 && cY == 2;
+    }
+}

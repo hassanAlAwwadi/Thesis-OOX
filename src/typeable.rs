@@ -4,7 +4,7 @@ use ordered_float::NotNan;
 
 use crate::{
     exec::HeapValue,
-    syntax::{DeclarationMember, Expression, Invocation, Lit, NonVoidType, RuntimeType, Type, Rhs, Lhs, Method}, symbol_table::SymbolTable, positioned::SourcePos,
+    syntax::{DeclarationMember, Expression, Invocation, Lit, NonVoidType, RuntimeType, Type, Rhs, Lhs, Method, Parameter}, symbol_table::SymbolTable, positioned::SourcePos,
 };
 
 pub trait Typeable {
@@ -131,6 +131,12 @@ impl Typeable for &Expression {
 impl Typeable for RuntimeType {
     fn type_of(&self) -> RuntimeType {
         self.clone()
+    }
+}
+
+impl Typeable for &RuntimeType {
+    fn type_of(&self) -> RuntimeType {
+        (*self).type_of()
     }
 }
 
@@ -274,5 +280,11 @@ impl Typeable for &Rhs {
 impl Typeable for Method {
     fn type_of(&self) -> RuntimeType {
         self.return_type.type_of()
+    }
+}
+
+impl Typeable for Parameter {
+    fn type_of(&self) -> RuntimeType {
+        self.type_.type_of()
     }
 }

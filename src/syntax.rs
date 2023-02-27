@@ -271,7 +271,7 @@ pub enum Invocation {
         // f.method(..), this.method(..), Foo.method(..);
         lhs: Identifier,
         rhs: Identifier,
-        arguments: Vec<Expression>,
+        arguments: Vec<Rc<Expression>>,
 
         #[derivative(PartialEq = "ignore")]
         resolved: Option<HashMap<Identifier, (Declaration, Rc<Method>)>>,
@@ -282,7 +282,7 @@ pub enum Invocation {
     InvokeSuperMethod {
         // super.method(..);
         rhs: Identifier,
-        arguments: Vec<Expression>,
+        arguments: Vec<Rc<Expression>>,
 
         #[derivative(PartialEq = "ignore")]
         resolved: Option<Box<(Declaration, Rc<Method>)>>,
@@ -292,7 +292,7 @@ pub enum Invocation {
     InvokeConstructor {
         // new Foo(..)
         class_name: Identifier,
-        arguments: Vec<Expression>,
+        arguments: Vec<Rc<Expression>>,
 
         #[derivative(PartialEq = "ignore")]
         resolved: Option<Box<(Declaration, Rc<Method>)>>,
@@ -301,7 +301,7 @@ pub enum Invocation {
     },
     /// invocation of the constructor of the superclass. i.e. `super(..);`
     InvokeSuperConstructor {
-        arguments: Vec<Expression>,
+        arguments: Vec<Rc<Expression>>,
 
         #[derivative(PartialEq = "ignore")]
         resolved: Option<Box<(Declaration, Rc<Method>)>>,
@@ -321,12 +321,12 @@ impl Invocation {
     //     }
     // }
 
-    pub fn arguments(&self) -> &Vec<Expression> {
+    pub fn arguments(&self) -> &Vec<Rc<Expression>> {
         match &self {
-            Invocation::InvokeMethod { arguments, .. } => arguments.as_ref(),
-            Invocation::InvokeSuperMethod { arguments, .. } => arguments.as_ref(),
-            Invocation::InvokeConstructor { arguments, .. } => arguments.as_ref(),
-            Invocation::InvokeSuperConstructor { arguments, .. } => arguments.as_ref(),
+            Invocation::InvokeMethod { arguments, .. } => arguments,
+            Invocation::InvokeSuperMethod { arguments, .. } => arguments,
+            Invocation::InvokeConstructor { arguments, .. } => arguments,
+            Invocation::InvokeSuperConstructor { arguments, .. } => arguments,
         }
     }
 

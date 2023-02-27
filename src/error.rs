@@ -35,6 +35,10 @@ pub fn class_does_not_exist(expected_class: &Identifier, info: SourcePos) -> Str
     format!("Cannot find class {}, {}", expected_class, info)
 }
 
+pub fn interface_does_not_exist(expected_interface: &Identifier, info: SourcePos) -> String {
+    format!("Cannot find interface {}, {}", expected_interface, info)
+}
+
 pub fn expected_class_found_interface(expected_class: &Identifier, info: SourcePos) -> String {
     format!(
         "Expected declaration {} to be a class, but found an interface. {}",
@@ -46,5 +50,17 @@ pub fn expected_interface_found_class(expected_interface: &Identifier, info: Sou
     format!(
         "Expected declaration {} to be an interface, but found a class. {}",
         expected_interface, info
+    )
+}
+
+pub fn could_not_resolve_method(method_name: &Identifier, info: SourcePos) -> String {
+    format!(
+        "Could not find a method implementation of {}(..), {}", method_name, info
+    )
+}
+
+pub fn could_not_resolve_constructor(constructor_name: &Identifier, arguments: &[RuntimeType], info: SourcePos) -> String {
+    format!(
+        "Could not find a constructor of {} with arguments {:?}, {}", constructor_name, arguments, info
     )
 }

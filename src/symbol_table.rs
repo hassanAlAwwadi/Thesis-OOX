@@ -228,7 +228,7 @@ impl SymbolTable {
                 Err(error::expected_interface_found_class(interface_name, interface_name.get_position()))
             }
 
-            None => Err(error::class_does_not_exist(interface_name, interface_name.get_position())),
+            None => Err(error::interface_does_not_exist(interface_name, interface_name.get_position())),
         }
     }
 

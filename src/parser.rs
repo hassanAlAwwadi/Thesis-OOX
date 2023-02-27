@@ -343,8 +343,8 @@ fn invocation<'a>() -> Parser<'a, Token<'a>, Invocation> {
         | super_constructor_invocation
 }
 
-fn arguments<'a>() -> Parser<'a, Token<'a>, Vec<Expression>> {
-    list(expression(), punct(","))
+fn arguments<'a>() -> Parser<'a, Token<'a>, Vec<Rc<Expression>>> {
+    list(expression(), punct(",")).map(|v| v.into_iter().map(Rc::new).collect())
 }
 
 fn specification<'a>() -> Parser<'a, Token<'a>, Specification> {
@@ -911,7 +911,7 @@ fn exceptional_invocation(invocation: &Invocation, class_names: &[Identifier]) -
 }
 fn exceptional_invoke_method(
     lhs: &Identifier,
-    arguments: &Vec<Expression>,
+    arguments: &Vec<Rc<Expression>>,
     class_names: &[Identifier],
 ) -> HashSet<Expression> {
     let exceptional_args: HashSet<_> = arguments

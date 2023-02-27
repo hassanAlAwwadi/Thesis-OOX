@@ -1,0 +1,32 @@
+class A {
+    void method() {
+        assert true;
+    }
+}
+
+class B extends A {
+    void method() {
+        assert false;
+    }
+
+    void x() {
+        super.method();
+    }
+}
+
+class C extends B {
+    void method() {
+        assert false;
+    }
+}
+
+class D extends C {
+
+}
+
+class Main {
+    static void test(D c)
+        requires(c != null) {
+        c.x();
+    }
+}

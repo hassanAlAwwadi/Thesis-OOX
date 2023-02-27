@@ -18,10 +18,12 @@ pub enum CFGStatement {
     FunctionEntry {
         decl_name: Identifier,
         method_name: Identifier,
+        argument_types: Vec<RuntimeType>,
     },
     FunctionExit {
         decl_name: Identifier,
         method_name: Identifier,
+        argument_types: Vec<RuntimeType>
     },
 }
 
@@ -62,7 +64,7 @@ fn memberCFG(
     i: &mut u64,
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
     match member {
-        DeclarationMember::Method(method) => label_method(class_name, &method.name, &method.body.borrow(), i),
+        DeclarationMember::Method(method) => label_method(class_name, method, i),
         DeclarationMember::Constructor(method) => {
             let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
             let mut v = Vec::new();
@@ -71,6 +73,7 @@ fn memberCFG(
                 CFGStatement::FunctionEntry {
                     decl_name: class_name.clone(),
                     method_name: method.name.clone(),
+                    argument_types: method.params.iter().map(Typeable::type_of).collect()
                 },
             ));
             let entry_label = *i;
@@ -96,6 +99,7 @@ fn memberCFG(
                 CFGStatement::FunctionExit {
                     decl_name: class_name,
                     method_name: method.name.clone(),
+                    argument_types: method.params.iter().map(Typeable::type_of).collect()
                 },
             ));
             let exit_label = *i;
@@ -135,7 +139,7 @@ fn interface_member_cfg(
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
     match member {
         InterfaceMember::DefaultMethod(method) => {
-            label_method(class_name, &method.name, &method.body.borrow(), i)
+            label_method(class_name, method, i)
         }
         InterfaceMember::AbstractMethod(_) => (Vec::new(), Vec::new()),
     }
@@ -143,8 +147,7 @@ fn interface_member_cfg(
 
 fn label_method(
     class_name: Identifier,
-    name: &Identifier,
-    body: &Statement,
+    method: &Method,
     i: &mut u64,
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
@@ -153,17 +156,19 @@ fn label_method(
         *i,
         CFGStatement::FunctionEntry {
             decl_name: class_name.clone(),
-            method_name: name.clone(),
+            method_name: method.name.clone(),
+            argument_types: method.params.iter().map(Typeable::type_of).collect()
         },
     ));
     let entry_label = *i;
     *i += 1;
-    v.append(&mut statementCFG(&body, i));
+    v.append(&mut statementCFG(&method.body.borrow(), i));
     v.push((
         *i,
         CFGStatement::FunctionExit {
             decl_name: class_name,
-            method_name: name.clone(),
+            method_name: method.name.clone(),
+            argument_types: method.params.iter().map(Typeable::type_of).collect()
         },
     ));
     let exit_label = *i;

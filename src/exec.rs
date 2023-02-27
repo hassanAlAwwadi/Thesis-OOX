@@ -29,7 +29,6 @@ use crate::{
     dsl::{equal, ite, negate, or, toIntExpr},
     eval::{self, evaluate, evaluateAsInt},
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
-    exec::invocation::{non_static_resolved_method_invocation, single_method_invocation},
     lexer::tokens,
     parser::{insert_exceptional_clauses, parse},
     positioned::SourcePos,
@@ -681,6 +680,7 @@ fn action(
         CFGStatement::FunctionExit {
             decl_name,
             method_name,
+            argument_types
         } => {
             state.exception_handler.decrement_handler();
 
@@ -850,6 +850,9 @@ fn exec_invocation(
 
     state.exception_handler.increment_handler();
 
+
+    let argument_types = invocation.arguments().iter().map(AsRef::as_ref).map(Typeable::type_of);
+
     match invocation {
         Invocation::InvokeMethod {
             resolved,
@@ -952,7 +955,7 @@ fn exec_invocation(
             let arguments = invocation
                 .arguments()
                 .into_iter()
-                .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
+                .map(|arg| evaluate(state, arg.clone(), st))
                 .collect::<Vec<_>>();
 
             // Zis is problems with interfaces
@@ -974,7 +977,7 @@ fn exec_invocation(
                 this_param,
             );
 
-            let next_entry = find_entry_for_static_invocation(&class_name, &method.name, program);
+            let next_entry = find_entry_for_static_invocation(&class_name, &method.name, argument_types,  program, st);
             ActionResult::FunctionCall(next_entry)
         }
         Invocation::InvokeSuperConstructor { resolved, .. } => {
@@ -988,7 +991,7 @@ fn exec_invocation(
             let arguments = invocation
                 .arguments()
                 .into_iter()
-                .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
+                .map(|arg| evaluate(state, arg.clone(), st))
                 .collect::<Vec<_>>();
 
             // zis is trouble with interfaces
@@ -1009,7 +1012,7 @@ fn exec_invocation(
                 st,
                 this_param,
             );
-            let next_entry = find_entry_for_static_invocation(&class_name, &method.name, program);
+            let next_entry = find_entry_for_static_invocation(&class_name, &method.name, argument_types, program, st);
             ActionResult::FunctionCall(next_entry)
         }
         Invocation::InvokeSuperMethod { resolved, .. } => {
@@ -1034,7 +1037,9 @@ fn exec_invocation(
 fn find_entry_for_static_invocation(
     class_name: &str,
     method_name: &str,
+    argument_types: impl ExactSizeIterator<Item=RuntimeType> + Clone,
     program: &HashMap<u64, CFGStatement>,
+    st: &SymbolTable
 ) -> u64 {
     // dbg!(invocation);
     let (entry, _) = program
@@ -1043,9 +1048,11 @@ fn find_entry_for_static_invocation(
             if let CFGStatement::FunctionEntry {
                 decl_name: other_decl_name,
                 method_name: other_method_name,
+                argument_types: other_argument_types,
             } = *v
             {
-                *other_decl_name == class_name && *other_method_name == method_name
+                let mut argument_types_match = argument_types.clone().zip(other_argument_types).map(|(a, b)| a.is_of_type(b, st));
+                *other_decl_name == class_name && *other_method_name == method_name && argument_types.len() == other_argument_types.len() && argument_types_match.all_equal()
             } else {
                 false
             }
@@ -1888,8 +1895,9 @@ fn verify(
 
     // dbg!(&flows);
     // panic!();
+    let argument_types = initial_method.params.iter().map(Typeable::type_of);
 
-    let pc = find_entry_for_static_invocation(class_name, method_name, &program);
+    let pc = find_entry_for_static_invocation(class_name, method_name, argument_types, &program, &symbol_table);
     // dbg!(&params);
     let params = initial_method
         .params
@@ -2411,4 +2419,22 @@ fn any_linked_list() {
         verify("./benchmarks/experiment1/anyLinkedList.oox", "Main", "test2", k).unwrap(),
         SymResult::Valid
     );
+}
+
+#[test]
+fn supertest() {
+    let k = 50;
+    assert_eq!(
+        verify("./examples/supertest.oox", "Main", "test", k).unwrap(),
+        SymResult::Valid
+    )
+}
+
+#[test]
+fn multiple_constructors() {
+    let k = 50;
+    assert_eq!(
+        verify("./examples/multiple_constructors.oox", "Foo", "test", k).unwrap(),
+        SymResult::Valid
+    )
 }

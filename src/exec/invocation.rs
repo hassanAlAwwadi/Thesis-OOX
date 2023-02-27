@@ -36,7 +36,7 @@ pub(super) fn single_method_invocation(
         let arguments = invocation
             .arguments()
             .into_iter()
-            .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
+            .map(|arg| evaluate(state, arg.clone(), st))
             .collect::<Vec<_>>();
 
         exec_static_method(
@@ -48,8 +48,9 @@ pub(super) fn single_method_invocation(
             &resolved_method.params,
             st,
         );
+        let argument_types = invocation.arguments().iter().map(AsRef::as_ref).map(Typeable::type_of);
         let next_entry =
-            find_entry_for_static_invocation(class_name, invocation.identifier(), program);
+            find_entry_for_static_invocation(class_name, invocation.identifier(), argument_types, program, st);
 
         return next_entry;
     } else {
@@ -66,6 +67,7 @@ pub(super) fn multiple_method_invocation(
     state: &mut State,
     invocation_lhs: &Identifier,
     invocation: &Invocation,
+    // For each type, the method implementation it resolves to.
     potential_methods: &HashMap<Identifier, (Declaration, Rc<Method>)>,
     return_point: u64,
     lhs: Option<Lhs>,
@@ -74,8 +76,8 @@ pub(super) fn multiple_method_invocation(
 ) -> ActionResult {
     let object = lookup_in_stack(invocation_lhs, &state.stack).unwrap();
     // object can be either a concrete reference to a heap object, or a symbolic object
-    // the latter means that we have to split states here, one path for every alias object types,
-    // if there is only one possible then we can also continue with that path
+    // the latter means that we have to split states here, one path for each distinct method that is resolved to,
+    // if all aliases resolve to the same method, then we can also continue with that path
     match object.as_ref() {
         Expression::Ref { ref_, type_, .. } => {
             let this = (type_.clone(), invocation_lhs.to_owned());
@@ -113,7 +115,7 @@ pub(super) fn multiple_method_invocation(
             // we can resolve which method to call
 
             if let Some(RuntimeType::ReferenceRuntimeType { type_ }) = alias_entry.uniform_type() {
-                // we can resolve this
+                // All aliases have the same type, so they all resolve to the same method.
                 let (
                     declaration,
                     member,
@@ -133,30 +135,33 @@ pub(super) fn multiple_method_invocation(
                 );
                 return ActionResult::FunctionCall(next_entry);
             } else {
-                // we need to split states such that each resulting path has a single type for the object in the alias map.
-                // dbg!(&alias_entry.aliases.iter().map(|a| (a.clone(), Typeable::type_of(a.as_ref()))).collect_vec());
-                // dbg!(potential_methods.keys());
-                let resulting_alias = utils::group_by(alias_entry.aliases.iter().map(|alias| (potential_methods.get(alias.type_of().as_reference_type().expect("expected reference type")).map(|(d, dm)| {
-                    (d.name().clone(), dm.name.clone())
-                }).expect("Could not find method for the type"), alias.clone())));
+                // Not all aliases have the same type, so it can happen that different types resolve to different methods.
+                // First we check to which methods they resolve:
+
+                // A mapping from a (class_name, method_name) -> array of aliases that resolve to this method.
+                let resulting_alias = utils::group_by(alias_entry.aliases.iter()
+                .map(|alias| {
+                        let (decl, method) = (potential_methods.get(alias.type_of().as_reference_type().expect("expected reference type"))).expect("Could not find method for the type");
+                        ((decl.name().clone(), method.name.clone()),  alias.clone())
+                    }
+                    )
+                );
+
 
                 if resulting_alias.len() == 1 {
-                    // not a uniform type, but classes resolve to the same method, we can continue with this path.
-                    let ((decl_name, _method_name), _objects) = resulting_alias.iter().next().unwrap();
-                    debug!(state.logger, "Symbolic object contains types that resolve to the same method {:?}::{:?}", decl_name, _method_name);
-
-                    let (
-                        declaration,
-                        member,
-                    ) = potential_methods.get(decl_name).unwrap();
-
-                    let decl_name = declaration.name();
+                    // not a uniform type, but all aliases resolve to the same method, we can continue with this path.
+                    let ((decl_name, method_name), _objects) = resulting_alias.iter().next().unwrap();
+                    debug!(state.logger, "Symbolic object contains types that resolve to the same method {:?}::{:?}", decl_name, method_name);
+                    
+                    // All methods are be the same for each candidate class, so take the first.
+                    let (_decl, method) = potential_methods.values().next().unwrap();
+                    
         
                     let next_entry = non_static_resolved_method_invocation(
                         state,
                         invocation,
                         decl_name,
-                        member.clone(),
+                        method.clone(),
                         return_point,
                         lhs,
                         program,
@@ -166,13 +171,9 @@ pub(super) fn multiple_method_invocation(
                 }
                 dbg!(resulting_alias.keys());
 
+                // We need to split states such that each resulting path has a single type for the object in the alias map.
                 return ActionResult::StateSplitObjectTypes { symbolic_object_ref: var.clone(), resulting_alias }
             }
-
-            // otherwise we need to split states for each type.
-
-
-            todo!()
         }
         _ => unreachable!(),
     };
@@ -197,10 +198,8 @@ fn find_unique_type(aliases: &Vec<Rc<Expression>>) -> Option<RuntimeType> {
 }
 
 
-/// Sane things below
-
-
-pub(super) fn non_static_resolved_method_invocation(
+/// Helper method for a non-static method invocation with an already resolved method.
+fn non_static_resolved_method_invocation(
     state: &mut State,
     invocation: &Invocation,
     class_name: &Identifier,
@@ -216,7 +215,7 @@ pub(super) fn non_static_resolved_method_invocation(
     let arguments = invocation
         .arguments()
         .into_iter()
-        .map(|arg| evaluate(state, Rc::new(arg.clone()), st))
+        .map(|arg| evaluate(state, arg.clone(), st))
         .collect::<Vec<_>>();
 
     let invocation_lhs = match invocation {
@@ -243,7 +242,8 @@ pub(super) fn non_static_resolved_method_invocation(
         st,
         this,
     );
-    let next_entry = find_entry_for_static_invocation(class_name, invocation.identifier(), program);
+    let argument_types = invocation.arguments().iter().map(AsRef::as_ref).map(Typeable::type_of);
+    let next_entry = find_entry_for_static_invocation(class_name, invocation.identifier(), argument_types, program, st);
 
     return next_entry;
 }

@@ -8,9 +8,11 @@ use crate::{
     symbol_table::SymbolTable,
     syntax::{
         self, Class, CompilationUnit, Declaration, DeclarationMember, Identifier, Interface,
-        Invocation, NonVoidType, Parameter, Rhs, RuntimeType, Specification, Statement, Method,
-    },
+        Invocation, NonVoidType, Parameter, Rhs, RuntimeType, Specification, Statement, Method, Expression,
+    }, typeable::Typeable, error, positioned::WithPosition,
 };
+
+pub type ResolveError = String;
 
 // pub fn set_resolvers(
 //     compilation_unit: CompilationUnit<UnresolvedDeclaration>,
@@ -377,6 +379,7 @@ fn method_call_helper(
                     }
                 }
             } else {
+                resolved_so_far.insert(class.name.clone(), (Declaration::Class(class.clone()), method.clone().unwrap()));
                 (Declaration::Class(class.clone()), method.unwrap())
             };
 
@@ -568,25 +571,35 @@ fn method_in_interface(
     }
 }
 
+/// Resolves constructor calls `new Foo(..)` to their method in the syntax tree.
+/// This is needed so we know during symbolic execution what the parameters are, 
+/// whether the method is static and what its return type is.
 fn constructor_call_helper(
     called_constructor: &Identifier,
+    arguments: &Vec<Rc<Expression>>,
     st: &SymbolTable
-) -> Box<(Declaration, Rc<Method>)> {
+) -> Result<Box<(Declaration, Rc<Method>)>, ResolveError> {
     let class = st.get_class(called_constructor).unwrap();
 
     for member in &class.members {
         if let DeclarationMember::Constructor(method) = member
         {
             //dbg!("{:?}, {:?}, {:?}, {:?}", lhs, rhs, class_name, member_name);
+            let method_param_types = method.params.iter().map(Typeable::type_of);
+
             if *called_constructor == method.name {
-                return Box::new((
-                    Declaration::Class(class.clone()),
-                    method.clone(),
-                ));
+                let arguments_match_type = method.params.len() == arguments.len() 
+                && method_param_types.zip(arguments.iter()).all(|(x, y)| y.is_of_type(x, st));
+                if arguments_match_type {
+                    return Ok(Box::new((
+                        Declaration::Class(class.clone()),
+                        method.clone(),
+                    )));
+                }
             }
         }
     }
-    panic!("Constructor not found"); // replace with proper error
+    Err(error::could_not_resolve_constructor(called_constructor, &arguments.iter().map(|arg| arg.type_of()).collect_vec(), called_constructor.get_position()))
 }
 
 fn constructor_super_call_helper(
@@ -622,8 +635,8 @@ pub fn resolve_super_method(
     super_method_call_helper(class_name, method_name, st)
 }
 
-pub fn resolve_constructor(class_name: &Identifier, st: &SymbolTable) -> Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)> {
-    constructor_call_helper(class_name, st)
+pub fn resolve_constructor(class_name: &Identifier, arguments: &Vec<Rc<Expression>>, st: &SymbolTable) -> Result<Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)>, ResolveError> {
+    constructor_call_helper(class_name, arguments, st)
 }
 
 pub fn resolve_super_constructor(class_name: &Identifier, st: &SymbolTable) -> Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)> {
