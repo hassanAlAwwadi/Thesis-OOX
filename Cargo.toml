@@ -27,3 +27,9 @@ sloggers = "2.1.1" # Logging extension for displaying logs in terminal
 num = "0.4.0" # Needed for one function (is that worth it?)
 derivative = "2.2.0"
 queues = "1.1.0"
+clap = { version = "4.1.7", features = ["derive"] }
+criterion = "0.4.0"
+
+[[bench]]
+name = "OOX_benchmark"
+harness = false

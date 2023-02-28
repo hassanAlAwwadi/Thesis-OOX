@@ -195,7 +195,7 @@ pub(super) fn multiple_method_invocation(
                 };
             }
         }
-        _ => unreachable!(),
+        _ => unreachable!("Expected Ref or SymbolicRef, found {:?}", object),
     };
 }
 

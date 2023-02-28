@@ -47,21 +47,13 @@ class Node {
     }
 }
 
-//class NodeB extends Node { ~0.1 sec
-//    int value2 ;
-//}
-//
-//class NodeC extends Node { ~0.5sec
-//    int value3 ;
-//}
-//
-//class NodeD extends Node { // ~9sec
-//    int value4 ;
-//}
-//
-//class NodeE extends Node { // longer than 2 minutes
-//    int value5 ;
-//}
+class NodeB extends Node { //~0.1 sec
+    int value2 ;
+}
+
+class NodeC extends Node { //~0.5sec
+    int value3 ;
+}
 
 class Main {
 
