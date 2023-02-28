@@ -2,18 +2,19 @@ use derivative::Derivative;
 
 use crate::positioned::{SourcePos, WithPosition};
 
-use std::{fmt::{Debug, Display}, ops::Deref};
+use std::{
+    fmt::{Debug, Display},
+    ops::Deref,
+};
 
-
-#[derive(Clone)]
-#[derive(Derivative)]
+#[derive(Clone, Derivative)]
 #[derivative(PartialEq, Hash, Eq)]
 pub struct Identifier {
     name: String,
 
-    #[derivative(PartialEq="ignore")]
-    #[derivative(Hash="ignore")]
-    info: SourcePos
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
+    info: SourcePos,
 }
 
 impl WithPosition for Identifier {
@@ -52,7 +53,10 @@ impl Identifier {
     }
 
     pub fn with_unknown_pos(name: String) -> Identifier {
-        Identifier { name, info: SourcePos::UnknownPosition }
+        Identifier {
+            name,
+            info: SourcePos::UnknownPosition,
+        }
     }
 
     pub fn as_str(&self) -> &str {

@@ -21,22 +21,19 @@ mod pretty_print;
 mod utils;
 
 mod concretization;
-mod symbol_table;
-mod fold;
-mod exception_handler;
-mod typing;
 mod error;
+mod exception_handler;
+mod fold;
 mod positioned;
+mod symbol_table;
+mod typing;
 
 mod statistics;
 
 #[macro_use]
 extern crate pest_derive;
 
-
 use std::sync::Mutex;
-
-
 
 pub use z3_checker::playground;
 

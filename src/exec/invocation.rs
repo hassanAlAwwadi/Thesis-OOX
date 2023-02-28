@@ -9,10 +9,7 @@ use crate::{
     exec::State,
     stack::lookup_in_stack,
     symbol_table::SymbolTable,
-    syntax::{
-        Declaration, Expression, Identifier, Invocation, Lhs, Method,
-        RuntimeType,
-    },
+    syntax::{Declaration, Expression, Identifier, Invocation, Lhs, Method, RuntimeType},
     typeable::Typeable,
     utils,
 };

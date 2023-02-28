@@ -15,7 +15,9 @@ pub fn concretizations<'a>(
     alias_map: &'a AliasMap,
 ) -> Vec<Rc<Expression>> {
     let mut replaced_expressions = Vec::new();
-    let n_combinations = alias_map.iter().fold(1, |a, (_, refs)| a * refs.aliases().len());
+    let n_combinations = alias_map
+        .iter()
+        .fold(1, |a, (_, refs)| a * refs.aliases().len());
 
     let mut concretizations = alias_map
         .iter()
@@ -64,7 +66,7 @@ fn helper(
             lhs,
             rhs,
             type_,
-            info
+            info,
         } => Rc::new(Expression::BinOp {
             bin_op: bin_op.clone(),
             lhs: helper(lhs.clone(), concretization),
@@ -76,12 +78,12 @@ fn helper(
             un_op,
             value,
             type_,
-            info
+            info,
         } => Rc::new(Expression::UnOp {
             un_op: un_op.clone(),
             value: helper(value.clone(), concretization),
             type_: type_.clone(),
-            info: *info
+            info: *info,
         }),
 
         Expression::Conditional {
@@ -89,13 +91,13 @@ fn helper(
             true_,
             false_,
             type_,
-            info 
+            info,
         } => Rc::new(Expression::Conditional {
             guard: helper(guard.clone(), concretization),
             true_: helper(true_.clone(), concretization),
             false_: helper(false_.clone(), concretization),
             type_: type_.clone(),
-            info: *info
+            info: *info,
         }),
         Expression::Forall {
             elem,
@@ -103,7 +105,7 @@ fn helper(
             domain,
             formula,
             type_,
-            info
+            info,
         } => todo!(),
         Expression::Exists {
             elem,
@@ -111,7 +113,7 @@ fn helper(
             domain,
             formula,
             type_,
-            info
+            info,
         } => todo!(),
         Expression::Var { .. }
         | Expression::SymbolicVar { .. }

@@ -247,7 +247,7 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
                 lhs,
                 rhs,
                 type_,
-                info
+                info,
             } => match bin_op {
                 BinOp::And => AstNode::and(helper(lhs, vars), helper(rhs, vars)).unwrap(),
                 BinOp::Or => AstNode::or(helper(lhs, vars), helper(rhs, vars)).unwrap(),
@@ -272,7 +272,7 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
                 un_op,
                 value,
                 type_,
-                info
+                info,
             } => match un_op {
                 UnOp::Negative => todo!(),
                 UnOp::Negate => AstNode::negate(helper(&value, vars)).unwrap(),
@@ -289,7 +289,7 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
                 true_,
                 false_,
                 type_,
-                info
+                info,
             } => AstNode::conditional(
                 helper(guard, vars),
                 helper(true_, vars),

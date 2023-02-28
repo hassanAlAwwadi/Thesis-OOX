@@ -3,7 +3,7 @@ use ordered_float::NotNan;
 use pom::parser::*;
 
 use std::collections::HashSet;
-use std::rc::{Rc};
+use std::rc::Rc;
 use std::str::{self, FromStr};
 
 use std::iter::Extend;
@@ -60,8 +60,11 @@ fn member<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
 }
 
 fn field<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
-    (nonvoidtype() + identifier() - punct(";"))
-        .map(|(type_, name)| DeclarationMember::Field { info: type_.get_position(), type_, name  })
+    (nonvoidtype() + identifier() - punct(";")).map(|(type_, name)| DeclarationMember::Field {
+        info: type_.get_position(),
+        type_,
+        name,
+    })
 }
 
 fn method<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
@@ -69,15 +72,18 @@ fn method<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
 
     (is_static + type_() + identifier() + parameters() + specification() + body()).map(
         |(((((is_static, return_type), name), params), specification), body)| {
-            DeclarationMember::Method(Method {
-                info: name.get_position(),
-                is_static,
-                return_type,
-                name,
-                params,
-                specification,
-                body: body.into(),
-            }.into())
+            DeclarationMember::Method(
+                Method {
+                    info: name.get_position(),
+                    is_static,
+                    return_type,
+                    name,
+                    params,
+                    specification,
+                    body: body.into(),
+                }
+                .into(),
+            )
         },
     )
 }
@@ -88,15 +94,23 @@ fn constructor<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     let body = constructor_body();
 
     (p + specification() + body).map(|(((name, params), specification), body)| {
-        DeclarationMember::Constructor(Method {
-            return_type: Type { type_: Some(NonVoidType::ReferenceType { identifier: name.clone(), info: name.get_position() }) },
-            is_static: false,
-            info: name.get_position(),
-            name,
-            params,
-            specification,
-            body: body.into(),
-        }.into())
+        DeclarationMember::Constructor(
+            Method {
+                return_type: Type {
+                    type_: Some(NonVoidType::ReferenceType {
+                        identifier: name.clone(),
+                        info: name.get_position(),
+                    }),
+                },
+                is_static: false,
+                info: name.get_position(),
+                name,
+                params,
+                specification,
+                body: body.into(),
+            }
+            .into(),
+        )
     })
 }
 
@@ -129,20 +143,39 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
                     }),
                 }
             } else {
-                Statement::Declare { info: type_.get_position(), type_, var  }
+                Statement::Declare {
+                    info: type_.get_position(),
+                    type_,
+                    var,
+                }
             }
         });
 
     // let declaration = (nonvoidtype() + identifier() - punct(";"))
     //     .map(|(type_, var)| Statement::Declare { type_, var });
     let assignment =
-        (lhs() - punct(":=") + rhs() - punct(";")).map(|(lhs, rhs)| Statement::Assign { info: lhs.get_position(), lhs, rhs,  });
-    let call_ = (invocation() - punct(";")).map(|invocation| Statement::Call { info: invocation.get_position(), invocation });
+        (lhs() - punct(":=") + rhs() - punct(";")).map(|(lhs, rhs)| Statement::Assign {
+            info: lhs.get_position(),
+            lhs,
+            rhs,
+        });
+    let call_ = (invocation() - punct(";")).map(|invocation| Statement::Call {
+        info: invocation.get_position(),
+        invocation,
+    });
     let skip = punct(";").map(|_| Statement::Skip);
-    let assert = (keyword("assert") + verification_expression() - punct(";"))
-        .map(|(assert_token, assertion)| Statement::Assert { assertion, info: assert_token.get_position() });
-    let assume = (keyword("assume") + verification_expression() - punct(";"))
-        .map(|(assume_token, assumption)| Statement::Assume { assumption, info: assume_token.get_position() });
+    let assert = (keyword("assert") + verification_expression() - punct(";")).map(
+        |(assert_token, assertion)| Statement::Assert {
+            assertion,
+            info: assert_token.get_position(),
+        },
+    );
+    let assume = (keyword("assume") + verification_expression() - punct(";")).map(
+        |(assume_token, assumption)| Statement::Assume {
+            assumption,
+            info: assume_token.get_position(),
+        },
+    );
 
     let while_ = (keyword("while") * punct("(") * expression() - punct(")")
         + ((punct("{") * call(statement).opt() - punct("}")) | call(statement).map(Some)))
@@ -152,10 +185,19 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         + (keyword("else") * ((punct("{") * call(statement) - punct("}")) | call(statement)))
             .opt())
     .map(|((guard, true_body), false_body)| create_ite(guard, true_body, false_body));
-    let continue_ = (keyword("continue") - punct(";")).map(|t| Statement::Continue { info: t.get_position() });
-    let break_ = (keyword("break") - punct(";")).map(|t| Statement::Break { info: t.get_position()});
-    let return_ = (keyword("return") + expression().opt() - punct(";"))
-        .map(|(return_token, expression)| Statement::Return { expression, info: return_token.get_position() });
+    let continue_ = (keyword("continue") - punct(";")).map(|t| Statement::Continue {
+        info: t.get_position(),
+    });
+    let break_ = (keyword("break") - punct(";")).map(|t| Statement::Break {
+        info: t.get_position(),
+    });
+    let return_ =
+        (keyword("return") + expression().opt() - punct(";")).map(|(return_token, expression)| {
+            Statement::Return {
+                expression,
+                info: return_token.get_position(),
+            }
+        });
     let throw = (keyword("throw") * literal() - punct(";")).map(|x| {
         if let Expression::Lit {
             lit: Lit::StringLit { string_value },
@@ -165,19 +207,20 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         {
             Statement::Throw {
                 message: string_value,
-                info
+                info,
             }
         } else {
             panic!("Currently only string literals can be thrown as exceptions")
         }
     });
-    let try_ = (keyword("try") - punct("{") + call(statement)
+    let try_ = (keyword("try") - punct("{")
+        + call(statement)
         + punct("}") * keyword("catch") * punct("{") * call(statement)
         - punct("}"))
     .map(|((try_token, try_body), catch_body)| Statement::Try {
         try_body: Box::new(try_body),
         catch_body: Box::new(catch_body),
-        info: try_token.get_position()
+        info: try_token.get_position(),
     });
     let block = (punct("{") * call(statement).opt() - punct("}"))
         // .map(|body| Statement::Block {
@@ -226,18 +269,18 @@ fn create_ite(guard: Expression, true_body: Statement, false_body: Option<Statem
         true_body: Box::new(Statement::Seq {
             stat1: Box::new(Statement::Assume {
                 assumption: guard.clone(),
-                info: guard.get_position()
+                info: guard.get_position(),
             }),
             stat2: Box::new(true_body),
         }),
         false_body: Box::new(Statement::Seq {
             stat1: Box::new(Statement::Assume {
                 assumption: negate(Rc::new(guard.clone())),
-                info: guard.get_position()
+                info: guard.get_position(),
             }),
             stat2: Box::new(false_body.unwrap_or(Statement::Skip)),
         }),
-        info: guard.get_position()
+        info: guard.get_position(),
     }
 }
 
@@ -249,12 +292,11 @@ fn create_while(guard: Expression, body: Option<Statement>) -> Statement {
                 body: Box::new(Statement::Seq {
                     stat1: Box::new(Statement::Assume {
                         assumption: guard.clone(),
-                        info: guard.get_position()
+                        info: guard.get_position(),
                     }),
                     stat2: Box::new(body),
-                }
-            ),
-                info: guard.get_position()
+                }),
+                info: guard.get_position(),
             }),
             stat2: Box::new(Statement::Assume {
                 info: guard.get_position(),
@@ -275,26 +317,30 @@ fn verification_expression<'a>() -> Parser<'a, Token<'a>, Expression> {
         + identifier()
         - punct(":")
         + call(expression1))
-    .map(|((((forall_token, elem), range), domain), formula)| Expression::Forall {
-        info: forall_token.get_position(),
-        elem,
-        range,
-        domain,
-        formula: Box::new(formula),
-        type_: RuntimeType::UnknownRuntimeType,
-    });
+    .map(
+        |((((forall_token, elem), range), domain), formula)| Expression::Forall {
+            info: forall_token.get_position(),
+            elem,
+            range,
+            domain,
+            formula: Box::new(formula),
+            type_: RuntimeType::UnknownRuntimeType,
+        },
+    );
     let exists = (keyword("exists") + identifier() - punct(",") + identifier() - punct(":")
         + identifier()
         - punct(":")
         + call(expression1))
-    .map(|((((exists_token, elem), range), domain), formula)| Expression::Exists {
-        info: exists_token.get_position(),
-        elem,
-        range,
-        domain,
-        formula: Box::new(formula),
-        type_: RuntimeType::UnknownRuntimeType,
-    });
+    .map(
+        |((((exists_token, elem), range), domain), formula)| Expression::Exists {
+            info: exists_token.get_position(),
+            elem,
+            range,
+            domain,
+            formula: Box::new(formula),
+            type_: RuntimeType::UnknownRuntimeType,
+        },
+    );
 
     forall | exists | expression2()
 }
@@ -330,11 +376,13 @@ fn invocation<'a>() -> Parser<'a, Token<'a>, Invocation> {
     });
 
     let super_constructor_invocation = (keyword("super") - punct("(") + arguments() - punct(")"))
-        .map(|(super_token, arguments) | Invocation::InvokeSuperConstructor {
-            arguments,
-            resolved: None,
-            info: super_token.get_position()
-        });
+        .map(
+            |(super_token, arguments)| Invocation::InvokeSuperConstructor {
+                arguments,
+                resolved: None,
+                info: super_token.get_position(),
+            },
+        );
 
     super_method_invocation
         | method_invocation
@@ -639,7 +687,11 @@ fn rhs<'a>() -> Parser<'a, Token<'a>, Rhs> {
 }
 
 fn parameters<'a>() -> Parser<'a, Token<'a>, Vec<Parameter>> {
-    let parameter = (nonvoidtype() + identifier()).map(|(type_, name)| Parameter { info: type_.get_position(), name, type_,  });
+    let parameter = (nonvoidtype() + identifier()).map(|(type_, name)| Parameter {
+        info: type_.get_position(),
+        name,
+        type_,
+    });
 
     // can it be empty?
     punct("(") * (list(parameter, punct(",")) | empty().map(|_| Vec::new())) - punct(")")
@@ -655,11 +707,17 @@ fn nonvoidtype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
 }
 
 fn primitivetype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
-    keyword("uint").map(|t| NonVoidType::UIntType { info: t.get_position() })
-        | keyword("int").map(|t| NonVoidType::IntType{ info: t.get_position()})
-        | keyword("bool").map(|t| NonVoidType::BoolType{ info: t.get_position()})
-        | keyword("float").map(|t| NonVoidType::FloatType{ info: t.get_position()})
-        | keyword("char").map(|t| NonVoidType::CharType{ info: t.get_position()})
+    keyword("uint").map(|t| NonVoidType::UIntType {
+        info: t.get_position(),
+    }) | keyword("int").map(|t| NonVoidType::IntType {
+        info: t.get_position(),
+    }) | keyword("bool").map(|t| NonVoidType::BoolType {
+        info: t.get_position(),
+    }) | keyword("float").map(|t| NonVoidType::FloatType {
+        info: t.get_position(),
+    }) | keyword("char").map(|t| NonVoidType::CharType {
+        info: t.get_position(),
+    })
 }
 
 fn referencetype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
@@ -676,8 +734,12 @@ fn referencetype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
 }
 
 fn classtype<'a>() -> Parser<'a, Token<'a>, NonVoidType> {
-    identifier().map(|identifier| NonVoidType::ReferenceType { info: identifier.get_position(), identifier })
-        | keyword("string").map(|t| NonVoidType::StringType { info: t.get_position() })
+    identifier().map(|identifier| NonVoidType::ReferenceType {
+        info: identifier.get_position(),
+        identifier,
+    }) | keyword("string").map(|t| NonVoidType::StringType {
+        info: t.get_position(),
+    })
 }
 
 fn integer<'a>() -> Parser<'a, Token<'a>, Expression> {
@@ -735,7 +797,7 @@ fn literal<'a>() -> Parser<'a, Token<'a>, Expression> {
                 _ => unreachable!(),
             },
             type_: RuntimeType::ANYRuntimeType,
-            info: pos
+            info: pos,
         })
 }
 
@@ -763,12 +825,17 @@ fn implements<'a>() -> Parser<'a, Token<'a>, Vec<Identifier>> {
 }
 
 fn punct<'a>(kw: &'a str) -> Parser<'a, Token<'a>, Token> {
-    is_a(move |t| match t { Token::Punctuator(p, _) => p == kw, _ => false} )
-    
+    is_a(move |t| match t {
+        Token::Punctuator(p, _) => p == kw,
+        _ => false,
+    })
 }
 
 fn keyword<'a>(kw: &'a str) -> Parser<'a, Token<'a>, Token> {
-    is_a(move |t| match t { Token::Keyword(p, _) => p == kw, _ => false} )
+    is_a(move |t| match t {
+        Token::Keyword(p, _) => p == kw,
+        _ => false,
+    })
 }
 
 fn exceptional_assignment(lhs: &Lhs, rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Expression> {
@@ -788,7 +855,12 @@ fn exceptional_lhs(lhs: &Lhs) -> HashSet<Expression> {
             },
             Expression::NULL,
         )]),
-        Lhs::LhsElem { var, index, type_, info } => union(
+        Lhs::LhsElem {
+            var,
+            index,
+            type_,
+            info,
+        } => union(
             HashSet::from([
                 equal(
                     Expression::Var {
@@ -816,7 +888,7 @@ fn exceptional_rhs(rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Expression>
             let var_name = if let Expression::Var {
                 var: var_name,
                 type_: _,
-                info
+                info,
             } = var
             {
                 var_name
@@ -835,11 +907,14 @@ fn exceptional_rhs(rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Expression>
                 exceptional_expression(index),
             )
         }
-        Rhs::RhsCall { invocation, type_, .. } => exceptional_invocation(invocation, class_names),
+        Rhs::RhsCall {
+            invocation, type_, ..
+        } => exceptional_invocation(invocation, class_names),
         Rhs::RhsArray {
             array_type,
             sizes,
-            type_, ..
+            type_,
+            ..
         } => HashSet::new(),
     }
 }
@@ -857,7 +932,7 @@ fn exceptional_expression(expression: &Expression) -> HashSet<Expression> {
                 Expression::Lit {
                     lit: Lit::IntLit { int_value: 0 },
                     type_: RuntimeType::IntRuntimeType,
-                    info: expression.get_position()
+                    info: expression.get_position(),
                 },
             )])
         }
@@ -880,7 +955,7 @@ fn exceptional_expression(expression: &Expression) -> HashSet<Expression> {
             domain,
             formula,
             type_,
-            info
+            info,
         } => todo!(),
         Expression::Exists {
             elem,
@@ -888,14 +963,17 @@ fn exceptional_expression(expression: &Expression) -> HashSet<Expression> {
             domain,
             formula,
             type_,
-            info
+            info,
         } => todo!(),
         Expression::SizeOf { var, type_, info } => todo!(),
         _ => HashSet::new(),
     }
 }
 
-fn exceptional_invocation(invocation: &Invocation, class_names: &[Identifier]) -> HashSet<Expression> {
+fn exceptional_invocation(
+    invocation: &Invocation,
+    class_names: &[Identifier],
+) -> HashSet<Expression> {
     match invocation {
         Invocation::InvokeMethod { lhs, arguments, .. } => {
             exceptional_invoke_method(lhs, arguments, class_names)
@@ -936,7 +1014,11 @@ fn exceptional_invoke_method(
     }
 }
 
-fn create_exceptional_ites(conditions: HashSet<Expression>, body: Statement, pos: SourcePos) -> Statement {
+fn create_exceptional_ites(
+    conditions: HashSet<Expression>,
+    body: Statement,
+    pos: SourcePos,
+) -> Statement {
     if conditions.len() == 0 {
         return body;
     }
@@ -946,7 +1028,7 @@ fn create_exceptional_ites(conditions: HashSet<Expression>, body: Statement, pos
         cond,
         Statement::Throw {
             message: "exception".into(),
-            info: pos
+            info: pos,
         },
         Some(body),
     )
@@ -1010,7 +1092,7 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
                 DeclarationMember::Constructor(method) => {
                     let new_body =
                         insert_exceptional_in_body(method.body.borrow().clone(), &decl_names);
-                        *method.body.borrow_mut() = new_body;
+                    *method.body.borrow_mut() = new_body;
                     DeclarationMember::Constructor(method)
                 }
                 field @ DeclarationMember::Field { .. } => field,
@@ -1026,10 +1108,11 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
             .iter()
             .map(|dcl| match dcl {
                 InterfaceMember::DefaultMethod(method) => {
-                    let new_body = insert_exceptional_in_body(method.body.borrow().clone(), &decl_names);
+                    let new_body =
+                        insert_exceptional_in_body(method.body.borrow().clone(), &decl_names);
                     *method.body.borrow_mut() = new_body;
                     InterfaceMember::DefaultMethod(method.clone())
-                },
+                }
                 InterfaceMember::AbstractMethod(_) => dcl.clone(),
             })
             .collect()
@@ -1040,7 +1123,7 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
             Statement::Assign { lhs, rhs, info } => {
                 let conditions = exceptional_assignment(&lhs, &rhs, class_names);
 
-                create_exceptional_ites(conditions, Statement::Assign { lhs, rhs, info }, info )
+                create_exceptional_ites(conditions, Statement::Assign { lhs, rhs, info }, info)
             }
             Statement::Call { invocation, info } => {
                 let conditions = exceptional_invocation(&invocation, class_names);
@@ -1051,31 +1134,31 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
                 guard,
                 true_body,
                 false_body,
-                info
+                info,
             } => Statement::Ite {
                 guard,
                 true_body: Box::new(insert_exceptional_in_body(*true_body, class_names)),
                 false_body: Box::new(insert_exceptional_in_body(*false_body, class_names)),
-                info
+                info,
             },
 
             Statement::Seq { stat1, stat2 } => Statement::Seq {
-                stat1: Box::new(insert_exceptional_in_body(*stat1, class_names,)),
+                stat1: Box::new(insert_exceptional_in_body(*stat1, class_names)),
                 stat2: Box::new(insert_exceptional_in_body(*stat2, class_names)),
             },
             Statement::While { guard, body, info } => Statement::While {
                 guard,
                 body: Box::new(insert_exceptional_in_body(*body, class_names)),
-                info
+                info,
             },
             Statement::Try {
                 try_body,
                 catch_body,
-                info
+                info,
             } => Statement::Try {
                 try_body: Box::new(insert_exceptional_in_body(*try_body, class_names)),
                 catch_body: Box::new(insert_exceptional_in_body(*catch_body, class_names)),
-                info
+                info,
             },
 
             Statement::Block { body } => Statement::Block {
@@ -1087,12 +1170,15 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
                         exceptional_expression(&e),
                         Statement::Return {
                             expression: Some(e),
-                            info
+                            info,
                         },
-                        info
+                        info,
                     )
                 } else {
-                    Statement::Return { expression: None, info }
+                    Statement::Return {
+                        expression: None,
+                        info,
+                    }
                 }
             }
 
@@ -1248,11 +1334,9 @@ fn parsing_empty_function() {
 
 fn pite<'a>() -> Parser<'a, Token<'a>, Statement> {
     (keyword("if") * punct("(") * expression() - punct(")")
-    + ((punct("{") * call(statement) - punct("}")) | call(statement))
-    + (keyword("else") * ((punct("{") * call(statement) - punct("}")) | call(statement)))
-        .opt())
-        .map(|((guard, true_body), false_body)| create_ite(guard, true_body, false_body))
-
+        + ((punct("{") * call(statement) - punct("}")) | call(statement))
+        + (keyword("else") * ((punct("{") * call(statement) - punct("}")) | call(statement))).opt())
+    .map(|((guard, true_body), false_body)| create_ite(guard, true_body, false_body))
 }
 
 #[test]
@@ -1263,7 +1347,6 @@ fn parsing_else_if() {
         ;
     }
     ";
-
 
     let tokens = tokens(&file_content).unwrap();
     let as_ref = tokens.as_slice();

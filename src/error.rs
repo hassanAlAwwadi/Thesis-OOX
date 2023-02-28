@@ -1,4 +1,7 @@
-use crate::{syntax::{Expression, Identifier, RuntimeType}, positioned::SourcePos};
+use crate::{
+    positioned::SourcePos,
+    syntax::{Expression, Identifier, RuntimeType},
+};
 
 pub fn shadowing(var1: &Identifier, var2: &Identifier, info: SourcePos) -> String {
     format!("Variable '{}' shadows variable '{}', {}", var1, var2, info)
@@ -9,7 +12,10 @@ pub fn undeclared_var(var: &Identifier, info: SourcePos) -> String {
 }
 
 pub fn unification_error(expected: RuntimeType, actual: RuntimeType, info: SourcePos) -> String {
-    format!("Expected type {} but is of type {}, {}", expected, actual, info)
+    format!(
+        "Expected type {} but is of type {}, {}",
+        expected, actual, info
+    )
 }
 
 pub fn unresolved_field_error(class_name: &Identifier, field: &str, info: SourcePos) -> String {
@@ -53,36 +59,63 @@ pub fn expected_interface_found_class(expected_interface: &Identifier, info: Sou
     )
 }
 
-pub fn could_not_resolve_method(class_name: &Identifier, method_name: &Identifier, info: SourcePos) -> String {
+pub fn could_not_resolve_method(
+    class_name: &Identifier,
+    method_name: &Identifier,
+    info: SourcePos,
+) -> String {
     format!(
         "Could not find a method implementation of {}.{}(..) in declaration, super or interfaces, {}", class_name, method_name, info
     )
 }
 
-pub fn could_not_resolve_constructor(constructor_name: &Identifier, arguments: &[RuntimeType], info: SourcePos) -> String {
+pub fn could_not_resolve_constructor(
+    constructor_name: &Identifier,
+    arguments: &[RuntimeType],
+    info: SourcePos,
+) -> String {
     format!(
-        "Could not find a constructor of {} with arguments {:?}, {}", constructor_name, arguments, info
+        "Could not find a constructor of {} with arguments {:?}, {}",
+        constructor_name, arguments, info
     )
 }
 
-pub fn constructor_not_found_in_superclass(class_name: &Identifier, arguments: &[RuntimeType], info: SourcePos) -> String {
+pub fn constructor_not_found_in_superclass(
+    class_name: &Identifier,
+    arguments: &[RuntimeType],
+    info: SourcePos,
+) -> String {
     format!(
-        "Could not find a constructor in the superclass of {} with arguments {:?}, {}", class_name, arguments, info
+        "Could not find a constructor in the superclass of {} with arguments {:?}, {}",
+        class_name, arguments, info
     )
 }
 
-pub fn cannot_call_super_method_on_interface_methods(method_name: &Identifier, info: SourcePos) -> String {
+pub fn cannot_call_super_method_on_interface_methods(
+    method_name: &Identifier,
+    info: SourcePos,
+) -> String {
     format!(
-        "Cannot call super.method() in default interface methods, {}, {}", method_name, info
+        "Cannot call super.method() in default interface methods, {}, {}",
+        method_name, info
     )
 }
 
-pub fn expected_superclass(class_name: &Identifier, method_name: &Identifier, info: SourcePos) -> String {
-    format!(
-        "Expected {} to have a superclass {}", class_name, info
-    )
+pub fn expected_superclass(
+    class_name: &Identifier,
+    method_name: &Identifier,
+    info: SourcePos,
+) -> String {
+    format!("Expected {} to have a superclass {}", class_name, info)
 }
 
-pub fn at_least_one_superclass_should_have_this_method(class_name: &Identifier, method_name: &Identifier, info: SourcePos) -> String {
-    format!("Expected at least one superclass of {} to have method {}, {}", class_name, method_name, info)
+pub fn at_least_one_superclass_should_have_this_method(
+    class_name: &Identifier,
+    method_name: &Identifier,
+    info: SourcePos,
+) -> String {
+    format!(
+        "Expected at least one superclass of {} to have method {}, {}",
+        class_name, method_name, info
+    )
 }

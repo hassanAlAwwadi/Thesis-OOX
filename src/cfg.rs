@@ -1,6 +1,9 @@
 // use std::intrinsics::unreachable;
 
-use crate::{lexer::tokens, parser::parse, syntax::*, typeable::Typeable, exec::this_str, positioned::SourcePos};
+use crate::{
+    exec::this_str, lexer::tokens, parser::parse, positioned::SourcePos, syntax::*,
+    typeable::Typeable,
+};
 
 const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
 
@@ -23,7 +26,7 @@ pub enum CFGStatement {
     FunctionExit {
         decl_name: Identifier,
         method_name: Identifier,
-        argument_types: Vec<RuntimeType>
+        argument_types: Vec<RuntimeType>,
     },
 }
 
@@ -73,7 +76,7 @@ fn memberCFG(
                 CFGStatement::FunctionEntry {
                     decl_name: class_name.clone(),
                     method_name: method.name.clone(),
-                    argument_types: method.params.iter().map(Typeable::type_of).collect()
+                    argument_types: method.params.iter().map(Typeable::type_of).collect(),
                 },
             ));
             let entry_label = *i;
@@ -86,10 +89,10 @@ fn memberCFG(
                     expression: Expression::Var {
                         var: this_str(),
                         type_: member.type_of(),
-                        info: SourcePos::UnknownPosition 
+                        info: SourcePos::UnknownPosition,
                     }
                     .into(),
-                    info: SourcePos::UnknownPosition 
+                    info: SourcePos::UnknownPosition,
                 }),
             ));
             let return_this_label = *i;
@@ -99,7 +102,7 @@ fn memberCFG(
                 CFGStatement::FunctionExit {
                     decl_name: class_name,
                     method_name: method.name.clone(),
-                    argument_types: method.params.iter().map(Typeable::type_of).collect()
+                    argument_types: method.params.iter().map(Typeable::type_of).collect(),
                 },
             ));
             let exit_label = *i;
@@ -138,9 +141,7 @@ fn interface_member_cfg(
     i: &mut u64,
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
     match member {
-        InterfaceMember::DefaultMethod(method) => {
-            label_method(class_name, method, i)
-        }
+        InterfaceMember::DefaultMethod(method) => label_method(class_name, method, i),
         InterfaceMember::AbstractMethod(_) => (Vec::new(), Vec::new()),
     }
 }
@@ -157,7 +158,7 @@ fn label_method(
         CFGStatement::FunctionEntry {
             decl_name: class_name.clone(),
             method_name: method.name.clone(),
-            argument_types: method.params.iter().map(Typeable::type_of).collect()
+            argument_types: method.params.iter().map(Typeable::type_of).collect(),
         },
     ));
     let entry_label = *i;
@@ -168,7 +169,7 @@ fn label_method(
         CFGStatement::FunctionExit {
             decl_name: class_name,
             method_name: method.name.clone(),
-            argument_types: method.params.iter().map(Typeable::type_of).collect()
+            argument_types: method.params.iter().map(Typeable::type_of).collect(),
         },
     ));
     let exit_label = *i;
@@ -227,7 +228,7 @@ fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> 
             labelled_statements.push((ite_l, CFGStatement::Ite(guard.clone(), i_true, i_false)));
             labelled_statements.append(&mut v);
         }
-        Statement::While { guard, body , info } => {
+        Statement::While { guard, body, info } => {
             let ite_l = *i;
             *i += 1;
             let i_body = *i;
@@ -241,7 +242,7 @@ fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> 
         Statement::Try {
             try_body,
             catch_body,
-            info
+            info,
         } => {
             let try_catch_l = *i;
             *i += 1;

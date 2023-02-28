@@ -2,7 +2,10 @@
 /// It can be used to reduce boilerplate code.
 use std::rc::Rc;
 
-use crate::{syntax::{BinOp, Expression, Lit, RuntimeType, UnOp, Identifier}, positioned::SourcePos};
+use crate::{
+    positioned::SourcePos,
+    syntax::{BinOp, Expression, Identifier, Lit, RuntimeType, UnOp},
+};
 
 /// Not the expression.
 /// e becomes !e
@@ -11,7 +14,7 @@ pub(crate) fn negate(expression: Rc<Expression>) -> Expression {
         un_op: UnOp::Negate,
         value: expression,
         type_: RuntimeType::BoolRuntimeType,
-        info: SourcePos::UnknownPosition
+        info: SourcePos::UnknownPosition,
     }
 }
 
@@ -21,12 +24,12 @@ pub(crate) fn negative(expression: Rc<Expression>) -> Expression {
         un_op: UnOp::Negative,
         value: expression,
         type_: RuntimeType::BoolRuntimeType,
-        info: SourcePos::UnknownPosition
+        info: SourcePos::UnknownPosition,
     }
 }
 
 /// Creates an if guard then e1 else e2 conditional expression.
-pub(crate) fn ite<E1, E2, E3>(guard: E1, e1: E2, e2: E3) -> Expression 
+pub(crate) fn ite<E1, E2, E3>(guard: E1, e1: E2, e2: E3) -> Expression
 where
     E1: Into<Rc<Expression>>,
     E2: Into<Rc<Expression>>,
@@ -37,7 +40,7 @@ where
         true_: e1.into(),
         false_: e2.into(),
         type_: RuntimeType::ANYRuntimeType,
-        info: SourcePos::UnknownPosition
+        info: SourcePos::UnknownPosition,
     }
 }
 
@@ -51,7 +54,7 @@ where
         lhs: e1.into(),
         rhs: e2.into(),
         type_,
-        info: SourcePos::UnknownPosition
+        info: SourcePos::UnknownPosition,
     }
 }
 pub(crate) fn equal<E1, E2>(e1: E1, e2: E2) -> Expression
@@ -67,7 +70,12 @@ where
     E1: Into<Rc<Expression>>,
     E2: Into<Rc<Expression>>,
 {
-    bin_op(e1, e2, BinOp::GreaterThanEqual, RuntimeType::BoolRuntimeType)
+    bin_op(
+        e1,
+        e2,
+        BinOp::GreaterThanEqual,
+        RuntimeType::BoolRuntimeType,
+    )
 }
 
 pub(crate) fn less_than<E1, E2>(e1: E1, e2: E2) -> Expression
@@ -94,11 +102,13 @@ where
     bin_op(e1, e2, BinOp::And, RuntimeType::BoolRuntimeType)
 }
 
-
 pub(crate) fn size_of(var: Identifier) -> Expression {
-    Expression::SizeOf { var, type_: RuntimeType::IntRuntimeType, info: SourcePos::UnknownPosition }
+    Expression::SizeOf {
+        var,
+        type_: RuntimeType::IntRuntimeType,
+        info: SourcePos::UnknownPosition,
+    }
 }
-
 
 /// Turns an iterator of Expressions into an OR expression, with a false added to the front.
 /// For example:
@@ -116,8 +126,7 @@ where
     I: IntoIterator<Item = E>,
     E: Into<Rc<Expression>>,
 {
-    iter.into_iter()
-        .fold(Expression::FALSE, or)
+    iter.into_iter().fold(Expression::FALSE, or)
 }
 
 /// Turns an iterator of Expressions into an AND expression, with a true added to the front.
@@ -136,15 +145,13 @@ where
     I: IntoIterator<Item = E>,
     E: Into<Rc<Expression>>,
 {
-    iter.into_iter()
-        .fold(Expression::TRUE, and)
+    iter.into_iter().fold(Expression::TRUE, and)
 }
-
 
 pub(crate) fn toIntExpr(int_value: i64) -> Expression {
     Expression::Lit {
         lit: Lit::IntLit { int_value },
         type_: RuntimeType::IntRuntimeType,
-        info: SourcePos::UnknownPosition
+        info: SourcePos::UnknownPosition,
     }
 }

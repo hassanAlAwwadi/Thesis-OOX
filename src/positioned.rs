@@ -1,17 +1,12 @@
-use std::{fmt::Display, collections::HashMap};
+use std::fmt::Display;
 
+use crate::syntax::{Expression, Invocation, Lhs, Method, NonVoidType, Rhs};
 use crate::FILE_NAMES;
-use crate::syntax::{NonVoidType, Expression, Rhs, Lhs, Invocation, Method};
-
-
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum SourcePos {
     UnknownPosition,
-    SourcePos {
-        line: usize,
-        col: usize,
-    }
+    SourcePos { line: usize, col: usize },
 }
 
 impl SourcePos {
@@ -22,8 +17,6 @@ impl SourcePos {
 
 impl Display for SourcePos {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-
-        
         if let SourcePos::SourcePos { line, col } = self {
             let path = FILE_NAMES.lock().unwrap();
             write!(f, "{}:{}:{}", path, line, col)
@@ -32,7 +25,6 @@ impl Display for SourcePos {
         }
     }
 }
-
 
 pub trait WithPosition {
     fn get_position(&self) -> SourcePos;
@@ -47,8 +39,8 @@ impl WithPosition for NonVoidType {
             NonVoidType::BoolType { info } => info,
             NonVoidType::StringType { info } => info,
             NonVoidType::CharType { info } => info,
-            NonVoidType::ReferenceType { identifier, info } => info,
-            NonVoidType::ArrayType { inner_type, info } => info,
+            NonVoidType::ReferenceType { info, .. } => info,
+            NonVoidType::ArrayType { info, .. } => info,
         }
     }
 }
@@ -56,17 +48,17 @@ impl WithPosition for NonVoidType {
 impl WithPosition for Expression {
     fn get_position(&self) -> SourcePos {
         *match self {
-            Expression::Forall { elem, range, domain, formula, type_, info } => info,
-            Expression::Exists { elem, range, domain, formula, type_, info } => info,
-            Expression::BinOp { bin_op, lhs, rhs, type_, info } => info,
-            Expression::UnOp { un_op, value, type_, info } => info,
-            Expression::Var { var, type_, info } => info,
-            Expression::SymbolicVar { var, type_, info } => info,
-            Expression::Lit { lit, type_, info } => info,
-            Expression::SizeOf { var, type_, info } => info,
-            Expression::Ref { ref_, type_, info } => info,
-            Expression::SymbolicRef { var, type_, info } => info,
-            Expression::Conditional { guard, true_, false_, type_, info } => info,
+            Expression::Forall { info, .. } => info,
+            Expression::Exists { info, .. } => info,
+            Expression::BinOp { info, .. } => info,
+            Expression::UnOp { info, .. } => info,
+            Expression::Var { info, .. } => info,
+            Expression::SymbolicVar { info, .. } => info,
+            Expression::Lit { info, .. } => info,
+            Expression::SizeOf { info, .. } => info,
+            Expression::Ref { info, .. } => info,
+            Expression::SymbolicRef { info, .. } => info,
+            Expression::Conditional { info, .. } => info,
         }
     }
 }
@@ -74,11 +66,11 @@ impl WithPosition for Expression {
 impl WithPosition for Rhs {
     fn get_position(&self) -> SourcePos {
         *match self {
-            Rhs::RhsExpression { value, type_, info } => info,
-            Rhs::RhsField { var, field, type_, info } => info,
-            Rhs::RhsElem { var, index, type_, info } => info,
-            Rhs::RhsCall { invocation, type_, info } => info,
-            Rhs::RhsArray { array_type, sizes, type_, info } => info,
+            Rhs::RhsExpression { info, .. } => info,
+            Rhs::RhsField { info, .. } => info,
+            Rhs::RhsElem { info, .. } => info,
+            Rhs::RhsCall { info, .. } => info,
+            Rhs::RhsArray { info, .. } => info,
         }
     }
 }
@@ -92,9 +84,9 @@ impl WithPosition for &Rhs {
 impl WithPosition for Lhs {
     fn get_position(&self) -> SourcePos {
         match self {
-            Lhs::LhsVar { var, type_, info } => *info,
-            Lhs::LhsField { var, var_type, field, type_, info } => *info,
-            Lhs::LhsElem { var, index, type_, info } => *info,
+            Lhs::LhsVar { info, .. } => *info,
+            Lhs::LhsField { info, .. } => *info,
+            Lhs::LhsElem { info, .. } => *info,
         }
     }
 }
@@ -102,10 +94,10 @@ impl WithPosition for Lhs {
 impl WithPosition for Invocation {
     fn get_position(&self) -> SourcePos {
         match self {
-            Invocation::InvokeMethod { lhs, rhs, arguments, resolved, info } => *info,
-            Invocation::InvokeSuperMethod { rhs, arguments, resolved, info } => *info,
-            Invocation::InvokeConstructor { class_name, arguments, resolved, info } => *info,
-            Invocation::InvokeSuperConstructor { arguments, resolved, info } => *info,
+            Invocation::InvokeMethod { info, .. } => *info,
+            Invocation::InvokeSuperMethod { info, .. } => *info,
+            Invocation::InvokeConstructor { info, .. } => *info,
+            Invocation::InvokeSuperConstructor { info, .. } => *info,
         }
     }
 }
@@ -119,17 +111,17 @@ impl WithPosition for Method {
 impl WithPosition for &Expression {
     fn get_position(&self) -> SourcePos {
         match self {
-            Expression::Forall { elem, range, domain, formula, type_, info } => *info,
-            Expression::Exists { elem, range, domain, formula, type_, info } => *info,
-            Expression::BinOp { bin_op, lhs, rhs, type_, info } => *info,
-            Expression::UnOp { un_op, value, type_, info } => *info,
-            Expression::Var { var, type_, info } => *info,
-            Expression::SymbolicVar { var, type_, info } => *info,
-            Expression::Lit { lit, type_, info } => *info,
-            Expression::SizeOf { var, type_, info } => *info,
-            Expression::Ref { ref_, type_, info } => *info,
-            Expression::SymbolicRef { var, type_, info } => *info,
-            Expression::Conditional { guard, true_, false_, type_, info } => *info,
+            Expression::Forall { info, .. } => *info,
+            Expression::Exists { info, .. } => *info,
+            Expression::BinOp { info, .. } => *info,
+            Expression::UnOp { info, .. } => *info,
+            Expression::Var { info, .. } => *info,
+            Expression::SymbolicVar { info, .. } => *info,
+            Expression::Lit { info, .. } => *info,
+            Expression::SizeOf { info, .. } => *info,
+            Expression::Ref { info, .. } => *info,
+            Expression::SymbolicRef { info, .. } => *info,
+            Expression::Conditional { info, .. } => *info,
         }
     }
 }

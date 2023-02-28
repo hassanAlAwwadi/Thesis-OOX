@@ -1,7 +1,6 @@
-
 #[derive(Default, Clone)]
 pub struct ExceptionHandlerStack {
-    stack: Vec<ExceptionHandlerEntry>
+    stack: Vec<ExceptionHandlerEntry>,
 }
 
 impl ExceptionHandlerStack {
@@ -43,7 +42,7 @@ impl ExceptionHandlerEntry {
     pub fn new(catch_pc: u64) -> ExceptionHandlerEntry {
         ExceptionHandlerEntry {
             catch_pc,
-            current_depth: 0
+            current_depth: 0,
         }
     }
 

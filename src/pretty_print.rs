@@ -19,7 +19,7 @@ impl Debug for Expression {
                     lhs,
                     rhs,
                     type_,
-                    info
+                    info,
                 } => {
                     let op_str = match bin_op {
                         BinOp::Implies => "==>",
@@ -60,7 +60,7 @@ impl Debug for Expression {
                     un_op,
                     value,
                     type_,
-                    info
+                    info,
                 } => {
                     match un_op {
                         UnOp::Negative => write!(f, "-")?,
@@ -89,7 +89,7 @@ impl Debug for Expression {
                     true_,
                     false_,
                     type_,
-                    info
+                    info,
                 } => {
                     helper(guard, f)?;
                     write!(f, " ? ")?;
@@ -119,7 +119,7 @@ impl Debug for Expression {
                     domain,
                     formula,
                     type_,
-                    info
+                    info,
                 } => {
                     // exists elem, index : a : elem > 0
                     write!(f, "exists {}, {} : {} : ", elem, range, domain)?;
@@ -214,7 +214,9 @@ impl Display for Lhs {
                 type_,
                 ..
             } => write!(f, "{}.{}: {}.{}", var, field, var_type, type_),
-            Lhs::LhsElem { var, index, type_ , ..} => {
+            Lhs::LhsElem {
+                var, index, type_, ..
+            } => {
                 write!(f, "{}[{:?}]: {}", var, index, type_)
             }
         }
@@ -227,14 +229,19 @@ impl Display for Rhs {
             Rhs::RhsExpression { value, type_, .. } => {
                 write!(f, "({:?}: {})", value, type_)
             }
-            Rhs::RhsField { var, field, type_, .. } => {
+            Rhs::RhsField {
+                var, field, type_, ..
+            } => {
                 write!(f, "{:?}.{} : {}", var, field, type_)
             }
-            Rhs::RhsElem { var, index, type_, .. } => {
+            Rhs::RhsElem {
+                var, index, type_, ..
+            } => {
                 write!(f, "{:?}[{:?}]: {}", var, index, type_)
             }
-            Rhs::RhsCall { invocation, type_, 
-                .. } => {
+            Rhs::RhsCall {
+                invocation, type_, ..
+            } => {
                 write!(f, "{}: {}", invocation, type_)
             }
             Rhs::RhsArray {
@@ -313,15 +320,15 @@ fn test() {
         lhs: Rc::new(Expression::Var {
             var: "x".into(),
             type_: RuntimeType::ANYRuntimeType,
-            info: crate::positioned::SourcePos::UnknownPosition
+            info: crate::positioned::SourcePos::UnknownPosition,
         }),
         rhs: Rc::new(Expression::Var {
             var: "y".into(),
             type_: RuntimeType::ANYRuntimeType,
-            info: crate::positioned::SourcePos::UnknownPosition
+            info: crate::positioned::SourcePos::UnknownPosition,
         }),
         type_: RuntimeType::ANYRuntimeType,
-        info: crate::positioned::SourcePos::UnknownPosition
+        info: crate::positioned::SourcePos::UnknownPosition,
     };
 
     let s = format!("{:?}", e);

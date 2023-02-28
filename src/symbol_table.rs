@@ -4,10 +4,11 @@ use itertools::Itertools;
 
 use crate::{
     error,
+    positioned::WithPosition,
     syntax::{
         self, Class, CompilationUnit, Declaration, DeclarationMember, Identifier, Interface,
         NonVoidType,
-    }, positioned::WithPosition,
+    },
 };
 
 pub type Fields = Vec<(Identifier, NonVoidType)>;
@@ -58,7 +59,7 @@ pub struct SymbolTable {
 
     pub declarations: HashMap<Identifier, Declaration>,
     pub decl_to_instance_types: HashMap<Identifier, Vec<Identifier>>,
-    pub subtypes: HashMap<Identifier, Vec<Identifier>>
+    pub subtypes: HashMap<Identifier, Vec<Identifier>>,
 }
 
 impl SymbolTable {
@@ -95,24 +96,40 @@ impl SymbolTable {
                             Self::get_class_from_declarations(&declarations, &extends_name)?;
 
                         it.class.get_mut(decl_name).unwrap().extends = Some(extend_class);
-                        it.class.get_mut(extends_name).unwrap().subclasses.push(class.clone());
+                        it.class
+                            .get_mut(extends_name)
+                            .unwrap()
+                            .subclasses
+                            .push(class.clone());
                     } else {
                         it.class.get_mut(decl_name).unwrap().extends = None;
                     }
                     for interface_name in class.implements.iter() {
                         let interface = Self::get_interface(&declarations, &interface_name)?;
-                        it.interface.get_mut(&interface.name).unwrap().implemented
+                        it.interface
+                            .get_mut(&interface.name)
+                            .unwrap()
+                            .implemented
                             .push(class.clone());
-                        it.class.get_mut(decl_name).unwrap().implements
+                        it.class
+                            .get_mut(decl_name)
+                            .unwrap()
+                            .implements
                             .push(interface);
                     }
                 }
                 Declaration::Interface(interface) => {
                     for interface_name in &interface.extends {
                         let extend_interface = Self::get_interface(&declarations, &interface_name)?;
-                        it.interface.get_mut(decl_name).unwrap().extends
+                        it.interface
+                            .get_mut(decl_name)
+                            .unwrap()
+                            .extends
                             .push(extend_interface);
-                        it.interface.get_mut(interface_name).unwrap().subinterfaces
+                        it.interface
+                            .get_mut(interface_name)
+                            .unwrap()
+                            .subinterfaces
                             .push(interface.clone());
                     }
                 }
@@ -141,26 +158,25 @@ impl SymbolTable {
                 (name.clone(), derived_classes)
             })
             .collect::<HashMap<_, _>>();
-        
+
         let subtypes = declarations
-        .iter()
-        .map(|(name, decl)| {
-            let derived_classes = Self::derived_declarations(decl.clone(), &it)
-                .into_iter()
-                .map(|d| d.name().clone())
-                .unique()
-                .collect_vec();
-            (name.clone(), derived_classes)
-        })
-        .collect::<HashMap<_, _>>();
-        
+            .iter()
+            .map(|(name, decl)| {
+                let derived_classes = Self::derived_declarations(decl.clone(), &it)
+                    .into_iter()
+                    .map(|d| d.name().clone())
+                    .unique()
+                    .collect_vec();
+                (name.clone(), derived_classes)
+            })
+            .collect::<HashMap<_, _>>();
 
         Ok(SymbolTable {
             class_to_fields,
             declarations,
             inheritance_table: it,
             decl_to_instance_types,
-            subtypes
+            subtypes,
         })
     }
 
@@ -210,11 +226,15 @@ impl SymbolTable {
     ) -> Result<Rc<Class>, SymbolError> {
         match declarations.get(class_name) {
             Some(Declaration::Class(class)) => Ok(class.clone()),
-            Some(Declaration::Interface(_)) => {
-                Err(error::expected_class_found_interface(class_name, class_name.get_position()))
-            }
+            Some(Declaration::Interface(_)) => Err(error::expected_class_found_interface(
+                class_name,
+                class_name.get_position(),
+            )),
 
-            None => Err(error::class_does_not_exist(class_name, class_name.get_position())),
+            None => Err(error::class_does_not_exist(
+                class_name,
+                class_name.get_position(),
+            )),
         }
     }
 
@@ -224,11 +244,15 @@ impl SymbolTable {
     ) -> Result<Rc<Interface>, SymbolError> {
         match declarations.get(interface_name) {
             Some(Declaration::Interface(interface)) => Ok(interface.clone()),
-            Some(Declaration::Class(_)) => {
-                Err(error::expected_interface_found_class(interface_name, interface_name.get_position()))
-            }
+            Some(Declaration::Class(_)) => Err(error::expected_interface_found_class(
+                interface_name,
+                interface_name.get_position(),
+            )),
 
-            None => Err(error::interface_does_not_exist(interface_name, interface_name.get_position())),
+            None => Err(error::interface_does_not_exist(
+                interface_name,
+                interface_name.get_position(),
+            )),
         }
     }
 
@@ -243,10 +267,7 @@ impl SymbolTable {
             Declaration::Interface(interface) => interface_helper(interface, it),
         };
 
-        fn class_helper(
-            subclass: Rc<syntax::Class>,
-            it: &InheritanceTable,
-        ) -> Vec<Declaration> {
+        fn class_helper(subclass: Rc<syntax::Class>, it: &InheritanceTable) -> Vec<Declaration> {
             let subclasses = &it.class[&subclass.name].subclasses;
             std::iter::once(Declaration::Class(subclass.clone()))
                 .chain(
@@ -276,9 +297,7 @@ impl SymbolTable {
                 .into_iter();
 
             std::iter::once(Declaration::Interface(subinterface.clone()))
-            .chain(
-            subclasses_from_subclasses
-                .chain(subclasses_from_interfaces))
+                .chain(subclasses_from_subclasses.chain(subclasses_from_interfaces))
                 .collect()
         }
 

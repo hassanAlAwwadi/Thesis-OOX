@@ -1,6 +1,5 @@
 use std::fmt::Display;
 
-
 pub struct Statistics {
     pub number_of_branches: u32,
     pub number_of_prunes: u32,
@@ -8,7 +7,7 @@ pub struct Statistics {
     pub number_of_verifications: u32,
     pub number_of_local_solves: u32,
     pub number_of_z3_invocations: u32,
-    pub total_runtime: u32
+    pub total_runtime: u32,
 }
 
 impl Default for Statistics {
@@ -20,7 +19,7 @@ impl Default for Statistics {
             number_of_verifications: 0,
             number_of_local_solves: 0,
             number_of_z3_invocations: 0,
-            total_runtime: 0
+            total_runtime: 0,
         }
     }
 }

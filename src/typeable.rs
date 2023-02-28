@@ -4,7 +4,12 @@ use ordered_float::NotNan;
 
 use crate::{
     exec::HeapValue,
-    syntax::{DeclarationMember, Expression, Invocation, Lit, NonVoidType, RuntimeType, Type, Rhs, Lhs, Method, Parameter}, symbol_table::SymbolTable, positioned::SourcePos,
+    positioned::SourcePos,
+    symbol_table::SymbolTable,
+    syntax::{
+        DeclarationMember, Expression, Invocation, Lhs, Lit, Method, NonVoidType, Parameter, Rhs,
+        RuntimeType, Type,
+    },
 };
 
 pub trait Typeable {
@@ -37,7 +42,9 @@ pub trait Typeable {
             // Matching ARRAY types
             (ARRAYRuntimeType, ArrayRuntimeType { .. }) => true,
             (ArrayRuntimeType { .. }, ARRAYRuntimeType) => true,
-            (ReferenceRuntimeType { type_: a }, ReferenceRuntimeType { type_: b}) => st.subtypes[&b].contains(&a),
+            (ReferenceRuntimeType { type_: a }, ReferenceRuntimeType { type_: b }) => {
+                st.subtypes[&b].contains(&a)
+            }
             (a, b) => a == b,
         }
     }
@@ -65,19 +72,23 @@ pub trait Typeable {
             RuntimeType::UnknownRuntimeType => todo!(),
         };
 
-        Expression::Lit { lit, type_, info: SourcePos::UnknownPosition }
+        Expression::Lit {
+            lit,
+            type_,
+            info: SourcePos::UnknownPosition,
+        }
     }
 }
 
 impl<B: Borrow<NonVoidType>> Typeable for B {
     fn type_of(&self) -> RuntimeType {
         match self.borrow() {
-            NonVoidType::UIntType {..} => RuntimeType::UIntRuntimeType,
-            NonVoidType::IntType {..} => RuntimeType::IntRuntimeType,
-            NonVoidType::FloatType {..} => RuntimeType::FloatRuntimeType,
-            NonVoidType::BoolType {..} => RuntimeType::BoolRuntimeType,
-            NonVoidType::StringType {..} => RuntimeType::StringRuntimeType,
-            NonVoidType::CharType {..} => RuntimeType::CharRuntimeType,
+            NonVoidType::UIntType { .. } => RuntimeType::UIntRuntimeType,
+            NonVoidType::IntType { .. } => RuntimeType::IntRuntimeType,
+            NonVoidType::FloatType { .. } => RuntimeType::FloatRuntimeType,
+            NonVoidType::BoolType { .. } => RuntimeType::BoolRuntimeType,
+            NonVoidType::StringType { .. } => RuntimeType::StringRuntimeType,
+            NonVoidType::CharType { .. } => RuntimeType::CharRuntimeType,
             NonVoidType::ReferenceType { identifier, .. } => RuntimeType::ReferenceRuntimeType {
                 type_: identifier.to_owned(),
             },
@@ -170,18 +181,31 @@ impl Typeable for HeapValue {
 
 pub fn runtime_to_nonvoidtype(type_: RuntimeType) -> Option<NonVoidType> {
     match type_ {
-        RuntimeType::UIntRuntimeType => Some(NonVoidType::UIntType{ info: SourcePos::UnknownPosition }),
-        RuntimeType::IntRuntimeType => Some(NonVoidType::IntType{ info: SourcePos::UnknownPosition }),
-        RuntimeType::FloatRuntimeType => Some(NonVoidType::FloatType{ info: SourcePos::UnknownPosition }),
-        RuntimeType::BoolRuntimeType => Some(NonVoidType::BoolType{ info: SourcePos::UnknownPosition }),
-        RuntimeType::StringRuntimeType => Some(NonVoidType::StringType{ info: SourcePos::UnknownPosition }),
-        RuntimeType::CharRuntimeType => Some(NonVoidType::CharType{ info: SourcePos::UnknownPosition }),
-        RuntimeType::ReferenceRuntimeType { type_ } => {
-            Some(NonVoidType::ReferenceType { identifier: type_, info: SourcePos::UnknownPosition })
-        }
+        RuntimeType::UIntRuntimeType => Some(NonVoidType::UIntType {
+            info: SourcePos::UnknownPosition,
+        }),
+        RuntimeType::IntRuntimeType => Some(NonVoidType::IntType {
+            info: SourcePos::UnknownPosition,
+        }),
+        RuntimeType::FloatRuntimeType => Some(NonVoidType::FloatType {
+            info: SourcePos::UnknownPosition,
+        }),
+        RuntimeType::BoolRuntimeType => Some(NonVoidType::BoolType {
+            info: SourcePos::UnknownPosition,
+        }),
+        RuntimeType::StringRuntimeType => Some(NonVoidType::StringType {
+            info: SourcePos::UnknownPosition,
+        }),
+        RuntimeType::CharRuntimeType => Some(NonVoidType::CharType {
+            info: SourcePos::UnknownPosition,
+        }),
+        RuntimeType::ReferenceRuntimeType { type_ } => Some(NonVoidType::ReferenceType {
+            identifier: type_,
+            info: SourcePos::UnknownPosition,
+        }),
         RuntimeType::ArrayRuntimeType { inner_type } => Some(NonVoidType::ArrayType {
             inner_type: runtime_to_nonvoidtype(*inner_type).map(Box::new)?,
-            info: SourcePos::UnknownPosition
+            info: SourcePos::UnknownPosition,
         }),
         _ => None,
     }
@@ -206,7 +230,7 @@ impl Typeable for Invocation {
         match self {
             Invocation::InvokeMethod {
                 resolved: Some(resolved),
-                lhs, 
+                lhs,
                 rhs,
                 ..
             } => {
@@ -237,9 +261,10 @@ impl Typeable for Lhs {
     fn type_of(&self) -> RuntimeType {
         match self {
             Lhs::LhsVar { type_, .. } => type_,
-            Lhs::LhsField {  type_, .. } => type_,
+            Lhs::LhsField { type_, .. } => type_,
             Lhs::LhsElem { type_, .. } => type_,
-        }.clone()
+        }
+        .clone()
     }
 }
 
@@ -247,9 +272,10 @@ impl Typeable for &Lhs {
     fn type_of(&self) -> RuntimeType {
         match self {
             Lhs::LhsVar { type_, .. } => type_,
-            Lhs::LhsField {  type_, .. } => type_,
+            Lhs::LhsField { type_, .. } => type_,
             Lhs::LhsElem { type_, .. } => type_,
-        }.clone()
+        }
+        .clone()
     }
 }
 
@@ -261,7 +287,8 @@ impl Typeable for Rhs {
             Rhs::RhsElem { type_, .. } => type_,
             Rhs::RhsCall { type_, .. } => type_,
             Rhs::RhsArray { type_, .. } => type_,
-        }.clone()
+        }
+        .clone()
     }
 }
 
@@ -273,7 +300,8 @@ impl Typeable for &Rhs {
             Rhs::RhsElem { type_, .. } => type_,
             Rhs::RhsCall { type_, .. } => type_,
             Rhs::RhsArray { type_, .. } => type_,
-        }.clone()
+        }
+        .clone()
     }
 }
 

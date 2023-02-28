@@ -188,72 +188,74 @@ pub struct Specification {
     pub exceptional: Option<Rc<Expression>>,
 }
 
-#[derive(Debug, Clone,  Derivative)]
+#[derive(Debug, Clone, Derivative)]
 #[derivative(PartialEq, Eq)]
 pub enum Statement {
     Declare {
         type_: NonVoidType,
         var: Identifier,
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
     },
     Assign {
         lhs: Lhs,
         rhs: Rhs,
 
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
     },
     Call {
         invocation: Invocation,
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
     },
     Skip,
     Assert {
         assertion: Expression,
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
     },
     Assume {
         assumption: Expression,
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
     },
     While {
         guard: Expression,
         body: Box<Statement>,
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
     },
     Ite {
         guard: Expression,
         true_body: Box<Statement>,
         false_body: Box<Statement>,
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
     },
-    Continue { 
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos},
-    Break { 
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos},
+    Continue {
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
+    },
+    Break {
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
+    },
     Return {
         expression: Option<Expression>,
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
     },
     Throw {
         message: String,
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
     },
     Try {
         try_body: Box<Statement>,
         catch_body: Box<Statement>,
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
     },
     Block {
         body: Box<Statement>,
@@ -275,9 +277,8 @@ pub enum Invocation {
 
         #[derivative(PartialEq = "ignore")]
         resolved: Option<HashMap<Identifier, (Declaration, Rc<Method>)>>,
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos
-        
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
     },
     InvokeSuperMethod {
         // super.method(..);
@@ -286,8 +287,8 @@ pub enum Invocation {
 
         #[derivative(PartialEq = "ignore")]
         resolved: Option<Box<(Declaration, Rc<Method>)>>,
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
     },
     InvokeConstructor {
         // new Foo(..)
@@ -296,8 +297,8 @@ pub enum Invocation {
 
         #[derivative(PartialEq = "ignore")]
         resolved: Option<Box<(Declaration, Rc<Method>)>>,
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
     },
     /// invocation of the constructor of the superclass. i.e. `super(..);`
     InvokeSuperConstructor {
@@ -305,8 +306,8 @@ pub enum Invocation {
 
         #[derivative(PartialEq = "ignore")]
         resolved: Option<Box<(Declaration, Rc<Method>)>>,
-        #[derivative(PartialEq="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
     },
 }
 
@@ -348,7 +349,7 @@ impl Debug for Invocation {
                 rhs,
                 arguments,
                 resolved,
-                info
+                info,
             } => f
                 .debug_struct("InvokeMethod")
                 .field("lhs", lhs)
@@ -360,7 +361,7 @@ impl Debug for Invocation {
                 rhs,
                 arguments,
                 resolved,
-                info
+                info,
             } => f
                 .debug_struct("InvokeSuperMethod")
                 .field("rhs", rhs)
@@ -371,7 +372,7 @@ impl Debug for Invocation {
                 class_name,
                 arguments,
                 resolved,
-                info
+                info,
             } => f
                 .debug_struct("InvokeConstructor")
                 .field("class_name", class_name)
@@ -381,7 +382,7 @@ impl Debug for Invocation {
             Self::InvokeSuperConstructor {
                 arguments,
                 resolved,
-                info
+                info,
             } => f
                 .debug_struct("InvokeSuperConstructor")
                 .field("arguments", arguments)
@@ -398,9 +399,8 @@ pub enum Lhs {
         var: Identifier,
         type_: RuntimeType,
 
-
         #[derivative(PartialEq = "ignore")]
-        info: SourcePos
+        info: SourcePos,
     },
     LhsField {
         var: Identifier,
@@ -408,18 +408,16 @@ pub enum Lhs {
         field: Identifier,
         type_: RuntimeType,
 
-
         #[derivative(PartialEq = "ignore")]
-        info: SourcePos
+        info: SourcePos,
     },
     LhsElem {
         var: Identifier,
         index: Rc<Expression>,
         type_: RuntimeType,
 
-
         #[derivative(PartialEq = "ignore")]
-        info: SourcePos
+        info: SourcePos,
     },
 }
 
@@ -430,43 +428,39 @@ pub enum Rhs {
         value: Expression,
         type_: RuntimeType,
 
-
         #[derivative(PartialEq = "ignore")]
-        info: SourcePos
+        info: SourcePos,
     },
     RhsField {
         var: Expression,
         field: Identifier,
         type_: RuntimeType,
 
-
         #[derivative(PartialEq = "ignore")]
-        info: SourcePos
+        info: SourcePos,
     },
     RhsElem {
         var: Expression,
         index: Expression,
         type_: RuntimeType,
 
-
         #[derivative(PartialEq = "ignore")]
-        info: SourcePos
+        info: SourcePos,
     },
     RhsCall {
         invocation: Invocation,
         type_: RuntimeType,
 
         #[derivative(PartialEq = "ignore")]
-        info: SourcePos
+        info: SourcePos,
     },
     RhsArray {
         array_type: NonVoidType,
         sizes: Vec<Expression>,
         type_: RuntimeType,
 
-
         #[derivative(PartialEq = "ignore")]
-        info: SourcePos
+        info: SourcePos,
     },
 }
 
@@ -479,9 +473,9 @@ pub enum Expression {
         domain: Identifier,
         formula: Box<Expression>,
         type_: RuntimeType,
-        
-        #[derivative(PartialEq = "ignore", Hash ="ignore")]
-        info: SourcePos
+
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        info: SourcePos,
     },
     Exists {
         elem: Identifier,
@@ -489,37 +483,37 @@ pub enum Expression {
         domain: Identifier,
         formula: Box<Expression>,
         type_: RuntimeType,
-        #[derivative(PartialEq = "ignore", Hash ="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        info: SourcePos,
     },
     BinOp {
         bin_op: BinOp,
         lhs: Rc<Expression>,
         rhs: Rc<Expression>,
         type_: RuntimeType,
-        #[derivative(PartialEq = "ignore", Hash ="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        info: SourcePos,
     },
     UnOp {
         un_op: UnOp,
         value: Rc<Expression>,
         type_: RuntimeType,
-        #[derivative(PartialEq = "ignore", Hash ="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        info: SourcePos,
     },
     Var {
         var: Identifier,
         type_: RuntimeType,
-        #[derivative(PartialEq = "ignore", Hash ="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        info: SourcePos,
     },
     SymbolicVar {
         // symbolic variables of primitives such as integers, boolean, floats
         var: Identifier,
         type_: RuntimeType,
 
-        #[derivative(PartialEq = "ignore", Hash ="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        info: SourcePos,
     },
     Lit {
         lit: Lit,
@@ -532,23 +526,23 @@ pub enum Expression {
         var: Identifier,
         type_: RuntimeType,
 
-        #[derivative(PartialEq = "ignore", Hash ="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        info: SourcePos,
     },
     Ref {
         ref_: Reference,
         type_: RuntimeType,
 
-        #[derivative(PartialEq = "ignore", Hash ="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        info: SourcePos,
     },
     SymbolicRef {
         // symbolic references to arrays, objects
         var: Identifier,
         type_: RuntimeType, // If this is REFRuntimeType, this means that we have different types in the aliasmap and a state split may be necessary if we invoke a method
 
-        #[derivative(PartialEq = "ignore", Hash ="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        info: SourcePos,
     },
     Conditional {
         guard: Rc<Expression>,
@@ -556,8 +550,8 @@ pub enum Expression {
         false_: Rc<Expression>,
         type_: RuntimeType,
 
-        #[derivative(PartialEq = "ignore", Hash ="ignore")]
-        info: SourcePos
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        info: SourcePos,
     },
 }
 
@@ -565,18 +559,18 @@ impl Expression {
     pub const TRUE: Expression = Expression::Lit {
         lit: Lit::BoolLit { bool_value: true },
         type_: RuntimeType::BoolRuntimeType,
-        info: SourcePos::UnknownPosition
+        info: SourcePos::UnknownPosition,
     };
     pub const FALSE: Expression = Expression::Lit {
         lit: Lit::BoolLit { bool_value: false },
         type_: RuntimeType::BoolRuntimeType,
-        info: SourcePos::UnknownPosition
+        info: SourcePos::UnknownPosition,
     };
 
     pub const NULL: Expression = Expression::Lit {
         lit: Lit::NullLit,
         type_: RuntimeType::REFRuntimeType,
-        info: SourcePos::UnknownPosition
+        info: SourcePos::UnknownPosition,
     };
 
     pub fn bool(v: bool) -> Rc<Expression> {
@@ -591,7 +585,7 @@ impl Expression {
         Rc::new(Expression::Lit {
             lit: Lit::IntLit { int_value: v },
             type_: RuntimeType::IntRuntimeType,
-            info: SourcePos::UnknownPosition
+            info: SourcePos::UnknownPosition,
         })
     }
 }

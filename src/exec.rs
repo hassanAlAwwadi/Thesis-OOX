@@ -34,6 +34,7 @@ use crate::{
     positioned::{SourcePos, WithPosition},
     resolver,
     stack::{lookup_in_stack, write_to_stack, StackFrame},
+    statistics::Statistics,
     symbol_table::SymbolTable,
     syntax::{
         BinOp, CompilationUnit, Declaration, DeclarationMember, Expression, Identifier, Invocation,
@@ -41,13 +42,13 @@ use crate::{
     },
     typeable::{runtime_to_nonvoidtype, Typeable},
     typing::type_compilation_unit,
-    utils, z3_checker, FILE_NAMES, statistics::Statistics,
+    utils, z3_checker, FILE_NAMES,
 };
 
 const NULL: Expression = Expression::Lit {
     lit: Lit::NullLit,
     type_: RuntimeType::ANYRuntimeType,
-    info: SourcePos::UnknownPosition
+    info: SourcePos::UnknownPosition,
 };
 
 pub fn retval() -> Identifier {
@@ -222,7 +223,7 @@ impl State {
         return Rc::new(Expression::Ref {
             ref_: ref_fresh,
             type_,
-            info: SourcePos::UnknownPosition
+            info: SourcePos::UnknownPosition,
         });
     }
 }
@@ -344,7 +345,12 @@ fn sym_exec(
             ActionResult::ArrayInitialization(array_name) => {
                 const N: u64 = 3;
                 statistics.measure_branches((N + 1) as u32); // including null, so + 1
-                info!(state.logger, "Symbolic array initialisation of {} into {} paths", array_name, N + 1);
+                info!(
+                    state.logger,
+                    "Symbolic array initialisation of {} into {} paths",
+                    array_name,
+                    N + 1
+                );
                 let StackFrame { params, .. } = state.stack.last_mut().unwrap();
 
                 let array_type = params[&array_name].type_of();
@@ -417,7 +423,7 @@ fn sym_exec(
                 let alias = &state.alias_map[&symbolic_object_ref];
 
                 assert!(resulting_alias.len() > 1);
-                
+
                 statistics.measure_branches(resulting_alias.len() as u32);
 
                 debug!(state.logger, "Splitting up current path into {:?} paths due to polymorphic method invocation", resulting_alias.len();
@@ -468,7 +474,7 @@ fn array_initialisation(
         Rc::new(Expression::Ref {
             ref_: r,
             type_: RuntimeType::ARRAYRuntimeType,
-            info: SourcePos::UnknownPosition
+            info: SourcePos::UnknownPosition,
         }),
     );
 
@@ -507,7 +513,7 @@ enum ActionResult {
     /// and requires the state to split into paths where the condition is true and false.
     /// A lhs becomes a conditional for example when `Point p := a[i];` where `i` is a symbolic variable.
     /// When later on p is referenced, e.g. `p.x` is called, it must be determined which element of a is referred to.
-    StateSplit((Rc<Expression>, Rc<Expression>, Rc<Expression>, Identifier)), 
+    StateSplit((Rc<Expression>, Rc<Expression>, Rc<Expression>, Identifier)),
     StateSplitObjectTypes {
         symbolic_object_ref: Identifier, // alias map entry
         resulting_alias: HashMap<(Identifier, Identifier), Vec<Rc<Expression>>>, // (class_name, method) -> resulting objects.
@@ -519,7 +525,7 @@ fn action(
     program: &HashMap<u64, CFGStatement>,
     k: u64,
     st: &SymbolTable,
-    statistics: &mut Statistics
+    statistics: &mut Statistics,
 ) -> ActionResult {
     let pc = state.pc;
     let action = &program[&pc];
@@ -547,15 +553,13 @@ fn action(
     // );
 
     match action {
-        CFGStatement::Statement(Statement::Declare { type_, var , 
-            info}) => {
+        CFGStatement::Statement(Statement::Declare { type_, var, info }) => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             params.insert(var.clone(), Rc::new(type_.default()));
 
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::Assign { lhs, rhs ,
-            info}) => {
+        CFGStatement::Statement(Statement::Assign { lhs, rhs, info }) => {
             // If lhs or rhs contains an uninitialized array, we must initialize it
             // When we initialize an array, we split up the state into multiple states each with an increasingly longer instance of the array.
             // In other words, we must split this path into multiple paths.
@@ -583,7 +587,11 @@ fn action(
                         return ActionResult::ArrayInitialization(var.clone());
                     }
                 }
-                Rhs::RhsCall { invocation, type_, info } => {
+                Rhs::RhsCall {
+                    invocation,
+                    type_,
+                    info,
+                } => {
                     // if rhs contains an invocation.
                     return exec_invocation(state, invocation, &program, pc, Some(lhs.clone()), st);
                 }
@@ -601,7 +609,7 @@ fn action(
 
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::Assert { assertion , ..}) => {
+        CFGStatement::Statement(Statement::Assert { assertion, .. }) => {
             let expression = prepare_assert_expression(state, Rc::new(assertion.clone()), st);
 
             let is_valid = eval_assertion(state, expression, st, statistics);
@@ -617,7 +625,7 @@ fn action(
             }
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::Return { expression , ..}) => {
+        CFGStatement::Statement(Statement::Return { expression, .. }) => {
             if let Some(expression) = expression {
                 let expression = evaluate(state, Rc::new(expression.clone()), st);
                 let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
@@ -644,7 +652,7 @@ fn action(
                             if let Expression::SymbolicRef {
                                 var,
                                 type_: RuntimeType::ArrayRuntimeType { inner_type },
-                                info
+                                info,
                             } = exp.as_ref()
                             {
                                 true
@@ -681,7 +689,7 @@ fn action(
         CFGStatement::FunctionExit {
             decl_name,
             method_name,
-            argument_types
+            argument_types,
         } => {
             state.exception_handler.decrement_handler();
 
@@ -726,10 +734,12 @@ fn action(
                 ActionResult::Return(pc)
             }
         }
-        CFGStatement::Statement(Statement::Call { invocation , info}) => {
+        CFGStatement::Statement(Statement::Call { invocation, info }) => {
             exec_invocation(state, invocation, &program, pc, None, st)
         }
-        CFGStatement::Statement(Statement::Throw { message, .. }) => exec_throw(state, st, message, statistics),
+        CFGStatement::Statement(Statement::Throw { message, .. }) => {
+            exec_throw(state, st, message, statistics)
+        }
         CFGStatement::TryCatch(_, _, catch_entry_pc, _) => {
             state
                 .exception_handler
@@ -746,7 +756,12 @@ fn action(
     }
 }
 
-fn exec_throw(state: &mut State, st: &SymbolTable, message: &str, statistics: &mut Statistics) -> ActionResult {
+fn exec_throw(
+    state: &mut State,
+    st: &SymbolTable,
+    message: &str,
+    statistics: &mut Statistics,
+) -> ActionResult {
     if let Some(ExceptionHandlerEntry {
         catch_pc,
         mut current_depth,
@@ -789,7 +804,12 @@ fn exec_throw(state: &mut State, st: &SymbolTable, message: &str, statistics: &m
     }
 }
 
-fn eval_assertion(state: &mut State, expression: Rc<Expression>, st: &SymbolTable, statistics: &mut Statistics) -> bool {
+fn eval_assertion(
+    state: &mut State,
+    expression: Rc<Expression>,
+    st: &SymbolTable,
+    statistics: &mut Statistics,
+) -> bool {
     // dbg!("invoke Z3 with:", &expression);
     // dbg!(&alias_map);
     statistics.measure_veficiation();
@@ -851,8 +871,11 @@ fn exec_invocation(
 
     state.exception_handler.increment_handler();
 
-
-    let argument_types = invocation.arguments().iter().map(AsRef::as_ref).map(Typeable::type_of);
+    let argument_types = invocation
+        .arguments()
+        .iter()
+        .map(AsRef::as_ref)
+        .map(Typeable::type_of);
 
     match invocation {
         Invocation::InvokeMethod {
@@ -929,7 +952,13 @@ fn exec_invocation(
                 this_param,
             );
 
-            let next_entry = find_entry_for_static_invocation(&class_name, &method.name, argument_types,  program, st);
+            let next_entry = find_entry_for_static_invocation(
+                &class_name,
+                &method.name,
+                argument_types,
+                program,
+                st,
+            );
             ActionResult::FunctionCall(next_entry)
         }
         Invocation::InvokeSuperConstructor { resolved, .. } => {
@@ -950,7 +979,7 @@ fn exec_invocation(
             let this_param = Parameter::new(
                 NonVoidType::ReferenceType {
                     identifier: class_name.clone(),
-                    info: SourcePos::UnknownPosition
+                    info: SourcePos::UnknownPosition,
                 },
                 this_str(),
             );
@@ -964,7 +993,13 @@ fn exec_invocation(
                 st,
                 this_param,
             );
-            let next_entry = find_entry_for_static_invocation(&class_name, &method.name, argument_types, program, st);
+            let next_entry = find_entry_for_static_invocation(
+                &class_name,
+                &method.name,
+                argument_types,
+                program,
+                st,
+            );
             ActionResult::FunctionCall(next_entry)
         }
         Invocation::InvokeSuperMethod { resolved, .. } => {
@@ -989,9 +1024,9 @@ fn exec_invocation(
 fn find_entry_for_static_invocation(
     class_name: &str,
     method_name: &str,
-    argument_types: impl ExactSizeIterator<Item=RuntimeType> + Clone,
+    argument_types: impl ExactSizeIterator<Item = RuntimeType> + Clone,
     program: &HashMap<u64, CFGStatement>,
-    st: &SymbolTable
+    st: &SymbolTable,
 ) -> u64 {
     // dbg!(invocation);
     let (entry, _) = program
@@ -1003,8 +1038,14 @@ fn find_entry_for_static_invocation(
                 argument_types: other_argument_types,
             } = *v
             {
-                let mut argument_types_match = argument_types.clone().zip(other_argument_types).map(|(a, b)| a.is_of_type(b, st));
-                *other_decl_name == class_name && *other_method_name == method_name && argument_types.len() == other_argument_types.len() && argument_types_match.all_equal()
+                let mut argument_types_match = argument_types
+                    .clone()
+                    .zip(other_argument_types)
+                    .map(|(a, b)| a.is_of_type(b, st));
+                *other_decl_name == class_name
+                    && *other_method_name == method_name
+                    && argument_types.len() == other_argument_types.len()
+                    && argument_types_match.all_equal()
             } else {
                 false
             }
@@ -1031,7 +1072,7 @@ fn exec_method(
     let this_expr = Expression::Var {
         var: this.1.clone(),
         type_: this.0,
-        info: method.info
+        info: method.info,
     };
     let parameters = std::iter::once(&this_param).chain(method.params.iter());
     let arguments = std::iter::once(Rc::new(this_expr)).chain(arguments.iter().cloned());
@@ -1164,7 +1205,7 @@ fn prepare_assert_expression(
                 lhs: Rc::new(x),
                 rhs: Rc::new(y),
                 type_: RuntimeType::BoolRuntimeType,
-                info: SourcePos::UnknownPosition
+                info: SourcePos::UnknownPosition,
             })
             .unwrap();
 
@@ -1173,7 +1214,7 @@ fn prepare_assert_expression(
             lhs: Rc::new(assumptions),
             rhs: assertion,
             type_: RuntimeType::BoolRuntimeType,
-            info: SourcePos::UnknownPosition
+            info: SourcePos::UnknownPosition,
         }))
     } else {
         negate(assertion)
@@ -1228,12 +1269,12 @@ fn read_field_symbolic_ref(
                         lhs: sym_ref.clone(),
                         rhs: r.clone(),
                         type_: RuntimeType::ANYRuntimeType,
-                        info: SourcePos::UnknownPosition
+                        info: SourcePos::UnknownPosition,
                     }),
                     true_: (read_field_concrete_ref(heap, ref_, &field)),
                     false_: (read_field_symbolic_ref(heap, rs, sym_ref, field)),
                     type_: RuntimeType::ANYRuntimeType,
-                    info: SourcePos::UnknownPosition
+                    info: SourcePos::UnknownPosition,
                 })
             } else {
                 panic!()
@@ -1296,7 +1337,7 @@ fn null() -> Expression {
     Expression::Lit {
         lit: Lit::NullLit,
         type_: RuntimeType::ANYRuntimeType,
-        info: SourcePos::UnknownPosition
+        info: SourcePos::UnknownPosition,
     }
 }
 
@@ -1319,7 +1360,7 @@ pub fn init_symbolic_reference(
         } else {
             panic!("Cannot initialize type {:?}", type_ref);
         };
-        
+
         // initialise new objects, one for each possible type (sub)class of class_name
         let new_object_references = st
             .get_all_instance_types(decl_name)
@@ -1418,7 +1459,7 @@ fn execute_assign(
     st: &SymbolTable,
 ) -> Option<ConditionalStateSplit> {
     match lhs {
-        Lhs::LhsVar { var, type_, info} => {
+        Lhs::LhsVar { var, type_, info } => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             params.insert(var.clone(), e);
         }
@@ -1427,7 +1468,7 @@ fn execute_assign(
             var_type,
             field,
             type_,
-            info
+            info,
         } => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             let o = params
@@ -1467,7 +1508,12 @@ fn execute_assign(
                 _ => todo!("{:?}", o.as_ref()),
             }
         }
-        Lhs::LhsElem { var, index, type_, info} => {
+        Lhs::LhsElem {
+            var,
+            index,
+            type_,
+            info,
+        } => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             let ref_ = params
                 .get(var)
@@ -1513,7 +1559,9 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolTable) -> Rc<Expression>
                 _ => Rc::new(value.clone()), // might have to expand on this when dealing with complex quantifying expressions and array
             }
         }
-        Rhs::RhsField { var, field, type_, .. } => {
+        Rhs::RhsField {
+            var, field, type_, ..
+        } => {
             if let Expression::Var { var, .. } = var {
                 let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
                 let object = params.get(var).unwrap().clone();
@@ -1524,7 +1572,9 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolTable) -> Rc<Expression>
                 )
             }
         }
-        Rhs::RhsElem { var, index, type_, .. } => {
+        Rhs::RhsElem {
+            var, index, type_, ..
+        } => {
             if let Expression::Var { var, .. } = var {
                 let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
                 let array = params.get(var).unwrap().clone();
@@ -1535,7 +1585,9 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolTable) -> Rc<Expression>
             //read_elem_concrete_index(state, ref_, index)
             //
         }
-        Rhs::RhsCall { invocation, type_, .. } => {
+        Rhs::RhsCall {
+            invocation, type_, ..
+        } => {
             unreachable!("unreachable, invocations are handled in function exec_invocation()")
         }
 
@@ -1564,7 +1616,7 @@ fn exec_rhs_field(
             true_,
             false_,
             type_,
-            info
+            info,
         } => {
             // bedoelt hij hier niet exec true_ ipv execField true_ ?
             // nope want hij wil nog steeds het field weten ervan
@@ -1576,13 +1628,15 @@ fn exec_rhs_field(
                 true_: true_,
                 false_: false_,
                 type_: type_.clone(),
-                info: *info
+                info: *info,
             })
         }
         Expression::Lit {
             lit: Lit::NullLit, ..
         } => panic!("infeasible"),
-        Expression::Ref { ref_, type_, info } => read_field_concrete_ref(&mut state.heap, *ref_, field),
+        Expression::Ref { ref_, type_, info } => {
+            read_field_concrete_ref(&mut state.heap, *ref_, field)
+        }
         sym_ref @ Expression::SymbolicRef { var, type_, info } => {
             init_symbolic_reference(state, var, type_, st);
             remove_symbolic_null(&mut state.alias_map, var);
@@ -1621,7 +1675,7 @@ fn true_lit() -> Expression {
     Expression::Lit {
         lit: Lit::BoolLit { bool_value: true },
         type_: RuntimeType::BoolRuntimeType,
-        info: SourcePos::UnknownPosition
+        info: SourcePos::UnknownPosition,
     }
 }
 
@@ -1629,7 +1683,7 @@ fn false_lit() -> Expression {
     Expression::Lit {
         lit: Lit::BoolLit { bool_value: false },
         type_: RuntimeType::BoolRuntimeType,
-        info: SourcePos::UnknownPosition
+        info: SourcePos::UnknownPosition,
     }
 }
 
@@ -1643,13 +1697,13 @@ fn create_symbolic_var(name: Identifier, type_: impl Typeable, st: &SymbolTable)
         Expression::SymbolicRef {
             var: name,
             type_: type_.type_of(),
-            info: SourcePos::UnknownPosition
+            info: SourcePos::UnknownPosition,
         }
     } else {
         Expression::SymbolicVar {
             var: name,
             type_: type_.type_of(),
-            info: SourcePos::UnknownPosition
+            info: SourcePos::UnknownPosition,
         }
     }
 }
@@ -1782,7 +1836,7 @@ fn exec_array_construction(
     Rc::new(Expression::Ref {
         ref_: ref_id,
         type_: type_.clone(),
-        info: SourcePos::UnknownPosition
+        info: SourcePos::UnknownPosition,
     })
 }
 
@@ -1809,14 +1863,13 @@ fn verify(
     k: u64,
 ) -> std::result::Result<SymResult, Error> {
     println!("Starting up");
-    let file_content =
-    std::fs::read_to_string(path).unwrap();
+    let file_content = std::fs::read_to_string(path).unwrap();
 
     // Set global file names
     *FILE_NAMES.lock().unwrap() = path.to_string();
 
-
-    let tokens = tokens(&file_content).map_err(|(line, col)| format!("Lexer error at {}:{}:{}", path.to_string(), line, col))?;
+    let tokens = tokens(&file_content)
+        .map_err(|(line, col)| format!("Lexer error at {}:{}:{}", path.to_string(), line, col))?;
     let as_ref = tokens.as_slice();
     // dbg!(as_ref);
     let c = parse(&tokens);
@@ -1835,7 +1888,6 @@ fn verify(
 
     let c = type_compilation_unit(c, &symbol_table)?;
     println!("Typing completed");
-    
 
     let (result, flw) = labelled_statements(c, &mut i);
 
@@ -1849,7 +1901,13 @@ fn verify(
     // panic!();
     let argument_types = initial_method.params.iter().map(Typeable::type_of);
 
-    let pc = find_entry_for_static_invocation(class_name, method_name, argument_types, &program, &symbol_table);
+    let pc = find_entry_for_static_invocation(
+        class_name,
+        method_name,
+        argument_types,
+        &program,
+        &symbol_table,
+    );
     // dbg!(&params);
     let params = initial_method
         .params
@@ -1915,18 +1973,29 @@ fn verify(
 
     let result_text = match sym_result {
         SymResult::Valid => "VALID".to_string(),
-        SymResult::Invalid(SourcePos::SourcePos { line, col }) => format!("INVALID at {}:{}:{}", path, line, col),
-        SymResult::Invalid(SourcePos::UnknownPosition) => "INVALID at unknown position".to_string()
+        SymResult::Invalid(SourcePos::SourcePos { line, col }) => {
+            format!("INVALID at {}:{}:{}", path, line, col)
+        }
+        SymResult::Invalid(SourcePos::UnknownPosition) => "INVALID at unknown position".to_string(),
     };
 
     println!("Statistics");
     println!("  Final result:     {}", result_text);
     println!("  #branches:        {}", statistics.number_of_branches);
     println!("  #prunes:          {}", statistics.number_of_prunes);
-    println!("  #complete_paths:  {}", statistics.number_of_complete_paths);
+    println!(
+        "  #complete_paths:  {}",
+        statistics.number_of_complete_paths
+    );
     println!("  #locally_solved:  {}", statistics.number_of_local_solves);
-    println!("  #Z3 invocations:  {}", statistics.number_of_z3_invocations);
-    println!("  #paths explored:  {}", path_counter.borrow().current_value());
+    println!(
+        "  #Z3 invocations:  {}",
+        statistics.number_of_z3_invocations
+    );
+    println!(
+        "  #paths explored:  {}",
+        path_counter.borrow().current_value()
+    );
 
     return Ok(sym_result);
 }
@@ -1934,28 +2003,19 @@ fn verify(
 #[test]
 fn sym_exec_of_absolute_simplest() {
     let path = "./examples/absolute_simplest.oox";
-    assert_eq!(
-        verify(path, "Foo", "f", 20).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(path, "Foo", "f", 20).unwrap(), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_min() {
     let path = "./examples/psv/min.oox";
-    assert_eq!(
-        verify(path, "Foo", "min", 20).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(path, "Foo", "min", 20).unwrap(), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_method() {
     let path = "./examples/psv/method.oox";
-    assert_eq!(
-        verify(path, "Main", "min", 20).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(path, "Main", "min", 20).unwrap(), SymResult::Valid);
 }
 
 // #[test]
@@ -1986,19 +2046,13 @@ fn sym_exec_div_by_n() {
 #[test]
 fn sym_exec_nonstatic_function() {
     let path = "./examples/nonstatic_function.oox";
-    assert_eq!(
-        verify(&path, "Main", "f", 20).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "f", 20).unwrap(), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_this_method() {
     let path = "./examples/this_method.oox";
-    assert_eq!(
-        verify(&path, "Main", "main", 30).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "main", 30).unwrap(), SymResult::Valid);
 }
 
 #[test]
@@ -2068,20 +2122,14 @@ fn sym_exec_exceptions1() {
         verify(&path, "Main", "test1_invalid", 20).unwrap(),
         SymResult::Invalid(SourcePos::new(15, 21))
     );
-    assert_eq!(
-        verify(&path, "Main", "div", 30).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "div", 30).unwrap(), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_exceptions_m0() {
     let path = "./examples/exceptions.oox";
 
-    assert_eq!(
-        verify(&path, "Main", "m0", 20).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "m0", 20).unwrap(), SymResult::Valid);
     assert_eq!(
         verify(&path, "Main", "m0_invalid", 20).unwrap(),
         SymResult::Invalid(SourcePos::new(49, 17))
@@ -2092,10 +2140,7 @@ fn sym_exec_exceptions_m0() {
 fn sym_exec_exceptions_m1() {
     let path = "./examples/exceptions.oox";
 
-    assert_eq!(
-        verify(&path, "Main", "m1", 20).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "m1", 20).unwrap(), SymResult::Valid);
     assert_eq!(
         verify(&path, "Main", "m1_invalid", 20).unwrap(),
         SymResult::Invalid(SourcePos::new(68, 17))
@@ -2106,20 +2151,14 @@ fn sym_exec_exceptions_m1() {
 fn sym_exec_exceptions_m2() {
     let path = "./examples/exceptions.oox";
 
-    assert_eq!(
-        verify(&path, "Main", "m2", 20).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "m2", 20).unwrap(), SymResult::Valid);
 }
 
 #[test]
 fn sym_exec_exceptions_m3() {
     let path = "./examples/exceptions.oox";
 
-    assert_eq!(
-        verify(&path, "Main", "m3", 30).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "m3", 30).unwrap(), SymResult::Valid);
     assert_eq!(
         verify(&path, "Main", "m3_invalid1", 30).unwrap(),
         SymResult::Invalid(SourcePos::new(94, 17))
@@ -2150,10 +2189,7 @@ fn sym_exec_exceptions_null() {
 fn sym_exec_array1() {
     let path = "./examples/array/array1.oox";
 
-    assert_eq!(
-        verify(&path, "Main", "foo", 50).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "foo", 50).unwrap(), SymResult::Valid);
     assert_eq!(
         verify(&path, "Main", "foo_invalid", 50).unwrap(),
         SymResult::Invalid(SourcePos::new(33, 16))
@@ -2166,10 +2202,7 @@ fn sym_exec_array1() {
         verify(&path, "Main", "sort_invalid1", 50).unwrap(),
         SymResult::Invalid(SourcePos::new(62, 17))
     );
-    assert_eq!(
-        verify(&path, "Main", "max", 50).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "max", 50).unwrap(), SymResult::Valid);
     assert_eq!(
         verify(&path, "Main", "max_invalid1", 50).unwrap(),
         SymResult::Invalid(SourcePos::new(104, 21))
@@ -2205,10 +2238,7 @@ fn sym_exec_array1() {
 fn sym_exec_array2() {
     let path = "./examples/array/array2.oox";
 
-    assert_eq!(
-        verify(&path, "Main", "foo1", 50).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "foo1", 50).unwrap(), SymResult::Valid);
     assert_eq!(
         verify(&path, "Main", "foo1_invalid", 50).unwrap(),
         SymResult::Invalid(SourcePos::new(37, 15))
@@ -2228,10 +2258,7 @@ fn sym_exec_inheritance() {
     let path = "./examples/inheritance/inheritance.oox";
     let k = 150;
 
-    assert_eq!(
-        verify(&path, "Main", "test1", k).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "test1", k).unwrap(), SymResult::Valid);
     assert_eq!(
         verify(&path, "Main", "test1_invalid", k).unwrap(),
         SymResult::Invalid(SourcePos::new(25, 16))
@@ -2251,10 +2278,7 @@ fn sym_exec_inheritance() {
         SymResult::Invalid(SourcePos::new(68, 16))
     );
 
-    assert_eq!(
-        verify(&path, "Main", "test3", k).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "test3", k).unwrap(), SymResult::Valid);
 
     assert_eq!(
         verify(&path, "Main", "test4_valid", k).unwrap(),
@@ -2264,15 +2288,9 @@ fn sym_exec_inheritance() {
         verify(&path, "Main", "test4_invalid", k).unwrap(),
         SymResult::Invalid(SourcePos::new(25, 16))
     );
-    assert_eq!(
-        verify(&path, "Main", "test5", k).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "test5", k).unwrap(), SymResult::Valid);
 
-    assert_eq!(
-        verify(&path, "Main", "test6", k).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "test6", k).unwrap(), SymResult::Valid);
 }
 
 #[test]
@@ -2296,10 +2314,7 @@ fn sym_exec_interface() {
 
     println!("hello");
 
-    assert_eq!(
-        verify(&path, "Main", "main", k).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(&path, "Main", "main", k).unwrap(), SymResult::Valid);
     assert_eq!(
         verify(&path, "Main", "test1_valid", k).unwrap(),
         SymResult::Valid
@@ -2338,7 +2353,13 @@ fn sym_exec_interface2() {
 fn sym_exec_polymorphic() {
     let k = 150;
     assert_eq!(
-        verify("./examples/inheritance/sym_exec_polymorphic.oox", "Main", "main", k).unwrap(),
+        verify(
+            "./examples/inheritance/sym_exec_polymorphic.oox",
+            "Main",
+            "main",
+            k
+        )
+        .unwrap(),
         SymResult::Valid
     );
 }
@@ -2347,7 +2368,13 @@ fn sym_exec_polymorphic() {
 fn benchmark_col_25() {
     let k = 15000;
     assert_eq!(
-        verify("./benchmarks/defects4j/collections_25.oox", "Test", "test", k).unwrap(),
+        verify(
+            "./benchmarks/defects4j/collections_25.oox",
+            "Test",
+            "test",
+            k
+        )
+        .unwrap(),
         SymResult::Invalid(SourcePos::new(352, 21))
     );
 }
@@ -2356,7 +2383,13 @@ fn benchmark_col_25() {
 fn benchmark_col_25_symbolic() {
     let k = 15000;
     assert_eq!(
-        verify("./benchmarks/defects4j/collections_25.oox", "Test", "test_symbolic", k).unwrap(),
+        verify(
+            "./benchmarks/defects4j/collections_25.oox",
+            "Test",
+            "test_symbolic",
+            k
+        )
+        .unwrap(),
         SymResult::Invalid(SourcePos::new(395, 21))
     );
 }
@@ -2365,7 +2398,13 @@ fn benchmark_col_25_symbolic() {
 fn benchmark_col_25_test3() {
     let k = 15000;
     assert_eq!(
-        verify("./benchmarks/defects4j/collections_25.oox", "Test", "test3", k).unwrap(),
+        verify(
+            "./benchmarks/defects4j/collections_25.oox",
+            "Test",
+            "test3",
+            k
+        )
+        .unwrap(),
         SymResult::Valid
     );
 }
@@ -2374,7 +2413,13 @@ fn benchmark_col_25_test3() {
 fn any_linked_list() {
     let k = 40;
     assert_eq!(
-        verify("./benchmarks/experiment1/anyLinkedList.oox", "Main", "test2", k).unwrap(),
+        verify(
+            "./benchmarks/experiment1/anyLinkedList.oox",
+            "Main",
+            "test2",
+            k
+        )
+        .unwrap(),
         SymResult::Valid
     );
 }
