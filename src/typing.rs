@@ -3,6 +3,8 @@
 /// The input is an abstract syntax tree (CompilationUnit) with (most) of its types set to UnknownType.
 /// If the program is type correct, each type in the syntax tree (without a type) is mapped to itself with a type.
 /// If type incorrect, a TypeError is returned instead.
+///
+/// Also any method invocations in the bodies of the methods are resolved, by assigning a reference to the invoked method(s).
 use std::{collections::HashMap, rc::Rc};
 
 use queues::IsQueue;
@@ -114,7 +116,7 @@ fn type_member_class(
 ) -> Result<(), TypeError> {
     use DeclarationMember as DM;
     match declaration_member.clone() {
-        field @ DM::Field { .. } => Ok(()),
+        DM::Field { .. } => Ok(()),
         DM::Constructor(method) | DM::Method(method) if method.is_static == false => {
             let mut env = env.clone();
             env.declare_var(
@@ -259,14 +261,8 @@ fn type_statement(
     while let Ok(next_statement) = queue.remove() {
         match next_statement {
             Statement::Seq { stat1, stat2 } => {
-                queue.add(*stat1);
-                queue.add(*stat2);
-                // let stat2 =
-                //     type_statement(*stat2, is_constructor, current_method, env, st, declaration)?;
-                // Ok(Statement::Seq {
-                //     stat1: Box::new(stat1),
-                //     stat2: Box::new(stat2),
-                // })
+                queue.add(*stat1).unwrap(); // always successful according to docs
+                queue.add(*stat2).unwrap();
             }
             Statement::Declare { type_, var, info } => {
                 env.declare_var(var.clone(), type_.type_of())?;
@@ -445,16 +441,12 @@ fn type_statement(
 
 fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Lhs, TypeError> {
     match lhs {
-        Lhs::LhsVar { var, type_, info } => {
+        Lhs::LhsVar { var, info, .. } => {
             let type_ = env.get_var_type(&var)?;
             Ok(Lhs::LhsVar { var, type_, info })
         }
         Lhs::LhsField {
-            var,
-            var_type,
-            field,
-            type_,
-            info,
+            var, field, info, ..
         } => {
             let var_type = env.get_var_type(&var)?;
             let class_name = var_type.get_reference_type().ok_or_else(|| {
@@ -608,7 +600,7 @@ fn type_invocation(
             // if lhs is not found as a variable, assume this is a static invocation.
             let lhs_type = env.get_var_type(&lhs).ok();
             // if lhs is non-static, add the class type to the argument list, due to the implicit 'this' argument.
-            let argument_types = {
+            let _argument_types = {
                 let mut arg_types = lhs_type
                     .as_ref()
                     .map_or(Vec::new(), |lhs_type| vec![lhs_type.clone()]);
@@ -624,7 +616,7 @@ fn type_invocation(
             let resolved = resolver::resolve_method(class_name, &rhs, st)?;
 
             if resolved.len() == 0 {
-                return Err(error::could_not_resolve_method(&class_name, &rhs, info))
+                return Err(error::could_not_resolve_method(&class_name, &rhs, info));
             }
 
             Ok(Invocation::InvokeMethod {
@@ -657,8 +649,11 @@ fn type_invocation(
             info,
             ..
         } => {
-            let arguments = arguments.into_iter().map(|arg| type_expression(arg, env, st).map(Rc::new)).collect::<Result<Vec<_>, _>>()?;
-            let resolved = resolver::resolve_constructor(&class_name, &arguments,  st)?;
+            let arguments = arguments
+                .into_iter()
+                .map(|arg| type_expression(arg, env, st).map(Rc::new))
+                .collect::<Result<Vec<_>, _>>()?;
+            let resolved = resolver::resolve_constructor(&class_name, &arguments, st)?;
             Ok(Invocation::InvokeConstructor {
                 class_name,
                 arguments,
@@ -669,7 +664,10 @@ fn type_invocation(
         Invocation::InvokeSuperConstructor {
             arguments, info, ..
         } => {
-            let arguments = arguments.into_iter().map(|arg| type_expression(arg, env, st).map(Rc::new)).collect::<Result<Vec<_>, _>>()?;
+            let arguments = arguments
+                .into_iter()
+                .map(|arg| type_expression(arg, env, st).map(Rc::new))
+                .collect::<Result<Vec<_>, _>>()?;
             let class_name = declaration.name();
             let resolved = resolver::resolve_super_constructor(&class_name, &arguments, st)?;
             Ok(Invocation::InvokeSuperConstructor {
@@ -724,8 +722,8 @@ fn type_expression(
             range,
             domain,
             formula,
-            type_,
             info,
+            ..
         } => {
             let array = env.get_var_type(&domain)?;
             let inner_type = array.get_inner_array_type().ok_or(unification_error(
@@ -768,10 +766,7 @@ fn type_expression(
             }
         }
         Expression::UnOp {
-            un_op,
-            value,
-            type_,
-            info,
+            un_op, value, info, ..
         } => {
             let value = type_expression(value, env, st)?;
             let type_ = match un_op {
