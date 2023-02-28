@@ -6,7 +6,7 @@ use crate::{
     error,
     syntax::{
         self, Class, CompilationUnit, Declaration, DeclarationMember, Identifier, Interface,
-        NonVoidType, RuntimeType,
+        NonVoidType,
     }, positioned::WithPosition,
 };
 
@@ -232,12 +232,6 @@ impl SymbolTable {
         }
     }
 
-    // pub fn lookup_method(&self, class_name: &str, method_name: &str) -> Option<
-
-    // pub fn match_method(&self, class_name: &str, method_name: &str, return_type: RuntimeType, arg_types: Vec<RuntimeType>) {
-    //     self.lookupMethod
-    // }
-
     /// Get all derived declarations of the declaration
     /// This includes childs of child etc.
     fn derived_declarations<'a>(
@@ -311,36 +305,4 @@ impl SymbolTable {
             fields
         }
     }
-
-    // fn collect_methods(declaration: Declaration) -> Vec<Rc<DeclarationMember>> {
-    //     match declaration {
-    //         Declaration::Class(class) => Self::collect_methods_class(class),
-    //         Declaration::Interface(interface) => Self::collect_methods_interface(interface),
-    //     }
-    // }
-
-    // fn collect_methods_class(class: Rc<Class>) -> Vec<Rc<DeclarationMember>> {
-    //         let mut methods = Vec::new();
-    //     for declaration_member in &class.members {
-    //         match declaration_member.as_ref() {
-    //             DeclarationMember::Field { type_, name } => {
-    //                 ()
-    //             }
-    //             _ => methods.push(declaration_member.clone()),
-    //         };
-    //     }
-
-    //     let methods = if let Some(extends) = class.extends.clone() {
-    //         [Self::collect_methods_class(extends.into()), methods].concat()
-    //     } else {
-    //         methods
-    //     };
-    //     let interface_methods = class.implements.iter().cloned().flat_map(|interface| Self::collect_methods_interface(interface)).collect();
-    //     methods.extend(interface_methods);
-    //     methods
-    // }
-
-    // fn collect_methods_interface(interface: Rc<Interface>) -> Vec<Rc<DeclarationMember>> {
-    //     todo!()
-    // }
 }
