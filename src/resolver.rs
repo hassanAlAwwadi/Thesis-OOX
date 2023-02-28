@@ -1,350 +1,31 @@
 // since the class and method declaration must be inserted into the abstract syntax tree, this mess is needed.
 
-use std::{borrow::BorrowMut, cell::RefCell, collections::HashMap, ops::Deref, rc::Rc};
+use std::{collections::HashMap, rc::Rc};
 
 use itertools::{Either, Itertools};
 
 use crate::{
+    error,
+    positioned::WithPosition,
     symbol_table::SymbolTable,
     syntax::{
-        self, Class, CompilationUnit, Declaration, DeclarationMember, Identifier, Interface,
-        Invocation, NonVoidType, Parameter, Rhs, RuntimeType, Specification, Statement, Method, Expression,
-    }, typeable::Typeable, error, positioned::WithPosition,
+        self, Class, Declaration, DeclarationMember, Expression, Identifier, Interface, Method,
+    },
+    typeable::Typeable,
 };
 
 pub type ResolveError = String;
 
-// pub fn set_resolvers(
-//     compilation_unit: CompilationUnit<UnresolvedDeclaration>,
-//     st: &SymbolTable,
-// ) -> CompilationUnit<Declaration> {
-//     //let members = resolve_inheritance(compilation_unit.members);
-
-//     // dbg!(&members);
-
-//     let mut compilation_unit = CompilationUnit { members };
-
-//     let old_members = compilation_unit.members.clone();
-
-//     for declaration in compilation_unit.members.iter_mut() {
-//         match declaration {
-//             Declaration::Class(class) => {
-//                 let syntax::Class {
-//                     name,
-//                     members,
-//                     extends_old,
-//                     implements_old,
-//                     subclasses_old,
-//                     extends,
-//                     implements,
-//                 } = class.as_ref().clone();
-//                 let members = members
-//                     .into_iter()
-//                     .map(|dcl| match dcl.as_ref().clone() {
-//                         DeclarationMember::Method {
-//                             name: method_name,
-//                             body,
-//                             params,
-//                             is_static,
-//                             return_type,
-//                             specification,
-//                         } => {
-//                             let mut local_variables: HashMap<&Identifier, NonVoidType> = HashMap::new(); // 'this' must also be set
-//                             for param in &params {
-//                                 local_variables.insert(&param.name, param.type_.to_owned());
-//                             }
-//                             let mut new_body = body;
-//                             helper(
-//                                 &mut new_body,
-//                                 &old_members,
-//                                 &name,
-//                                 &mut local_variables,
-//                                 extends_old.clone(),
-//                                 &implements_old,
-//                                 st
-//                             );
-
-//                             DeclarationMember::Method {
-//                                 name: method_name,
-//                                 body: new_body,
-//                                 params,
-//                                 is_static,
-//                                 return_type,
-//                                 specification,
-//                             }
-//                         }
-//                         DeclarationMember::Constructor {
-//                             name,
-//                             params,
-//                             body,
-//                             specification,
-//                         } => {
-//                             let mut local_variables: HashMap<&Identifier, NonVoidType> = HashMap::new(); // 'this' must also be set
-//                             for param in &params {
-//                                 local_variables.insert(&param.name, param.type_.to_owned());
-//                             }
-//                             let mut new_body = body;
-//                             helper(
-//                                 &mut new_body,
-//                                 &old_members,
-//                                 &name,
-//                                 &mut local_variables,
-//                                 extends_old.clone(),
-//                                 &implements_old,
-//                                 st
-//                             );
-
-//                             DeclarationMember::Constructor {
-//                                 body: new_body,
-//                                 name,
-//                                 params,
-//                                 specification,
-//                             }
-//                         }
-//                         field => field,
-//                     })
-//                     .map(Rc::new)
-//                     .collect_vec();
-
-//                 *class = Rc::new(
-//                     syntax::Class {
-//                         name,
-//                         members,
-//                         extends_old,
-//                         implements_old,
-//                         subclasses_old,
-//                         extends,
-//                         implements,
-//                     }
-//                     .into(),
-//                 );
-//             }
-//             Declaration::Interface(interface) => {
-//                 let mut new_interface = interface.as_ref().clone();
-//                 let members = interface.members.iter().map(|member| match member.as_ref() {
-//                     syntax::InterfaceMember::Method(method) => {
-//                         let method = method.clone();
-//                         let mut local_variables: HashMap<&Identifier, NonVoidType> = HashMap::new(); // 'this' must also be set
-//                         for param in &method.parameters {
-//                             local_variables.insert(&param.name, param.type_.to_owned());
-//                         }
-//                         if let Some(body) = method.body {
-//                             let mut new_body = body;
-//                             helper(
-//                                 &mut new_body,
-//                                 &old_members,
-//                                 &interface.name,
-//                                 &mut local_variables,
-//                                 None,
-//                                 &interface.extends_old,
-//                                 st
-//                             );
-
-//                             Rc::new(syntax::InterfaceMember::Method(syntax::InterfaceMethod { body: Some(new_body), ..method }))
-//                         } else {
-//                             member.clone()
-//                         }
-
-//                     },
-//                 }).collect_vec();
-
-//                 new_interface.members = members;
-//                 *interface = Rc::new(new_interface);
-//             },
-//         }
-//     }
-//     compilation_unit
-// }
-
-// /// Set resolvers in the body statement
-// fn helper<'a>(
-//     statement: &'a mut Statement,
-//     declarations: &Vec<Declaration>,
-//     class_name: &Identifier,
-//     local_variables: &mut HashMap<&'a String, NonVoidType>,
-//     extended_classes: Option<Rc<syntax::Class>>,
-//     implemented_interfaces: &Vec<Rc<syntax::Interface>>,
-//     st: &SymbolTable
-// ) {
-//     match statement {
-//         Statement::Call { invocation } => {
-//             match invocation {
-//                 Invocation::InvokeSuperMethod { resolved, rhs, .. } => {
-//                     super_method_call_helper(resolved, declarations, class_name, &rhs)
-//                 }
-//                 Invocation::InvokeMethod {
-//                     lhs, rhs, resolved, ..
-//                 } => {
-//                     if lhs == "this" {
-//                         method_call_helper(resolved, declarations, class_name, &rhs, st);
-//                     } else if let Some(NonVoidType::ReferenceType { identifier }) =
-//                         &local_variables.get(lhs)
-//                     {
-//                         // This is a normal method call
-//                         method_call_helper(resolved, declarations, identifier, &rhs, st);
-//                     } else {
-//                         // This is a static method call on a class
-//                         method_call_helper(resolved, declarations, &lhs, &rhs, st);
-//                     }
-//                 }
-//                 Invocation::InvokeConstructor {
-//                     class_name,
-//                     resolved,
-//                     ..
-//                 } => constructor_call_helper(resolved, declarations, class_name),
-//                 Invocation::InvokeSuperConstructor { resolved, .. } => {
-//                     constructor_super_call_helper(class_name, resolved, extended_classes)
-//                 }
-//             }
-//         }
-
-//         Statement::Assign {
-//             lhs: _,
-//             rhs: Rhs::RhsCall { invocation, .. },
-//         } => {
-//             match invocation {
-//                 Invocation::InvokeMethod {
-//                     lhs,
-//                     rhs,
-//                     arguments,
-//                     resolved,
-//                 } => {
-//                     if lhs == "this" {
-//                         method_call_helper(resolved, declarations, class_name, &rhs, st);
-//                     } else if let Some(NonVoidType::ReferenceType { identifier }) =
-//                         &local_variables.get(lhs)
-//                     {
-//                         // This is a normal method call
-//                         method_call_helper(resolved, declarations, identifier, &rhs, st);
-//                     } else {
-//                         // This is a static method call on a class
-//                         method_call_helper(resolved, declarations, &lhs, &rhs, st);
-//                     }
-//                 }
-//                 Invocation::InvokeConstructor {
-//                     class_name,
-//                     resolved,
-//                     ..
-//                 } => {
-//                     constructor_call_helper(resolved, declarations, class_name);
-//                 }
-//                 _ => todo!(),
-//             }
-//         }
-//         Statement::Ite {
-//             guard,
-//             true_body,
-//             false_body,
-//         } => {
-//             helper(
-//                 true_body,
-//                 declarations,
-//                 class_name,
-//                 local_variables,
-//                 extended_classes.clone(),
-//                 implemented_interfaces,
-//                 st
-//             );
-//             helper(
-//                 false_body,
-//                 declarations,
-//                 class_name,
-//                 local_variables,
-//                 extended_classes,
-//                 implemented_interfaces,
-//                 st
-//             );
-//         }
-//         Statement::Seq { stat1, stat2 } => {
-//             helper(
-//                 stat1,
-//                 declarations,
-//                 class_name,
-//                 local_variables,
-//                 extended_classes.clone(),
-//                 implemented_interfaces,
-//                 st
-//             );
-//             helper(stat2, declarations, class_name, local_variables, extended_classes,
-//                 implemented_interfaces, st);
-//         }
-//         Statement::While { guard, body } => {
-//             helper(body, declarations, class_name, local_variables, extended_classes,
-//                 implemented_interfaces, st);
-//         }
-//         Statement::Throw { .. } => (),
-//         Statement::Try {
-//             try_body,
-//             catch_body,
-//         } => {
-//             helper(
-//                 try_body,
-//                 declarations,
-//                 class_name,
-//                 local_variables,
-//                 extended_classes.clone(),
-//                 implemented_interfaces,
-//                 st
-//             );
-//             helper(
-//                 catch_body,
-//                 declarations,
-//                 class_name,
-//                 local_variables,
-//                 extended_classes,
-//                 implemented_interfaces,
-//                 st
-//             );
-//         }
-//         Statement::Block { body } => todo!(),
-//         Statement::Declare { type_, var } => {
-//             local_variables.insert(var, type_.clone());
-//         }
-//         _ => (),
-//     }
-// }
-
-// super.method()
-fn super_method_call_helper(
-    class_name: &Identifier,
-    method_name: &Identifier,
-    st: &SymbolTable,
-) -> Box<(Declaration, Rc<Method>)> {
-    let decl = &st.declarations[class_name];
-
-    let class = decl
-        .try_into_class()
-        .expect("cannot call super.method() for interface methods"); // TODO: turn this into an error
-
-    let extends = st
-        .class_extends(&class.name)
-        .as_ref()
-        .expect("expected at least one superclass")
-        .clone();
-
-    let (_super_class_name, super_class_method) = method_in_superclass(extends, method_name, st)
-        .expect("at least one superclass should have this method");
-
-    Box::new(super_class_method)
-}
-
-/// This method resolves the invocation by finding the declaration corresponding to the class type.
-/// Then it looks for any method that could be called by this invocation
-/// either by superclasses or subclasses.
-///
-/// In case of an interface it works similarly, but searches for default implementations,
-/// and then resolves those default implementations to any class that does not override it.
-/// Or
-///
-///
-/// The result is added to resolved.
+/// Resolves the invocation of a method call on an object e.g. `a.method()`.
+/// It returns a mapping from runtimetype class to concrete method.
+/// Any class that `a` may represent at runtime will be in this mapping.
 #[inline(always)]
 fn method_call_helper(
-    class_name: &Identifier,
+    decl_name: &Identifier,
     method_name: &Identifier,
     st: &SymbolTable,
-) -> HashMap<Identifier, (Declaration, Rc<Method>)> {
-    let decl = &st.declarations[class_name];
+) -> Result<HashMap<Identifier, (Declaration, Rc<Method>)>, ResolveError> {
+    let decl = &st.declarations[decl_name];
 
     // Check if class itself contains the method in question
     match decl {
@@ -358,52 +39,70 @@ fn method_call_helper(
             // Find other potential methods in superclasses and subclasses
 
             // superclasses
-            let overridable = if !class_contains_method {
+            let method = if !class_contains_method {
                 if let Some(extends) = st.class_extends(&class.name) {
                     // The method is not overridden by this class, check superclasses for the method
-                    let (super_class_name, super_class_method) =
-                        method_in_superclass(extends.clone(), method_name, st)
-                            .expect("at least one superclass should have this method");
-                    resolved_so_far.insert(class_name.clone(), super_class_method.clone());
+                    let (_super_class_name, super_class_method) =
+                        method_in_superclass(extends.clone(), method_name, st).ok_or_else(
+                            || {
+                                error::at_least_one_superclass_should_have_this_method(
+                                    &class.name,
+                                    method_name,
+                                    method_name.get_position(),
+                                )
+                            },
+                        )?;
+                    // Class found, current class resolves to that superclass method
                     super_class_method
                 } else {
                     // Method not found in superclass, but perhaps in interfaces there is a default implementation.
                     match method_in_interfaces(st.class_implements(&class.name), method_name, st) {
-                        Either::Left(Some((interface_name, interface_method))) => interface_method,
+                        Either::Left(Some((_interface_name, interface_method))) => interface_method,
                         _ => {
-                            panic!(
-                                "Method {:?} is not found in class or any superclass, or interfaces for {:?}",
-                                method_name, class_name
-                            )
+                            // Method not found in any of the interfaces
+                            return Err(error::could_not_resolve_method(
+                                &class.name,
+                                method_name,
+                                method_name.get_position(),
+                            ));
                         }
                     }
                 }
             } else {
-                resolved_so_far.insert(class.name.clone(), (Declaration::Class(class.clone()), method.clone().unwrap()));
+                resolved_so_far.insert(
+                    class.name.clone(),
+                    (Declaration::Class(class.clone()), method.clone().unwrap()),
+                );
                 (Declaration::Class(class.clone()), method.unwrap())
             };
 
-            resolved_so_far.extend(
-                methods_in_subclasses(class.clone(), method_name, Some(overridable), st)
-                    .into_iter(),
-            );
+            // Method found, current class resolves to that method
+            resolved_so_far.insert(class.name.clone(), method.clone());
 
-            return resolved_so_far;
+            let overridable = method;
+
+            let subclass_methods =
+                methods_in_subclasses(class.clone(), method_name, Some(overridable), st)?;
+            resolved_so_far.extend(subclass_methods);
+
+            return Ok(resolved_so_far);
         }
         Declaration::Interface(interface) => {
             // IFoo foo;
             // foo.method();
 
             let overridable_method = method_in_interface(interface.clone(), method_name, st)
-                .expect_left(&format!(
-                    "Method {:?} not declared in interface {:?} or any of its parents",
-                    method_name, interface.name
-                ));
+                .left()
+                .ok_or(error::could_not_resolve_method(
+                    &interface.name,
+                    method_name,
+                    method_name.get_position(),
+                ))?;
 
             let resolved_so_far = st
                 .interface_implemented(&interface.name)
                 .iter()
-                .flat_map(|class| {
+                .map(|class| {
                     methods_in_subclasses(
                         class.clone(),
                         method_name,
@@ -412,15 +111,18 @@ fn method_call_helper(
                             .map(|(_, method)| method.clone()),
                         st,
                     )
-                    .into_iter()
                 })
-                .collect();
-            return resolved_so_far;
+                .flatten_ok()
+                .collect::<Result<HashMap<_, _>, _>>()?;
+            return Ok(resolved_so_far);
         }
     }
 }
 
-fn find_declaration(decl_name: &Identifier, declarations: &Vec<Declaration>) -> Option<Declaration> {
+fn find_declaration(
+    decl_name: &Identifier,
+    declarations: &Vec<Declaration>,
+) -> Option<Declaration> {
     declarations
         .iter()
         .filter_map(|declaration| match declaration {
@@ -436,20 +138,15 @@ fn find_declaration(decl_name: &Identifier, declarations: &Vec<Declaration>) -> 
 }
 
 /// Finds first normal Method, non-constructor, with given name
-fn find_method(
-    method_name: &str,
-    members: &Vec<DeclarationMember>,
-) -> Option<Rc<Method>> {
-    members
-        .iter()
-        .find_map(|member| {
-            if let DeclarationMember::Method(method) = member {
-                if method.name == method_name {
-                    return Some(method.clone());
-                }
+fn find_method(method_name: &str, members: &Vec<DeclarationMember>) -> Option<Rc<Method>> {
+    members.iter().find_map(|member| {
+        if let DeclarationMember::Method(method) = member {
+            if method.name == method_name {
+                return Some(method.clone());
             }
-            None
-        })
+        }
+        None
+    })
 }
 
 /// Find the first method with the name method_name
@@ -462,14 +159,13 @@ fn method_in_superclass(
 ) -> Option<(Identifier, (Declaration, Rc<Method>))> {
     // Find the first superclass (in the chain) with the method
     let member = find_method(method_name, &superclass.members);
-    
+
     if let Some(method) = member {
         // Stop on the first overriden method in the chain.
         Some((
             superclass.name.clone(),
             (Declaration::Class(superclass), method.clone()),
         ))
-        
     } else if let Some(superclass) = st.class_extends(&superclass.name).clone() {
         method_in_superclass(superclass, method_name, st)
     } else {
@@ -482,10 +178,10 @@ fn method_in_superclass(
 /// Returns for each subclass what method it resolves to
 fn methods_in_subclasses(
     class: Rc<Class>,
-    method_name: &str,
+    method_name: &Identifier,
     overridable: Option<(Declaration, Rc<Method>)>,
     st: &SymbolTable,
-) -> HashMap<Identifier, (Declaration, Rc<Method>)> {
+) -> Result<HashMap<Identifier, (Declaration, Rc<Method>)>, ResolveError> {
     let method = find_method(method_name, &class.members);
     let mut methods = if let Some(method) = method.clone() {
         // this class contains the method, assign it to the type
@@ -498,7 +194,11 @@ fn methods_in_subclasses(
             // this class does not contain the method, assign it to the overridable
             HashMap::from([(class.name.clone(), overridable.clone())]) // MUST class.name NOT BE OF OVERRIDABLE TYPE?
         } else {
-            panic!("this class {:?} does not contain the method {:?}, and there is also no method to inherit", class.name, method_name);
+            return Err(error::could_not_resolve_method(
+                &class.name,
+                method_name,
+                method_name.get_position(),
+            ));
         }
     };
 
@@ -507,12 +207,22 @@ fn methods_in_subclasses(
         .map(|method| (Declaration::Class(class.clone()), method))
         .or(overridable);
 
-    methods.extend(st.subclasses(&class.name).iter().flat_map(|subclass| {
-        methods_in_subclasses(subclass.clone(), method_name, overridable.clone(), st).into_iter()
-    }));
-    methods
+    let subclass_methods = st
+        .subclasses(&class.name)
+        .iter()
+        .map(|subclass| {
+            methods_in_subclasses(subclass.clone(), method_name, overridable.clone(), st)
+        })
+        .flatten_ok()
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    methods.extend(subclass_methods);
+    Ok(methods)
 }
 
+/// Tries to find the method_name in the list of interfaces, and their extended interfaces.
+///
+/// Either return a Left when the method was found, with a Some(..) if it was a default method, None otherwise.
+/// Return a Right if the method was not found.
 fn method_in_interfaces(
     interfaces: &Vec<Rc<Interface>>,
     method_name: &str,
@@ -554,13 +264,10 @@ fn method_in_interface(
         match member {
             syntax::InterfaceMember::DefaultMethod(method) => Either::Left(Some((
                 interface.name.clone(),
-                (
-                    Declaration::Interface(interface.clone()),
-                    method
-                ),
+                (Declaration::Interface(interface.clone()), method),
             ))),
             // Abstract method defined in this interface, no need to look in superinterfaces, but cannot provide overridable.
-            syntax::InterfaceMember::AbstractMethod(method) => Either::Left(None),
+            syntax::InterfaceMember::AbstractMethod(_method) => Either::Left(None),
         }
     } else {
         // find first non-default method in superinterfaces, or none.
@@ -571,25 +278,68 @@ fn method_in_interface(
     }
 }
 
+pub(crate) fn resolve_method(
+    class_name: &Identifier,
+    method_name: &Identifier,
+    st: &SymbolTable,
+) -> Result<HashMap<Identifier, (Declaration, Rc<Method>)>, ResolveError> {
+    method_call_helper(class_name, method_name, st)
+}
+
+/// Resolves method calls to super methods, `super.method(..)`.
+pub fn resolve_super_method(
+    class_name: &Identifier,
+    method_name: &Identifier,
+    st: &SymbolTable,
+) -> Result<Box<(Declaration, Rc<Method>)>, ResolveError> {
+    let decl = &st.declarations[class_name];
+
+    let class =
+        decl.try_into_class()
+            .ok_or(error::cannot_call_super_method_on_interface_methods(
+                method_name,
+                method_name.get_position(),
+            ))?;
+
+    let extends = st
+        .class_extends(&class.name)
+        .as_ref()
+        .ok_or(error::expected_superclass(
+            class_name,
+            method_name,
+            method_name.get_position(),
+        ))?
+        .clone();
+
+    let (_super_class_name, super_class_method) = method_in_superclass(extends, method_name, st)
+        .ok_or(error::at_least_one_superclass_should_have_this_method(
+            class_name,
+            method_name,
+            method_name.get_position(),
+        ))?;
+
+    Ok(Box::new(super_class_method))
+}
+
 /// Resolves constructor calls `new Foo(..)` to their method in the syntax tree.
-/// This is needed so we know during symbolic execution what the parameters are, 
+/// This is needed so we know during symbolic execution what the parameters are,
 /// whether the method is static and what its return type is.
-fn constructor_call_helper(
+pub fn resolve_constructor(
     called_constructor: &Identifier,
     arguments: &Vec<Rc<Expression>>,
-    st: &SymbolTable
-) -> Result<Box<(Declaration, Rc<Method>)>, ResolveError> {
+    st: &SymbolTable,
+) -> Result<Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)>, ResolveError> {
     let class = st.get_class(called_constructor).unwrap();
 
     for member in &class.members {
-        if let DeclarationMember::Constructor(method) = member
-        {
-            //dbg!("{:?}, {:?}, {:?}, {:?}", lhs, rhs, class_name, member_name);
+        if let DeclarationMember::Constructor(method) = member {
             let method_param_types = method.params.iter().map(Typeable::type_of);
 
             if *called_constructor == method.name {
-                let arguments_match_type = method.params.len() == arguments.len() 
-                && method_param_types.zip(arguments.iter()).all(|(x, y)| y.is_of_type(x, st));
+                let arguments_match_type = method.params.len() == arguments.len()
+                    && method_param_types
+                        .zip(arguments.iter())
+                        .all(|(x, y)| y.is_of_type(x, st));
                 if arguments_match_type {
                     return Ok(Box::new((
                         Declaration::Class(class.clone()),
@@ -599,258 +349,40 @@ fn constructor_call_helper(
             }
         }
     }
-    Err(error::could_not_resolve_constructor(called_constructor, &arguments.iter().map(|arg| arg.type_of()).collect_vec(), called_constructor.get_position()))
+    Err(error::could_not_resolve_constructor(
+        called_constructor,
+        &arguments.iter().map(|arg| arg.type_of()).collect_vec(),
+        called_constructor.get_position(),
+    ))
 }
 
-fn constructor_super_call_helper(
+pub fn resolve_super_constructor(
     class_name: &Identifier,
+    arguments: &Vec<Rc<Expression>>,
     st: &SymbolTable,
-) -> Box<(Declaration, Rc<Method>)> {
-    let extends = st.class_extends(class_name).expect("super() found in constructor but class does not extend other class");
+) -> Result<Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)>, ResolveError> {
+    let extends = st
+        .class_extends(class_name)
+        .expect("super() found in constructor but class does not extend other class");
 
     for member in &extends.members {
         if let DeclarationMember::Constructor(method) = member {
-            return Box::new((
-                Declaration::Class(extends.clone()),
-                method.clone(),
-            ));
+            let method_param_types = method.params.iter().map(Typeable::type_of);
+            let arguments_match_type = method.params.len() == arguments.len()
+                && method_param_types
+                    .zip(arguments.iter())
+                    .all(|(x, y)| y.is_of_type(x, st));
+            if arguments_match_type {
+                return Ok(Box::new((
+                    Declaration::Class(extends.clone()),
+                    method.clone(),
+                )));
+            }
         }
     }
-    panic!("No constructor found in superclass");
+    Err(error::constructor_not_found_in_superclass(
+        class_name,
+        &arguments.iter().map(|arg| arg.type_of()).collect_vec(),
+        class_name.get_position(),
+    ))
 }
-
-pub(crate) fn resolve_method(
-    class_name: &Identifier,
-    method_name: &Identifier,
-    st: &SymbolTable,
-) -> HashMap<Identifier, (Declaration, Rc<Method>)> {
-    method_call_helper(class_name, method_name, st)
-}
-
-pub fn resolve_super_method(
-    class_name: &Identifier,
-    method_name: &Identifier,
-    st: &SymbolTable
-) -> Box<(Declaration, Rc<Method>)> {
-    super_method_call_helper(class_name, method_name, st)
-}
-
-pub fn resolve_constructor(class_name: &Identifier, arguments: &Vec<Rc<Expression>>, st: &SymbolTable) -> Result<Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)>, ResolveError> {
-    constructor_call_helper(class_name, arguments, st)
-}
-
-pub fn resolve_super_constructor(class_name: &Identifier, st: &SymbolTable) -> Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)> {
-    constructor_super_call_helper(class_name, st)
-}
-
-
-// /// A function that resolves declarations
-// fn resolve_inheritance(unresolved: Vec<UnresolvedDeclaration>) -> Vec<Declaration> {
-//     use UnresolvedDeclaration::*;
-
-//     let resolved_interfaces = resolve_interfaces(&unresolved);
-
-//     // dbg!(&resolved_interfaces);
-
-//     let classes_that_dont_extend = unresolved
-//         .iter()
-//         .filter_map(|u| {
-//             if let Class(class) = u {
-//                 if class.extends.is_none() {
-//                     return Some(class);
-//                 }
-//             }
-//             None
-//         })
-//         .collect_vec();
-//     let mut classes_that_do_extend = unresolved
-//         .iter()
-//         .filter_map(|u| {
-//             if let Class(class) = u {
-//                 if class.extends.is_some() {
-//                     return Some(class);
-//                 }
-//             }
-//             None
-//         })
-//         .collect_vec();
-
-//     let mut resolved = classes_that_dont_extend
-//         .iter()
-//         .copied()
-//         .map(|u| {
-//             let UnresolvedClass { name, members, implements, extends } = u.clone();
-
-//             let implements_old = find_interfaces(&implements, &resolved_interfaces)
-//             .expect("unresolved interface");
-
-//             let class = Rc::new(syntax::Class {
-//                 name,
-//                 extends_old: None,
-//                 subclasses_old: RefCell::new(Vec::new()),
-//                 implements_old: implements_old.clone(),
-//                 members,
-//                 extends,
-//                 implements: implements.clone(),
-//             });
-//             for interface in implements_old {
-//                 interface.implemented.borrow_mut().push(class.clone());
-//             }
-//             class
-//         })
-//         .collect_vec();
-
-//     let max_iterations = 1000;
-//     let mut i = 0;
-//     loop {
-//         classes_that_do_extend.retain(|class| {
-//             let UnresolvedClass {
-//                 name,
-//                 extends,
-//                 members,
-//                 implements,
-//             } = class;
-
-//             let extends = extends.as_ref().unwrap().clone();
-//             let class_it_extends = resolved.iter().find(|class| extends == class.name).cloned();
-
-//             if let Some(class_it_extends) = class_it_extends {
-//                 // Resolve implements
-//                 let implements_old = find_interfaces(&implements, &resolved_interfaces)
-//                     .expect("unresolved interface");
-
-//                 let resolved_class = Rc::new(syntax::Class {
-//                     name: name.clone(),
-//                     extends_old: Some(class_it_extends.clone()),
-//                     subclasses_old: RefCell::new(Vec::new()),
-//                     members: members.clone(),
-//                     implements_old: implements_old.clone(),
-//                     extends: Some(extends),
-//                     implements: implements.clone(),
-//                 });
-//                 resolved.push(resolved_class.clone());
-//                 // Also add this class to the list of extended classes of the superclass.
-//                 let syntax::Class { subclasses_old: subclasses, .. } = class_it_extends.as_ref();
-//                 subclasses.borrow_mut().push(resolved_class.clone());
-
-//                 for interface in implements_old {
-//                     interface
-//                         .implemented
-//                         .borrow_mut()
-//                         .push(resolved_class.clone());
-//                 }
-
-//                 false
-//             } else {
-//                 true
-//             }
-//         });
-//         if classes_that_do_extend.len() == 0 {
-//             return resolved
-//                 .into_iter()
-//                 .map(Declaration::Class)
-//                 .chain(resolved_interfaces.into_iter().map(Declaration::Interface))
-//                 .collect_vec();
-//         }
-
-//         i += 1;
-//         if i == max_iterations {
-//             panic!("max iterations reached, likely due to cyclic inheritance");
-//         }
-//     }
-// }
-
-
-// /// Assumes no cyclic inheritance between interfaces
-// fn resolve_interfaces(unresolved: &Vec<UnresolvedDeclaration>) -> Vec<Rc<Interface>> {
-//     let interfaces_that_dont_extend = unresolved
-//         .iter()
-//         .filter_map(|declaration| {
-//             if let UnresolvedDeclaration::Interface(UnresolvedInterface {
-//                 name,
-//                 extends,
-//                 members,
-//             }) = declaration.clone()
-//             {
-//                 if extends.is_empty() {
-//                     return Some(Rc::new(Interface {
-//                         name,
-//                         extends_old: Vec::new(),
-//                         subinterfaces: Default::default(),
-//                         implemented: Default::default(),
-//                         members,
-//                         extends,
-//                     }));
-//                 }
-//             }
-//             None
-//         })
-//         .collect_vec();
-
-//     let mut interfaces_that_extend = unresolved
-//         .iter()
-//         .filter_map(|declaration| {
-//             if let UnresolvedDeclaration::Interface(interface) = declaration.clone() {
-//                 if !interface.extends.is_empty() {
-//                     return Some(interface);
-//                 }
-//             }
-//             None
-//         })
-//         .collect_vec();
-
-//     let mut resolved = interfaces_that_dont_extend;
-//     let max_iterations = 1000;
-//     let mut i = 0;
-//     loop {
-//         interfaces_that_extend.retain(|declaration| {
-//             let UnresolvedInterface {
-//                 name,
-//                 extends,
-//                 members,
-//             } = declaration;
-//             // try to find all extend interfaces
-//             let resolved_extends = extends
-//                 .iter()
-//                 .map(|interface_name| {
-//                     resolved
-//                         .iter()
-//                         .cloned()
-//                         .find(|resolved_interface| resolved_interface.name == *interface_name)
-//                 })
-//                 .collect::<Option<Vec<_>>>();
-
-//             if let Some(resolved_extends) = resolved_extends {
-//                 // All its parent interfaces are already resolved so we can resolve this one
-//                 let resolved_interface = Rc::new(syntax::Interface {
-//                     name: name.clone(),
-//                     extends_old: resolved_extends.clone(),
-//                     subinterfaces: RefCell::new(Vec::new()),
-//                     implemented: RefCell::new(Vec::new()),
-//                     members: members.clone(),
-//                     extends: extends.clone(),
-//                 });
-//                 resolved.push(resolved_interface.clone());
-
-//                 for extended_interface in resolved_extends {
-//                     extended_interface
-//                         .subinterfaces
-//                         .borrow_mut()
-//                         .push(resolved_interface.clone());
-//                 }
-
-//                 false
-//             } else {
-//                 // Can't resolve yet since not all parent interfaces are resolved, continue
-//                 true
-//             }
-//         });
-//         if interfaces_that_extend.len() == 0 {
-//             return resolved.into_iter().collect_vec();
-//         }
-//         i += 1;
-//         if i == max_iterations {
-//             panic!("max iterations reached, likely due to cyclic inheritance");
-//         }
-//     }
-// }

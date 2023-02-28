@@ -53,9 +53,9 @@ pub fn expected_interface_found_class(expected_interface: &Identifier, info: Sou
     )
 }
 
-pub fn could_not_resolve_method(method_name: &Identifier, info: SourcePos) -> String {
+pub fn could_not_resolve_method(class_name: &Identifier, method_name: &Identifier, info: SourcePos) -> String {
     format!(
-        "Could not find a method implementation of {}(..), {}", method_name, info
+        "Could not find a method implementation of {}.{}(..) in declaration, super or interfaces, {}", class_name, method_name, info
     )
 }
 
@@ -63,4 +63,26 @@ pub fn could_not_resolve_constructor(constructor_name: &Identifier, arguments: &
     format!(
         "Could not find a constructor of {} with arguments {:?}, {}", constructor_name, arguments, info
     )
+}
+
+pub fn constructor_not_found_in_superclass(class_name: &Identifier, arguments: &[RuntimeType], info: SourcePos) -> String {
+    format!(
+        "Could not find a constructor in the superclass of {} with arguments {:?}, {}", class_name, arguments, info
+    )
+}
+
+pub fn cannot_call_super_method_on_interface_methods(method_name: &Identifier, info: SourcePos) -> String {
+    format!(
+        "Cannot call super.method() in default interface methods, {}, {}", method_name, info
+    )
+}
+
+pub fn expected_superclass(class_name: &Identifier, method_name: &Identifier, info: SourcePos) -> String {
+    format!(
+        "Expected {} to have a superclass {}", class_name, info
+    )
+}
+
+pub fn at_least_one_superclass_should_have_this_method(class_name: &Identifier, method_name: &Identifier, info: SourcePos) -> String {
+    format!("Expected at least one superclass of {} to have method {}, {}", class_name, method_name, info)
 }

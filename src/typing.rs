@@ -621,10 +621,10 @@ fn type_invocation(
                 .and_then(|t| t.as_reference_type())
                 .unwrap_or(&lhs);
 
-            let resolved = resolver::resolve_method(class_name, &rhs, st);
+            let resolved = resolver::resolve_method(class_name, &rhs, st)?;
 
             if resolved.len() == 0 {
-                return Err(error::could_not_resolve_method(&rhs, info))
+                return Err(error::could_not_resolve_method(&class_name, &rhs, info))
             }
 
             Ok(Invocation::InvokeMethod {
@@ -642,7 +642,7 @@ fn type_invocation(
             ..
         } => {
             let class_name = declaration.name();
-            let resolved = resolver::resolve_super_method(class_name, &rhs, st);
+            let resolved = resolver::resolve_super_method(class_name, &rhs, st)?;
 
             Ok(Invocation::InvokeSuperMethod {
                 rhs,
@@ -669,8 +669,9 @@ fn type_invocation(
         Invocation::InvokeSuperConstructor {
             arguments, info, ..
         } => {
+            let arguments = arguments.into_iter().map(|arg| type_expression(arg, env, st).map(Rc::new)).collect::<Result<Vec<_>, _>>()?;
             let class_name = declaration.name();
-            let resolved = resolver::resolve_super_constructor(&class_name, st);
+            let resolved = resolver::resolve_super_constructor(&class_name, &arguments, st)?;
             Ok(Invocation::InvokeSuperConstructor {
                 arguments,
                 resolved: Some(resolved),
