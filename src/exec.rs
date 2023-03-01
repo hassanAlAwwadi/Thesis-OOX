@@ -343,43 +343,14 @@ fn sym_exec(
             }
 
             ActionResult::ArrayInitialization(array_name) => {
-                const N: u64 = 3;
-                statistics.measure_branches((N + 1) as u32); // including null, so + 1
-                info!(
-                    state.logger,
-                    "Symbolic array initialisation of {} into {} paths",
-                    array_name,
-                    N + 1
-                );
-                let StackFrame { params, .. } = state.stack.last_mut().unwrap();
-
-                let array_type = params[&array_name].type_of();
-
-                let inner_type = match array_type.clone() {
-                    RuntimeType::ArrayRuntimeType { inner_type } => inner_type,
-                    _ => panic!(
-                        "Expected array type, found {:?}",
-                        params[&array_name].type_of()
-                    ),
-                };
-
-                let new_path_ids = (1..=N).map(|_| path_counter.borrow_mut().next_id());
-
-                // initialise new states with arrays 1..N
-                for (array_size, path_id) in (1..=N).zip(new_path_ids) {
-                    let mut new_state = state.clone();
-                    new_state.path_id = path_id;
-                    array_initialisation(
-                        &mut new_state,
-                        &array_name,
-                        array_size,
-                        array_type.clone(),
-                        *inner_type.clone(),
+                let engine = Engine {
+                    state: &mut state,
+                    remaining_states: &mut remaining_states,
+                    path_counter: path_counter.clone(),
+                    statistics,
                         st,
-                    );
-
-                    // note path_length does not decrease, we stay at the same statement containing array access
-                    remaining_states.push(new_state);
+                };
+                exec_array_initialisation(engine, array_name);
                 }
 
                 // And a state for the case where the array is NULL
@@ -457,6 +428,78 @@ fn sym_exec(
             }
         }
     }
+}
+
+struct Engine<'a> {
+    state: &'a mut State,
+    remaining_states: &'a mut Vec<State>,
+    path_counter: Rc<RefCell<IdCounter<u64>>>,
+    statistics: &'a mut Statistics,
+    st: &'a SymbolTable,
+}
+
+fn exec_array_initialisation(engine: Engine, array_name: Identifier) {
+    let Engine {
+        state,
+        remaining_states,
+        path_counter,
+        statistics,
+        st,
+    } = engine;
+    const N: u64 = 3;
+    statistics.measure_branches((N + 1) as u32); // including null, so + 1
+    info!(
+        state.logger,
+        "Symbolic array initialisation of {} into {} paths",
+        array_name,
+        N + 1
+    );
+    let StackFrame { params, .. } = state.stack.last_mut().unwrap();
+
+    let array_type = params[&array_name].type_of();
+
+    let inner_type = match array_type.clone() {
+        RuntimeType::ArrayRuntimeType { inner_type } => inner_type,
+        _ => panic!(
+            "Expected array type, found {:?}",
+            params[&array_name].type_of()
+        ),
+    };
+
+    let new_path_ids = (1..=N).map(|_| path_counter.borrow_mut().next_id());
+
+    // initialise new states with arrays 1..N
+    for (array_size, path_id) in (1..=N).zip(new_path_ids) {
+        let mut new_state = state.clone();
+        new_state.path_id = path_id;
+        array_initialisation(
+            &mut new_state,
+            &array_name,
+            array_size,
+            array_type.clone(),
+            *inner_type.clone(),
+            st,
+        );
+
+        // note path_length does not decrease, we stay at the same statement containing array access
+        remaining_states.push(new_state);
+    }
+
+    // And a state for the case where the array is NULL
+    let mut null_state = state.clone();
+    let StackFrame { params, .. } = null_state.stack.last_mut().unwrap();
+    params.insert(array_name.clone(), Expression::NULL.into());
+    remaining_states.push(null_state);
+
+    // initialise array on the current state, with size 0
+    array_initialisation(
+        state,
+        &array_name,
+        0,
+        array_type.clone(),
+        *inner_type.clone(),
+        st,
+    );
 }
 
 fn array_initialisation(
@@ -2452,7 +2495,23 @@ fn supertest() {
 fn multiple_constructors() {
     let k = 50;
     assert_eq!(
-        verify("./examples/multiple_constructors.oox", "Foo", "test", k, false).unwrap(),
+        verify(
+            "./examples/multiple_constructors.oox",
+            "Foo",
+            "test",
+            k,
+            false
+        )
+        .unwrap(),
+        SymResult::Valid
+    )
+}
+
+#[test]
+fn arrays3() {
+    let k = 50;
+    assert_eq!(
+        verify("./examples/array/array3.oox", "Main", "test", k, false).unwrap(),
         SymResult::Valid
     )
 }
