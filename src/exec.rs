@@ -372,7 +372,7 @@ fn sym_exec(
                 let feasible_path = exec_assume(
                     &mut true_state,
                     guard.clone(),
-                    &Engine {
+                    &mut Engine {
                         remaining_states: &mut remaining_states,
                         path_counter: path_counter.clone(),
                         statistics,
@@ -388,7 +388,7 @@ fn sym_exec(
                 let feasible_path = exec_assume(
                     &mut false_state,
                     guard,
-                    &Engine {
+                    &mut Engine {
                         remaining_states: &mut remaining_states,
                         path_counter: path_counter.clone(),
                         statistics,
@@ -903,7 +903,7 @@ fn exec_invocation(
     program: &HashMap<u64, CFGStatement>,
     return_point: u64,
     lhs: Option<Lhs>,
-    en: &Engine,
+    en: &mut Engine,
 ) -> ActionResult {
     // dbg!(invocation);
 
@@ -1101,7 +1101,7 @@ fn exec_method(
     method: Rc<Method>,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
-    en: &Engine,
+    en: &mut Engine,
     this: (RuntimeType, Identifier),
 ) {
     let this_param = Parameter::new(
@@ -1134,7 +1134,7 @@ fn exec_static_method(
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
-    en: &Engine,
+    en: &mut Engine,
 ) {
     push_stack_frame(
         state,
@@ -1153,7 +1153,7 @@ fn exec_constructor(
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     class_name: &Identifier,
-    en: &Engine,
+    en: &mut Engine,
     this_param: Parameter,
 ) {
     let parameters = std::iter::once(&this_param).chain(method.params.iter());
@@ -1189,7 +1189,7 @@ fn exec_super_constructor(
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
-    en: &Engine,
+    en: &mut Engine,
     this_param: Parameter,
 ) {
     let parameters = std::iter::once(&this_param).chain(parameters.iter());
@@ -1215,7 +1215,7 @@ fn push_stack_frame<'a, P>(
     method: Rc<Method>,
     lhs: Option<Lhs>,
     params: P,
-    en: &Engine,
+    en: &mut Engine,
 ) where
     P: Iterator<Item = (&'a Parameter, Rc<Expression>)>,
 {
@@ -1234,7 +1234,7 @@ fn push_stack_frame<'a, P>(
 fn prepare_assert_expression(
     state: &mut State,
     assertion: Rc<Expression>,
-    en: &Engine,
+    en: &mut Engine,
 ) -> Rc<Expression> {
     let expression = if state.constraints.len() >= 1 {
         let assumptions = state
@@ -1387,7 +1387,7 @@ pub fn init_symbolic_reference(
     state: &mut State,
     sym_ref: &Identifier,
     type_ref: &RuntimeType,
-    en: &Engine,
+    en: &mut Engine,
 ) {
     let st = en.st;
     if !state.alias_map.contains_key(sym_ref) {
@@ -1397,9 +1397,18 @@ pub fn init_symbolic_reference(
         // then if they are initialised by a single type they remain that
         // if they become initialised by multiple types their type becomes REFRuntimeType (or a different one)
         // Or aliasmap contains a flag whether all types are the same of the symbolic object or there are multipe types.
+        match type_ref {
+            RuntimeType::ReferenceRuntimeType { type_ } => type_,
+            RuntimeType::ArrayRuntimeType { inner_type } => {
+                exec_array_initialisation(state, en, sym_ref.clone());
+                return;
+            },
+            _ => panic!("Cannot initialize type {:?}", type_ref)
+        };
         let decl_name = if let RuntimeType::ReferenceRuntimeType { type_ } = type_ref {
             type_
         } else {
+            
             panic!("Cannot initialize type {:?}", type_ref);
         };
 
@@ -1498,7 +1507,7 @@ fn execute_assign(
     state: &mut State,
     lhs: &Lhs,
     e: Rc<Expression>,
-    en: &Engine,
+    en: &mut Engine,
 ) -> Option<ConditionalStateSplit> {
     let st = en.st;
     match lhs {
@@ -1587,7 +1596,7 @@ fn execute_assign(
 }
 
 // fn evaluateRhs(state: &mut State, rhs: &Rhs) -> Expression {
-fn evaluateRhs(state: &mut State, rhs: &Rhs, en: &Engine) -> Rc<Expression> {
+fn evaluateRhs(state: &mut State, rhs: &Rhs, en: &mut Engine) -> Rc<Expression> {
     match rhs {
         Rhs::RhsExpression { value, type_, .. } => {
             match value {
@@ -1651,7 +1660,7 @@ fn exec_rhs_field(
     object: &Expression,
     field: &Identifier,
     type_: &RuntimeType,
-    en: &Engine,
+    en: &mut Engine,
 ) -> Rc<Expression> {
     match object {
         Expression::Conditional {
@@ -1701,7 +1710,7 @@ fn exec_rhs_elem(
     state: &mut State,
     array: Rc<Expression>,
     index: Rc<Expression>,
-    en: &Engine,
+    en: &mut Engine,
 ) -> Rc<Expression> {
     if let Expression::Ref { ref_, .. } = array.as_ref() {
         let index = evaluateAsInt(state, index, en);
@@ -1854,7 +1863,7 @@ fn exec_array_construction(
     array_type: &NonVoidType,
     sizes: &Vec<Expression>,
     type_: &RuntimeType,
-    en: &Engine,
+    en: &mut Engine,
 ) -> Rc<Expression> {
     let ref_id = state.next_reference_id();
 
@@ -1886,7 +1895,7 @@ fn exec_array_construction(
 /// Helper function, does not invoke Z3 but tries to evaluate the assumption locally.
 /// Returns whether the assumption was found to be infeasible.
 /// Otherwise it inserts the assumption into the constraints.
-fn exec_assume(state: &mut State, assumption: Rc<Expression>, en: &Engine) -> bool {
+fn exec_assume(state: &mut State, assumption: Rc<Expression>, en: &mut Engine) -> bool {
     let expression = evaluate(state, assumption, en);
 
     if *expression == false_lit() {

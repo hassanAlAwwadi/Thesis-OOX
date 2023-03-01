@@ -18,7 +18,7 @@ pub type EvaluationResult<T> = Either<Rc<Expression>, T>;
 pub fn evaluateAsInt(
     state: &mut State,
     expression: Rc<Expression>,
-    en: &Engine,
+    en: &mut Engine,
 ) -> EvaluationResult<i64> {
     let expression = evaluate(state, expression, en);
     if let Expression::Lit {
@@ -32,7 +32,7 @@ pub fn evaluateAsInt(
     }
 }
 
-pub fn evaluate(state: &mut State, expression: Rc<Expression>, en: &Engine) -> Rc<Expression> {
+pub fn evaluate(state: &mut State, expression: Rc<Expression>, en: &mut Engine) -> Rc<Expression> {
     // if substitute
 
     // let expression = substitute(heap, stack, alias_map, expression, ref_counter, st);
@@ -154,7 +154,7 @@ pub fn evaluate(state: &mut State, expression: Rc<Expression>, en: &Engine) -> R
 //     }
 // }
 
-fn eval_locally(state: &mut State, expression: Rc<Expression>, en: &Engine) -> Rc<Expression> {
+fn eval_locally(state: &mut State, expression: Rc<Expression>, en: &mut Engine) -> Rc<Expression> {
     match expression.as_ref() {
         Expression::BinOp {
             bin_op,
@@ -525,7 +525,7 @@ fn evaluate_quantifier<'a, F>(
     domain: &'a Identifier,
     formula: &'a Expression,
     state: &'a mut State,
-    en: &Engine,
+    en: &mut Engine,
 ) -> Rc<Expression>
 where
     F: Fn(Vec<Rc<Expression>>) -> Expression,
