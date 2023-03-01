@@ -1,0 +1,10 @@
+class List {
+    int[] array;
+}
+
+class Main {
+    static void test(List list) {
+        int[] a := list.array;
+        a[0] := 4;
+    }
+}

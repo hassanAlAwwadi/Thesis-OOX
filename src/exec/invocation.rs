@@ -16,7 +16,7 @@ use crate::{
 
 use super::{
     exec_method, exec_static_method, find_entry_for_static_invocation, remove_symbolic_null,
-    ActionResult,
+    ActionResult, Engine,
 };
 
 /// A static method, or a method that is not overriden anywhere (non-polymorphic)
@@ -29,7 +29,7 @@ pub(super) fn single_method_invocation(
     return_point: u64,
     lhs: Option<Lhs>,
     program: &HashMap<u64, CFGStatement>,
-    st: &SymbolTable,
+    en: &mut Engine,
 ) -> u64 {
     let (declaration, resolved_method) = resolved;
     let class_name = &declaration.name();
@@ -39,7 +39,7 @@ pub(super) fn single_method_invocation(
         let arguments = invocation
             .arguments()
             .into_iter()
-            .map(|arg| evaluate(state, arg.clone(), st))
+            .map(|arg| evaluate(state, arg.clone(), en))
             .collect::<Vec<_>>();
 
         exec_static_method(
@@ -49,7 +49,7 @@ pub(super) fn single_method_invocation(
             lhs,
             &arguments,
             &resolved_method.params,
-            st,
+            en,
         );
         let argument_types = invocation
             .arguments()
@@ -61,7 +61,7 @@ pub(super) fn single_method_invocation(
             invocation.identifier(),
             argument_types,
             program,
-            st,
+            en.st,
         );
 
         return next_entry;
@@ -74,7 +74,7 @@ pub(super) fn single_method_invocation(
             return_point,
             lhs,
             program,
-            st,
+            en,
         )
     }
 }
@@ -92,7 +92,7 @@ pub(super) fn multiple_method_invocation(
     return_point: u64,
     lhs: Option<Lhs>,
     program: &HashMap<u64, CFGStatement>,
-    st: &SymbolTable,
+    en: &mut Engine,
 ) -> ActionResult {
     let object = lookup_in_stack(invocation_lhs, &state.stack).unwrap();
     // object can be either a concrete reference to a heap object, or a symbolic object
@@ -116,7 +116,7 @@ pub(super) fn multiple_method_invocation(
                 return_point,
                 lhs,
                 program,
-                st,
+                en,
             );
             return ActionResult::FunctionCall(next_entry);
         }
@@ -141,7 +141,7 @@ pub(super) fn multiple_method_invocation(
                     return_point,
                     lhs,
                     program,
-                    st,
+                    en,
                 );
                 return ActionResult::FunctionCall(next_entry);
             } else {
@@ -182,7 +182,7 @@ pub(super) fn multiple_method_invocation(
                         return_point,
                         lhs,
                         program,
-                        st,
+                        en,
                     );
                     return ActionResult::FunctionCall(next_entry);
                 }
@@ -226,7 +226,7 @@ fn non_static_resolved_method_invocation(
     return_point: u64,
     lhs: Option<Lhs>,
     program: &HashMap<u64, CFGStatement>,
-    st: &SymbolTable,
+    en: &mut Engine,
 ) -> u64 {
     debug!(state.logger, "non-static method invocation");
 
@@ -234,7 +234,7 @@ fn non_static_resolved_method_invocation(
     let arguments = invocation
         .arguments()
         .into_iter()
-        .map(|arg| evaluate(state, arg.clone(), st))
+        .map(|arg| evaluate(state, arg.clone(), en))
         .collect::<Vec<_>>();
 
     let invocation_lhs = match invocation {
@@ -257,7 +257,7 @@ fn non_static_resolved_method_invocation(
         resolved_method,
         lhs,
         &arguments,
-        st,
+        en,
         this,
     );
     let argument_types = invocation
@@ -270,7 +270,7 @@ fn non_static_resolved_method_invocation(
         invocation.identifier(),
         argument_types,
         program,
-        st,
+        en.st,
     );
 
     return next_entry;
