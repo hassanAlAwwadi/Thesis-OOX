@@ -6,7 +6,8 @@ use std::{
     ops::{AddAssign, Deref},
     rc::Rc,
     string,
-    sync::Mutex, time::Instant,
+    sync::Mutex,
+    time::Instant,
 };
 
 use itertools::{Either, Itertools};
@@ -261,7 +262,17 @@ fn sym_exec(
             }
         }
 
-        let next = action(&mut state, program, k, st, statistics);
+        let next = action(
+            &mut state,
+            program,
+            k,
+            &mut Engine {
+                remaining_states: &mut remaining_states,
+                path_counter: path_counter.clone(),
+                statistics,
+                st,
+            },
+        );
         match next {
             ActionResult::FunctionCall(next) => {
                 // function call or return
@@ -342,47 +353,48 @@ fn sym_exec(
                 }
             }
 
-            ActionResult::ArrayInitialization(array_name) => {
-                let engine = Engine {
-                    state: &mut state,
+            ActionResult::ArrayInitialization(array_name) => exec_array_initialisation(
+                &mut state,
+                &mut Engine {
                     remaining_states: &mut remaining_states,
                     path_counter: path_counter.clone(),
                     statistics,
-                        st,
-                };
-                exec_array_initialisation(engine, array_name);
-                }
-
-                // And a state for the case where the array is NULL
-                let mut null_state = state.clone();
-                let StackFrame { params, .. } = null_state.stack.last_mut().unwrap();
-                params.insert(array_name.clone(), Expression::NULL.into());
-                remaining_states.push(null_state);
-
-                // initialise array on the current state, with size 0
-                array_initialisation(
-                    &mut state,
-                    &array_name,
-                    0,
-                    array_type.clone(),
-                    *inner_type.clone(),
                     st,
-                );
-            }
+                },
+                array_name,
+            ),
             ActionResult::StateSplit((guard, true_lhs, false_lhs, lhs_name)) => {
                 // split up the paths into two, one where guard == true and one where guard == false.
                 // Do not increase path_length
                 statistics.measure_branches(2);
                 let mut true_state = state.clone();
                 true_state.path_id = path_counter.borrow_mut().next_id();
-                let feasible_path = exec_assume(&mut true_state, guard.clone(), st);
+                let feasible_path = exec_assume(
+                    &mut true_state,
+                    guard.clone(),
+                    &Engine {
+                        remaining_states: &mut remaining_states,
+                        path_counter: path_counter.clone(),
+                        statistics,
+                        st,
+                    },
+                );
                 if feasible_path {
                     write_to_stack(lhs_name.clone(), true_lhs, &mut true_state.stack);
                     remaining_states.push(true_state);
                 }
                 // continue with false state
                 let mut false_state = &mut state;
-                let feasible_path = exec_assume(&mut false_state, guard, st);
+                let feasible_path = exec_assume(
+                    &mut false_state,
+                    guard,
+                    &Engine {
+                        remaining_states: &mut remaining_states,
+                        path_counter: path_counter.clone(),
+                        statistics,
+                        st,
+                    },
+                );
                 if feasible_path {
                     write_to_stack(lhs_name, false_lhs, &mut false_state.stack);
                 }
@@ -430,24 +442,22 @@ fn sym_exec(
     }
 }
 
-struct Engine<'a> {
-    state: &'a mut State,
+pub struct Engine<'a> {
     remaining_states: &'a mut Vec<State>,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &'a mut Statistics,
     st: &'a SymbolTable,
 }
 
-fn exec_array_initialisation(engine: Engine, array_name: Identifier) {
-    let Engine {
-        state,
-        remaining_states,
-        path_counter,
-        statistics,
-        st,
-    } = engine;
+fn exec_array_initialisation(state: &mut State, engine: &mut Engine, array_name: Identifier) {
+    // let Engine {
+    //     remaining_states,
+    //     path_counter,
+    //     statistics,
+    //     st,
+    // } = engine;
     const N: u64 = 3;
-    statistics.measure_branches((N + 1) as u32); // including null, so + 1
+    engine.statistics.measure_branches((N + 1) as u32); // including null, so + 1
     info!(
         state.logger,
         "Symbolic array initialisation of {} into {} paths",
@@ -466,7 +476,7 @@ fn exec_array_initialisation(engine: Engine, array_name: Identifier) {
         ),
     };
 
-    let new_path_ids = (1..=N).map(|_| path_counter.borrow_mut().next_id());
+    let new_path_ids = (1..=N).map(|_| engine.path_counter.borrow_mut().next_id());
 
     // initialise new states with arrays 1..N
     for (array_size, path_id) in (1..=N).zip(new_path_ids) {
@@ -478,18 +488,18 @@ fn exec_array_initialisation(engine: Engine, array_name: Identifier) {
             array_size,
             array_type.clone(),
             *inner_type.clone(),
-            st,
+            engine.st,
         );
 
         // note path_length does not decrease, we stay at the same statement containing array access
-        remaining_states.push(new_state);
+        engine.remaining_states.push(new_state);
     }
 
     // And a state for the case where the array is NULL
     let mut null_state = state.clone();
     let StackFrame { params, .. } = null_state.stack.last_mut().unwrap();
     params.insert(array_name.clone(), Expression::NULL.into());
-    remaining_states.push(null_state);
+    engine.remaining_states.push(null_state);
 
     // initialise array on the current state, with size 0
     array_initialisation(
@@ -498,7 +508,7 @@ fn exec_array_initialisation(engine: Engine, array_name: Identifier) {
         0,
         array_type.clone(),
         *inner_type.clone(),
-        st,
+        engine.st,
     );
 }
 
@@ -567,8 +577,7 @@ fn action(
     state: &mut State,
     program: &HashMap<u64, CFGStatement>,
     k: u64,
-    st: &SymbolTable,
-    statistics: &mut Statistics,
+    en: &mut Engine,
 ) -> ActionResult {
     let pc = state.pc;
     let action = &program[&pc];
@@ -636,15 +645,15 @@ fn action(
                     info,
                 } => {
                     // if rhs contains an invocation.
-                    return exec_invocation(state, invocation, &program, pc, Some(lhs.clone()), st);
+                    return exec_invocation(state, invocation, &program, pc, Some(lhs.clone()), en);
                 }
                 _ => (),
             }
 
-            let value = evaluateRhs(state, rhs, st);
-            let e = evaluate(state, value, st);
+            let value = evaluateRhs(state, rhs, en);
+            let e = evaluate(state, value, en);
 
-            let state_split = execute_assign(state, lhs, e, st);
+            let state_split = execute_assign(state, lhs, e, en);
 
             if let Some(state_split) = state_split {
                 return ActionResult::StateSplit(state_split);
@@ -653,16 +662,16 @@ fn action(
             ActionResult::Continue
         }
         CFGStatement::Statement(Statement::Assert { assertion, .. }) => {
-            let expression = prepare_assert_expression(state, Rc::new(assertion.clone()), st);
+            let expression = prepare_assert_expression(state, Rc::new(assertion.clone()), en);
 
-            let is_valid = eval_assertion(state, expression, st, statistics);
+            let is_valid = eval_assertion(state, expression, en);
             if !is_valid {
                 return ActionResult::InvalidAssertion(assertion.get_position());
             }
             ActionResult::Continue
         }
         CFGStatement::Statement(Statement::Assume { assumption, .. }) => {
-            let is_feasible_path = exec_assume(state, Rc::new(assumption.clone()), st);
+            let is_feasible_path = exec_assume(state, Rc::new(assumption.clone()), en);
             if !is_feasible_path {
                 return ActionResult::InfeasiblePath;
             }
@@ -670,7 +679,7 @@ fn action(
         }
         CFGStatement::Statement(Statement::Return { expression, .. }) => {
             if let Some(expression) = expression {
-                let expression = evaluate(state, Rc::new(expression.clone()), st);
+                let expression = evaluate(state, Rc::new(expression.clone()), en);
                 let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
                 params.insert(retval(), expression);
             }
@@ -708,7 +717,7 @@ fn action(
                         return ActionResult::ArrayInitialization(array_name.clone());
                     }
 
-                    let expression = evaluate(state, requires, st);
+                    let expression = evaluate(state, requires, en);
 
                     if *expression == false_lit() {
                         println!("Constraint is infeasible");
@@ -718,8 +727,8 @@ fn action(
                     }
                 } else {
                     // Assert that requires is true
-                    let assertion = prepare_assert_expression(state, requires.clone(), st);
-                    let is_valid = eval_assertion(state, assertion.clone(), st, statistics);
+                    let assertion = prepare_assert_expression(state, requires.clone(), en);
+                    let is_valid = eval_assertion(state, assertion.clone(), en);
                     if !is_valid {
                         return ActionResult::InvalidAssertion(requires.get_position());
                     }
@@ -742,8 +751,8 @@ fn action(
                 ..
             } = state.stack.last().unwrap();
             if let Some(post_condition) = current_member.post_condition() {
-                let expression = prepare_assert_expression(state, post_condition.clone(), st);
-                let is_valid = eval_assertion(state, expression, st, statistics);
+                let expression = prepare_assert_expression(state, post_condition.clone(), en);
+                let is_valid = eval_assertion(state, expression, en);
                 if !is_valid {
                     // postcondition invalid
                     return ActionResult::InvalidAssertion(post_condition.get_position());
@@ -765,12 +774,12 @@ fn action(
                 if return_type != RuntimeType::VoidRuntimeType {
                     if let Some(lhs) = t {
                         let rv = params.get(&retval()).unwrap();
-                        let return_value = evaluate(state, rv.clone(), st);
+                        let return_value = evaluate(state, rv.clone(), en);
 
                         // perhaps also write retval to current stack?
                         // will need to do this due to this case: `return o.func();`
 
-                        execute_assign(state, &lhs, return_value, st);
+                        execute_assign(state, &lhs, return_value, en);
                     }
                 }
 
@@ -778,11 +787,9 @@ fn action(
             }
         }
         CFGStatement::Statement(Statement::Call { invocation, info }) => {
-            exec_invocation(state, invocation, &program, pc, None, st)
+            exec_invocation(state, invocation, &program, pc, None, en)
         }
-        CFGStatement::Statement(Statement::Throw { message, .. }) => {
-            exec_throw(state, st, message, statistics)
-        }
+        CFGStatement::Statement(Statement::Throw { message, .. }) => exec_throw(state, en, message),
         CFGStatement::TryCatch(_, _, catch_entry_pc, _) => {
             state
                 .exception_handler
@@ -799,12 +806,7 @@ fn action(
     }
 }
 
-fn exec_throw(
-    state: &mut State,
-    st: &SymbolTable,
-    message: &str,
-    statistics: &mut Statistics,
-) -> ActionResult {
+fn exec_throw(state: &mut State, en: &mut Engine, message: &str) -> ActionResult {
     if let Some(ExceptionHandlerEntry {
         catch_pc,
         mut current_depth,
@@ -817,9 +819,9 @@ fn exec_throw(
                 .unwrap_or_else(|| panic!("Unexpected empty stack"));
 
             if let Some(exceptional) = stack_frame.current_member.exceptional() {
-                let assertion = prepare_assert_expression(state, exceptional.clone(), st);
+                let assertion = prepare_assert_expression(state, exceptional.clone(), en);
                 //dbg!(&assertion);
-                let is_valid = eval_assertion(state, assertion.clone(), st, statistics);
+                let is_valid = eval_assertion(state, assertion.clone(), en);
                 if !is_valid {
                     error!(state.logger, "Exceptional error: {:?}", message);
                     return ActionResult::InvalidAssertion(exceptional.get_position());
@@ -832,9 +834,9 @@ fn exec_throw(
     } else {
         while let Some(stack_frame) = state.stack.last() {
             if let Some(exceptional) = stack_frame.current_member.exceptional() {
-                let assertion = prepare_assert_expression(state, exceptional.clone(), st);
+                let assertion = prepare_assert_expression(state, exceptional.clone(), en);
                 //dbg!(&assertion);
-                let is_valid = eval_assertion(state, assertion.clone(), st, statistics);
+                let is_valid = eval_assertion(state, assertion.clone(), en);
                 if !is_valid {
                     error!(state.logger, "Exceptional error: {:?}", message);
                     return ActionResult::InvalidAssertion(exceptional.get_position());
@@ -847,15 +849,10 @@ fn exec_throw(
     }
 }
 
-fn eval_assertion(
-    state: &mut State,
-    expression: Rc<Expression>,
-    st: &SymbolTable,
-    statistics: &mut Statistics,
-) -> bool {
+fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut Engine) -> bool {
     // dbg!("invoke Z3 with:", &expression);
     // dbg!(&alias_map);
-    statistics.measure_veficiation();
+    en.statistics.measure_veficiation();
 
     if *expression == true_lit() {
         false
@@ -873,20 +870,20 @@ fn eval_assertion(
             // dbg!(&symbolic_refs);
             let expressions = concretizations(expression.clone(), &symbolic_refs, &state.alias_map);
             // This introduces branching in computation for each concretization proposed:
-            statistics.measure_branches(expressions.len() as u32);
+            en.statistics.measure_branches(expressions.len() as u32);
             // dbg!(&expressions);
 
             for expression in expressions {
-                let expression = evaluate(state, expression, st);
+                let expression = evaluate(state, expression, en);
                 if *expression == true_lit() {
                     // Invalid
-                    statistics.measure_local_solve();
+                    en.statistics.measure_local_solve();
                     return false;
                 } else if *expression == false_lit() {
                     // valid, continue
-                    statistics.measure_local_solve();
+                    en.statistics.measure_local_solve();
                 } else {
-                    statistics.measure_invoke_z3();
+                    en.statistics.measure_invoke_z3();
                     let result = z3_checker::verify(&expression);
                     if let SatResult::Unsat = result {
                         // valid, continue
@@ -906,7 +903,7 @@ fn exec_invocation(
     program: &HashMap<u64, CFGStatement>,
     return_point: u64,
     lhs: Option<Lhs>,
-    st: &SymbolTable,
+    en: &Engine,
 ) -> ActionResult {
     // dbg!(invocation);
 
@@ -941,7 +938,7 @@ fn exec_invocation(
                     return_point,
                     lhs,
                     program,
-                    st,
+                    en,
                 );
                 return ActionResult::FunctionCall(next_entry);
             } else {
@@ -955,7 +952,7 @@ fn exec_invocation(
                     return_point,
                     lhs,
                     program,
-                    st,
+                    en,
                 );
             }
         }
@@ -973,7 +970,7 @@ fn exec_invocation(
             let arguments = invocation
                 .arguments()
                 .into_iter()
-                .map(|arg| evaluate(state, arg.clone(), st))
+                .map(|arg| evaluate(state, arg.clone(), en))
                 .collect::<Vec<_>>();
 
             // Zis is problems with interfaces
@@ -991,7 +988,7 @@ fn exec_invocation(
                 lhs,
                 &arguments,
                 class_name,
-                st,
+                en,
                 this_param,
             );
 
@@ -1000,7 +997,7 @@ fn exec_invocation(
                 &method.name,
                 argument_types,
                 program,
-                st,
+                en.st,
             );
             ActionResult::FunctionCall(next_entry)
         }
@@ -1015,7 +1012,7 @@ fn exec_invocation(
             let arguments = invocation
                 .arguments()
                 .into_iter()
-                .map(|arg| evaluate(state, arg.clone(), st))
+                .map(|arg| evaluate(state, arg.clone(), en))
                 .collect::<Vec<_>>();
 
             // zis is trouble with interfaces
@@ -1033,7 +1030,7 @@ fn exec_invocation(
                 lhs,
                 &arguments,
                 &method.params,
-                st,
+                en,
                 this_param,
             );
             let next_entry = find_entry_for_static_invocation(
@@ -1041,7 +1038,7 @@ fn exec_invocation(
                 &method.name,
                 argument_types,
                 program,
-                st,
+                en.st,
             );
             ActionResult::FunctionCall(next_entry)
         }
@@ -1055,7 +1052,7 @@ fn exec_invocation(
                 return_point,
                 lhs,
                 program,
-                st,
+                en,
             );
             return ActionResult::FunctionCall(next_entry);
         }
@@ -1104,7 +1101,7 @@ fn exec_method(
     method: Rc<Method>,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
-    st: &SymbolTable,
+    en: &Engine,
     this: (RuntimeType, Identifier),
 ) {
     let this_param = Parameter::new(
@@ -1126,7 +1123,7 @@ fn exec_method(
         method.clone(),
         lhs,
         parameters.zip(arguments),
-        st,
+        en,
     )
 }
 
@@ -1137,7 +1134,7 @@ fn exec_static_method(
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
-    st: &SymbolTable,
+    en: &Engine,
 ) {
     push_stack_frame(
         state,
@@ -1145,7 +1142,7 @@ fn exec_static_method(
         member,
         lhs,
         parameters.iter().zip(arguments.iter().cloned()),
-        st,
+        en,
     )
 }
 
@@ -1156,12 +1153,13 @@ fn exec_constructor(
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     class_name: &Identifier,
-    st: &SymbolTable,
+    en: &Engine,
     this_param: Parameter,
 ) {
     let parameters = std::iter::once(&this_param).chain(method.params.iter());
 
-    let fields = st
+    let fields = en
+        .st
         .get_all_fields(class_name)
         .iter()
         .map(|(s, t)| (s.clone(), t.default().into()))
@@ -1180,7 +1178,7 @@ fn exec_constructor(
         method.clone(),
         lhs,
         parameters.zip(arguments),
-        st,
+        en,
     )
 }
 
@@ -1191,7 +1189,7 @@ fn exec_super_constructor(
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
-    st: &SymbolTable,
+    en: &Engine,
     this_param: Parameter,
 ) {
     let parameters = std::iter::once(&this_param).chain(parameters.iter());
@@ -1207,7 +1205,7 @@ fn exec_super_constructor(
         method,
         lhs,
         parameters.zip(arguments),
-        st,
+        en,
     )
 }
 
@@ -1217,12 +1215,12 @@ fn push_stack_frame<'a, P>(
     method: Rc<Method>,
     lhs: Option<Lhs>,
     params: P,
-    st: &SymbolTable,
+    en: &Engine,
 ) where
     P: Iterator<Item = (&'a Parameter, Rc<Expression>)>,
 {
     let params = params
-        .map(|(p, e)| (p.name.clone(), evaluate(state, e, st)))
+        .map(|(p, e)| (p.name.clone(), evaluate(state, e, en)))
         .collect();
     let stack_frame = StackFrame {
         pc: return_point,
@@ -1236,7 +1234,7 @@ fn push_stack_frame<'a, P>(
 fn prepare_assert_expression(
     state: &mut State,
     assertion: Rc<Expression>,
-    st: &SymbolTable,
+    en: &Engine,
 ) -> Rc<Expression> {
     let expression = if state.constraints.len() >= 1 {
         let assumptions = state
@@ -1276,7 +1274,7 @@ fn prepare_assert_expression(
     //     },
     // );
     debug!(state.logger, "Expression to evaluate: {:?}", expression);
-    let z = evaluate(state, Rc::new(expression), st);
+    let z = evaluate(state, Rc::new(expression), en);
     debug!(state.logger, "Evaluated expression: {:?}", z);
     z
 }
@@ -1389,8 +1387,9 @@ pub fn init_symbolic_reference(
     state: &mut State,
     sym_ref: &Identifier,
     type_ref: &RuntimeType,
-    st: &SymbolTable,
+    en: &Engine,
 ) {
+    let st = en.st;
     if !state.alias_map.contains_key(sym_ref) {
         debug!(state.logger, "Lazy initialisation of symbolic reference"; "ref" => #?sym_ref, "type" => #?type_ref);
 
@@ -1499,8 +1498,9 @@ fn execute_assign(
     state: &mut State,
     lhs: &Lhs,
     e: Rc<Expression>,
-    st: &SymbolTable,
+    en: &Engine,
 ) -> Option<ConditionalStateSplit> {
+    let st = en.st;
     match lhs {
         Lhs::LhsVar { var, type_, info } => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
@@ -1524,7 +1524,7 @@ fn execute_assign(
                     write_field_concrete_ref(&mut state.heap, *ref_, field, e);
                 }
                 sym_ref @ Expression::SymbolicRef { var, type_, .. } => {
-                    init_symbolic_reference(state, &var, &type_, st);
+                    init_symbolic_reference(state, &var, &type_, en);
                     // should also remove null here? --Assignemnt::45
                     // Yes, we have if (x = null) { throw; } guards that ensure it cannot be null
                     remove_symbolic_null(&mut state.alias_map, &var);
@@ -1571,7 +1571,7 @@ fn execute_assign(
 
             match ref_.as_ref() {
                 Expression::Ref { ref_, type_, .. } => {
-                    let index = evaluateAsInt(state, index.clone(), st);
+                    let index = evaluateAsInt(state, index.clone(), en);
 
                     match index {
                         Either::Left(index) => write_elem_symbolic_index(state, *ref_, index, e),
@@ -1587,7 +1587,7 @@ fn execute_assign(
 }
 
 // fn evaluateRhs(state: &mut State, rhs: &Rhs) -> Expression {
-fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolTable) -> Rc<Expression> {
+fn evaluateRhs(state: &mut State, rhs: &Rhs, en: &Engine) -> Rc<Expression> {
     match rhs {
         Rhs::RhsExpression { value, type_, .. } => {
             match value {
@@ -1608,7 +1608,7 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolTable) -> Rc<Expression>
             if let Expression::Var { var, .. } = var {
                 let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
                 let object = params.get(var).unwrap().clone();
-                exec_rhs_field(state, &object, field, type_, st)
+                exec_rhs_field(state, &object, field, type_, en)
             } else {
                 panic!(
                     "Currently only right hand sides of the form <variable>.<field> are allowed."
@@ -1621,7 +1621,7 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolTable) -> Rc<Expression>
             if let Expression::Var { var, .. } = var {
                 let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
                 let array = params.get(var).unwrap().clone();
-                exec_rhs_elem(state, array, index.to_owned().into(), st)
+                exec_rhs_elem(state, array, index.to_owned().into(), en)
             } else {
                 panic!("Unexpected uninitialized array");
             }
@@ -1640,7 +1640,7 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, st: &SymbolTable) -> Rc<Expression>
             type_,
             ..
         } => {
-            return exec_array_construction(state, array_type, sizes, type_, st);
+            return exec_array_construction(state, array_type, sizes, type_, en);
         }
         _ => unimplemented!(),
     }
@@ -1651,7 +1651,7 @@ fn exec_rhs_field(
     object: &Expression,
     field: &Identifier,
     type_: &RuntimeType,
-    st: &SymbolTable,
+    en: &Engine,
 ) -> Rc<Expression> {
     match object {
         Expression::Conditional {
@@ -1663,8 +1663,8 @@ fn exec_rhs_field(
         } => {
             // bedoelt hij hier niet exec true_ ipv execField true_ ?
             // nope want hij wil nog steeds het field weten ervan
-            let true_ = exec_rhs_field(state, true_, field, type_, st);
-            let false_ = exec_rhs_field(state, false_, field, type_, st);
+            let true_ = exec_rhs_field(state, true_, field, type_, en);
+            let false_ = exec_rhs_field(state, false_, field, type_, en);
 
             Rc::new(Expression::Conditional {
                 guard: guard.clone(),
@@ -1681,7 +1681,7 @@ fn exec_rhs_field(
             read_field_concrete_ref(&mut state.heap, *ref_, field)
         }
         sym_ref @ Expression::SymbolicRef { var, type_, info } => {
-            init_symbolic_reference(state, var, type_, st);
+            init_symbolic_reference(state, var, type_, en);
             remove_symbolic_null(&mut state.alias_map, var);
             let concrete_refs = &state.alias_map[var];
             // dbg!(&alias_map);
@@ -1701,10 +1701,10 @@ fn exec_rhs_elem(
     state: &mut State,
     array: Rc<Expression>,
     index: Rc<Expression>,
-    st: &SymbolTable,
+    en: &Engine,
 ) -> Rc<Expression> {
     if let Expression::Ref { ref_, .. } = array.as_ref() {
-        let index = evaluateAsInt(state, index, st);
+        let index = evaluateAsInt(state, index, en);
         match index {
             Either::Left(index) => read_elem_symbolic_index(state, *ref_, index),
             Either::Right(index) => read_elem_concrete_index(state, *ref_, index),
@@ -1854,7 +1854,7 @@ fn exec_array_construction(
     array_type: &NonVoidType,
     sizes: &Vec<Expression>,
     type_: &RuntimeType,
-    st: &SymbolTable,
+    en: &Engine,
 ) -> Rc<Expression> {
     let ref_id = state.next_reference_id();
 
@@ -1862,7 +1862,7 @@ fn exec_array_construction(
     // int[][] a = new int[10][10];
 
     let size =
-        evaluateAsInt(state, Rc::new(sizes[0].clone()), st).expect_right("no symbolic array sizes");
+        evaluateAsInt(state, Rc::new(sizes[0].clone()), en).expect_right("no symbolic array sizes");
 
     let array = (0..size)
         .map(|_| Rc::new(array_type.default()))
@@ -1886,8 +1886,8 @@ fn exec_array_construction(
 /// Helper function, does not invoke Z3 but tries to evaluate the assumption locally.
 /// Returns whether the assumption was found to be infeasible.
 /// Otherwise it inserts the assumption into the constraints.
-fn exec_assume(state: &mut State, assumption: Rc<Expression>, st: &SymbolTable) -> bool {
-    let expression = evaluate(state, assumption, st);
+fn exec_assume(state: &mut State, assumption: Rc<Expression>, en: &Engine) -> bool {
+    let expression = evaluate(state, assumption, en);
 
     if *expression == false_lit() {
         return false;
@@ -1904,11 +1904,13 @@ pub fn verify(
     class_name: &str,
     method_name: &str,
     k: u64,
-    quiet: bool
+    quiet: bool,
 ) -> std::result::Result<SymResult, Error> {
     let start = Instant::now();
-    if !quiet {println!("Starting up");}
-    
+    if !quiet {
+        println!("Starting up");
+    }
+
     let file_content = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
 
     // Set global file names
@@ -1922,18 +1924,29 @@ pub fn verify(
     let c = c.unwrap();
 
     // dbg!(&c);
-    if !quiet { println!("Parsing completed"); }
+    if !quiet {
+        println!("Parsing completed");
+    }
 
     let initial_method = c
         .find_class_declaration_member(method_name, class_name.into())
-        .ok_or_else(|| format!("Could not find method '{}' in class '{}'", method_name, class_name))?;
+        .ok_or_else(|| {
+            format!(
+                "Could not find method '{}' in class '{}'",
+                method_name, class_name
+            )
+        })?;
 
     let mut i = 0;
     let symbol_table = SymbolTable::from_ast(&c)?;
-    if !quiet { println!("Symbol table completed"); }
+    if !quiet {
+        println!("Symbol table completed");
+    }
 
     let c = type_compilation_unit(c, &symbol_table)?;
-    if !quiet { println!("Typing completed"); }
+    if !quiet {
+        println!("Typing completed");
+    }
 
     let (result, flw) = labelled_statements(c, &mut i);
 
@@ -2056,19 +2069,28 @@ pub fn verify(
 #[test]
 fn sym_exec_of_absolute_simplest() {
     let path = "./examples/absolute_simplest.oox";
-    assert_eq!(verify(path, "Foo", "f", 20, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(path, "Foo", "f", 20, false).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_min() {
     let path = "./examples/psv/min.oox";
-    assert_eq!(verify(path, "Foo", "min", 20, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(path, "Foo", "min", 20, false).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_method() {
     let path = "./examples/psv/method.oox";
-    assert_eq!(verify(path, "Main", "min", 20, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(path, "Main", "min", 20, false).unwrap(),
+        SymResult::Valid
+    );
 }
 
 // #[test]
@@ -2099,13 +2121,19 @@ fn sym_exec_div_by_n() {
 #[test]
 fn sym_exec_nonstatic_function() {
     let path = "./examples/nonstatic_function.oox";
-    assert_eq!(verify(&path, "Main", "f", 20, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "f", 20, false).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_this_method() {
     let path = "./examples/this_method.oox";
-    assert_eq!(verify(&path, "Main", "main", 30, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "main", 30, false).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
@@ -2175,14 +2203,20 @@ fn sym_exec_exceptions1() {
         verify(&path, "Main", "test1_invalid", 20, false).unwrap(),
         SymResult::Invalid(SourcePos::new(15, 21))
     );
-    assert_eq!(verify(&path, "Main", "div", 30, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "div", 30, false).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_exceptions_m0() {
     let path = "./examples/exceptions.oox";
 
-    assert_eq!(verify(&path, "Main", "m0", 20, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "m0", 20, false).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&path, "Main", "m0_invalid", 20, false).unwrap(),
         SymResult::Invalid(SourcePos::new(49, 17))
@@ -2193,7 +2227,10 @@ fn sym_exec_exceptions_m0() {
 fn sym_exec_exceptions_m1() {
     let path = "./examples/exceptions.oox";
 
-    assert_eq!(verify(&path, "Main", "m1", 20, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "m1", 20, false).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&path, "Main", "m1_invalid", 20, false).unwrap(),
         SymResult::Invalid(SourcePos::new(68, 17))
@@ -2204,14 +2241,20 @@ fn sym_exec_exceptions_m1() {
 fn sym_exec_exceptions_m2() {
     let path = "./examples/exceptions.oox";
 
-    assert_eq!(verify(&path, "Main", "m2", 20, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "m2", 20, false).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
 fn sym_exec_exceptions_m3() {
     let path = "./examples/exceptions.oox";
 
-    assert_eq!(verify(&path, "Main", "m3", 30, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "m3", 30, false).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&path, "Main", "m3_invalid1", 30, false).unwrap(),
         SymResult::Invalid(SourcePos::new(94, 17))
@@ -2242,7 +2285,10 @@ fn sym_exec_exceptions_null() {
 fn sym_exec_array1() {
     let path = "./examples/array/array1.oox";
 
-    assert_eq!(verify(&path, "Main", "foo", 50, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "foo", 50, false).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&path, "Main", "foo_invalid", 50, false).unwrap(),
         SymResult::Invalid(SourcePos::new(33, 16))
@@ -2255,7 +2301,10 @@ fn sym_exec_array1() {
         verify(&path, "Main", "sort_invalid1", 50, false).unwrap(),
         SymResult::Invalid(SourcePos::new(62, 17))
     );
-    assert_eq!(verify(&path, "Main", "max", 50, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "max", 50, false).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&path, "Main", "max_invalid1", 50, false).unwrap(),
         SymResult::Invalid(SourcePos::new(104, 21))
@@ -2291,7 +2340,10 @@ fn sym_exec_array1() {
 fn sym_exec_array2() {
     let path = "./examples/array/array2.oox";
 
-    assert_eq!(verify(&path, "Main", "foo1", 50, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "foo1", 50, false).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&path, "Main", "foo1_invalid", 50, false).unwrap(),
         SymResult::Invalid(SourcePos::new(37, 15))
@@ -2311,7 +2363,10 @@ fn sym_exec_inheritance() {
     let path = "./examples/inheritance/inheritance.oox";
     let k = 150;
 
-    assert_eq!(verify(&path, "Main", "test1", k, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "test1", k, false).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&path, "Main", "test1_invalid", k, false).unwrap(),
         SymResult::Invalid(SourcePos::new(25, 16))
@@ -2331,7 +2386,10 @@ fn sym_exec_inheritance() {
         SymResult::Invalid(SourcePos::new(68, 16))
     );
 
-    assert_eq!(verify(&path, "Main", "test3", k, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "test3", k, false).unwrap(),
+        SymResult::Valid
+    );
 
     assert_eq!(
         verify(&path, "Main", "test4_valid", k, false).unwrap(),
@@ -2341,9 +2399,15 @@ fn sym_exec_inheritance() {
         verify(&path, "Main", "test4_invalid", k, false).unwrap(),
         SymResult::Invalid(SourcePos::new(25, 16))
     );
-    assert_eq!(verify(&path, "Main", "test5", k, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "test5", k, false).unwrap(),
+        SymResult::Valid
+    );
 
-    assert_eq!(verify(&path, "Main", "test6", k, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "test6", k, false).unwrap(),
+        SymResult::Valid
+    );
 }
 
 #[test]
@@ -2367,7 +2431,10 @@ fn sym_exec_interface() {
 
     println!("hello");
 
-    assert_eq!(verify(&path, "Main", "main", k, false).unwrap(), SymResult::Valid);
+    assert_eq!(
+        verify(&path, "Main", "main", k, false).unwrap(),
+        SymResult::Valid
+    );
     assert_eq!(
         verify(&path, "Main", "test1_valid", k, false).unwrap(),
         SymResult::Valid
