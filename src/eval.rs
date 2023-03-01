@@ -35,126 +35,12 @@ pub fn evaluateAsInt(
 }
 
 pub fn evaluate(state: &mut State, expression: Rc<Expression>, en: &mut Engine) -> Rc<Expression> {
-    // if substitute
-
-    // let expression = substitute(heap, stack, alias_map, expression, ref_counter, st);
-
-    // dbg!(expression);
+    // dbg!(expression)
     let expression = eval_locally(state, expression, en);
     // dbg!(&expression);
     return expression;
 }
 
-// fn substitute(state: &mut State, expression: Rc<Expression>, st: &SymbolTable) -> Rc<Expression> {
-//     match expression.as_ref() {
-//         Expression::BinOp {
-//             bin_op,
-//             lhs,
-//             rhs,
-//             type_,
-//             info,
-//         } => {
-//             let lhs = substitute(state, lhs.clone(), st);
-//             let rhs = substitute(state, rhs.clone(), st);
-//             return Rc::new(Expression::BinOp {
-//                 bin_op: bin_op.clone(),
-//                 lhs,
-//                 rhs,
-//                 type_: type_.clone(),
-//                 info: SourcePos::UnknownPosition,
-//             });
-//         }
-//         Expression::UnOp {
-//             un_op,
-//             value,
-//             type_,
-//             info,
-//         } => {
-//             let value = substitute(state, value.clone(), st);
-//             Rc::new(Expression::UnOp {
-//                 un_op: un_op.clone(),
-//                 value,
-//                 type_: type_.clone(),
-//                 info: SourcePos::UnknownPosition,
-//             })
-//         }
-//         Expression::Var { var, type_, info } => {
-//             let StackFrame { pc, t, params, .. } = state.stack.last().unwrap();
-//             let o = params
-//                 .get(var)
-//                 .unwrap_or_else(|| panic!("infeasible, object does not exit"))
-//                 .clone();
-
-//             match o.as_ref() {
-//                 Expression::SymbolicRef { var, type_, info } => {
-//                     let value = match state.alias_map.get(var) {
-//                         None => o.clone(),
-//                         Some(alias_entry) => {
-//                             if alias_entry.aliases.len() == 1 {
-//                                 alias_entry.aliases[0].clone()
-//                             } else {
-//                                 o.clone()
-//                             }
-//                         }
-//                     };
-//                     init_symbolic_reference(state, &var, type_, st);
-
-//                     value.clone()
-//                 }
-//                 value => substitute(state, o.clone(), st),
-//             }
-//         }
-//         Expression::SymbolicVar { .. } => expression,
-//         Expression::Lit { .. } => expression,
-//         Expression::SizeOf { var, type_, info } => {
-//             todo!()
-//         }
-//         Expression::Ref { .. } => expression,
-//         Expression::SymbolicRef { var, type_, info } => {
-//             init_symbolic_reference(state, &var, &type_, st);
-
-//             Rc::new(Expression::SymbolicRef {
-//                 var: var.clone(),
-//                 type_: type_.clone(),
-//                 info: *info,
-//             })
-//         }
-//         Expression::Conditional {
-//             guard,
-//             true_,
-//             false_,
-//             type_,
-//             info,
-//         } => {
-//             let guard = substitute(state, guard.clone(), st);
-//             let false_ = substitute(state, false_.clone(), st);
-//             let true_ = substitute(state, true_.clone(), st);
-//             Rc::new(Expression::Conditional {
-//                 guard,
-//                 true_,
-//                 false_,
-//                 type_: type_.clone(),
-//                 info: *info,
-//             })
-//         }
-//         Expression::Forall {
-//             elem,
-//             range,
-//             domain,
-//             formula,
-//             type_,
-//             info,
-//         } => todo!(),
-//         Expression::Exists {
-//             elem,
-//             range,
-//             domain,
-//             formula,
-//             type_,
-//             info,
-//         } => todo!(),
-//     }
-// }
 
 fn eval_locally(state: &mut State, expression: Rc<Expression>, en: &mut Engine) -> Rc<Expression> {
     match expression.as_ref() {
