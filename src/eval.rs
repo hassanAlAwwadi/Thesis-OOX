@@ -6,7 +6,9 @@ use itertools::{Either, Itertools};
 
 use crate::{
     dsl::{and, ands, equal, ite, negate, negative, or, ors, toIntExpr},
-    exec::{get_element, init_symbolic_reference, AliasMap, Engine, Heap, HeapValue, State},
+    exec::{
+        get_element, init_symbolic_reference, single_alias_elimination, Engine, HeapValue, State,
+    },
     positioned::SourcePos,
     stack::{remove_from_stack, write_to_stack, StackFrame},
     symbol_table::SymbolTable,
@@ -213,7 +215,9 @@ fn eval_locally(state: &mut State, expression: Rc<Expression>, en: &mut Engine) 
         Expression::Lit { .. } => expression,
         Expression::SizeOf { var, type_, info } => {
             let StackFrame { pc, t, params, .. } = state.stack.last().unwrap();
-            match params[var].as_ref() {
+            let expr = single_alias_elimination(params[var].clone(), &state.alias_map);
+
+            match expr.as_ref() {
                 Expression::Lit {
                     lit: Lit::NullLit,
                     type_,
@@ -539,6 +543,9 @@ where
         .unwrap()
         .clone();
     let array = evaluate(state, array, en);
+
+    let array = single_alias_elimination(array, &state.alias_map);
+
     match array.as_ref() {
         Expression::Lit {
             lit: Lit::NullLit, ..
@@ -573,9 +580,6 @@ where
                 .collect_vec();
 
             quantifier(formulas).into()
-        }
-        Expression::SymbolicRef { var, type_, info } => {
-            unreachable!("Arrays are initialized as concrete references for each path")
         }
         _ => unreachable!("Expected array to be a reference, found {:?}", array),
     }

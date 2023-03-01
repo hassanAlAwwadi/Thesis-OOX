@@ -197,7 +197,7 @@ pub struct State {
     exception_handler: ExceptionHandlerStack,
 
     // logger and other (non-functional) metrics
-    logger: Logger,
+    pub logger: Logger,
     path_length: u64,
     path_id: u64,
 }
@@ -353,16 +353,6 @@ fn sym_exec(
                 }
             }
 
-            ActionResult::ArrayInitialization(array_name) => exec_array_initialisation(
-                &mut state,
-                &mut Engine {
-                    remaining_states: &mut remaining_states,
-                    path_counter: path_counter.clone(),
-                    statistics,
-                    st,
-                },
-                array_name,
-            ),
             ActionResult::StateSplit((guard, true_lhs, false_lhs, lhs_name)) => {
                 // split up the paths into two, one where guard == true and one where guard == false.
                 // Do not increase path_length
@@ -449,13 +439,12 @@ pub struct Engine<'a> {
     st: &'a SymbolTable,
 }
 
-fn exec_array_initialisation(state: &mut State, engine: &mut Engine, array_name: Identifier) {
-    // let Engine {
-    //     remaining_states,
-    //     path_counter,
-    //     statistics,
-    //     st,
-    // } = engine;
+fn exec_array_initialisation(
+    state: &mut State,
+    engine: &mut Engine,
+    array_name: Identifier,
+    array_type: RuntimeType,
+) {
     const N: u64 = 3;
     engine.statistics.measure_branches((N + 1) as u32); // including null, so + 1
     info!(
@@ -464,16 +453,10 @@ fn exec_array_initialisation(state: &mut State, engine: &mut Engine, array_name:
         array_name,
         N + 1
     );
-    let StackFrame { params, .. } = state.stack.last_mut().unwrap();
-
-    let array_type = params[&array_name].type_of();
 
     let inner_type = match array_type.clone() {
         RuntimeType::ArrayRuntimeType { inner_type } => inner_type,
-        _ => panic!(
-            "Expected array type, found {:?}",
-            params[&array_name].type_of()
-        ),
+        _ => panic!("Expected array type, found {:?}", array_type),
     };
 
     let new_path_ids = (1..=N).map(|_| engine.path_counter.borrow_mut().next_id());
@@ -497,8 +480,10 @@ fn exec_array_initialisation(state: &mut State, engine: &mut Engine, array_name:
 
     // And a state for the case where the array is NULL
     let mut null_state = state.clone();
-    let StackFrame { params, .. } = null_state.stack.last_mut().unwrap();
-    params.insert(array_name.clone(), Expression::NULL.into());
+    null_state.alias_map.insert(
+        array_name.clone(),
+        AliasEntry::new(vec![Expression::NULL.into()]),
+    );
     engine.remaining_states.push(null_state);
 
     // initialise array on the current state, with size 0
@@ -521,14 +506,14 @@ fn array_initialisation(
     st: &SymbolTable,
 ) {
     let r = state.next_reference_id();
-    let StackFrame { params, .. } = state.stack.last_mut().unwrap();
-    params.insert(
+
+    state.alias_map.insert(
         array_name.clone(),
-        Rc::new(Expression::Ref {
+        AliasEntry::new(vec![Rc::new(Expression::Ref {
             ref_: r,
-            type_: RuntimeType::ARRAYRuntimeType,
+            type_: array_type.clone(),
             info: SourcePos::UnknownPosition,
-        }),
+        })]),
     );
 
     let array_elements = (0..array_size)
@@ -561,7 +546,6 @@ enum ActionResult {
     InvalidAssertion(SourcePos),
     InfeasiblePath,
     Finish,
-    ArrayInitialization(Identifier),
     /// This occurs when a lhs in a statement is a conditional
     /// and requires the state to split into paths where the condition is true and false.
     /// A lhs becomes a conditional for example when `Point p := a[i];` where `i` is a symbolic variable.
@@ -612,33 +596,9 @@ fn action(
             ActionResult::Continue
         }
         CFGStatement::Statement(Statement::Assign { lhs, rhs, info }) => {
-            // If lhs or rhs contains an uninitialized array, we must initialize it
-            // When we initialize an array, we split up the state into multiple states each with an increasingly longer instance of the array.
-            // In other words, we must split this path into multiple paths.
-            // This will be done in sym_exec. We return an ActionResult::ArrayInitialization with the current program counter.
-
-            if let Lhs::LhsElem { var, .. } = lhs {
-                // if var is an uninitialized array (symbolic reference)
-                if let Expression::SymbolicRef { .. } =
-                    state.stack.last().unwrap().params[var].as_ref()
-                {
-                    return ActionResult::ArrayInitialization(var.clone());
-                }
-            }
-            // RhsElem 'a[i]' and RhsCall 'x.foo()' have a special case,
+            // RhsCall 'x.foo()' has a special case,
             // others are handled in evaluateRhs
             match rhs {
-                Rhs::RhsElem {
-                    // if rhs contains an uninitialized array
-                    var: Expression::Var { var, .. },
-                    ..
-                } => {
-                    if let Expression::SymbolicRef { .. } =
-                        state.stack.last().unwrap().params[var].as_ref()
-                    {
-                        return ActionResult::ArrayInitialization(var.clone());
-                    }
-                }
                 Rhs::RhsCall {
                     invocation,
                     type_,
@@ -692,31 +652,6 @@ fn action(
             if let Some(requires) = current_member.requires() {
                 // if this is the program entry, assume that require is true, otherwise assert it.
                 if (state.path_length == 0) {
-                    // if any parameters currently are symbolic arrays, initialise them
-
-                    let mut symbolic_array_parameters = state
-                        .stack
-                        .last()
-                        .unwrap()
-                        .params
-                        .iter()
-                        .filter(|(id, exp)| {
-                            if let Expression::SymbolicRef {
-                                var,
-                                type_: RuntimeType::ArrayRuntimeType { inner_type },
-                                info,
-                            } = exp.as_ref()
-                            {
-                                true
-                            } else {
-                                false
-                            }
-                        });
-
-                    if let Some((array_name, _)) = symbolic_array_parameters.next() {
-                        return ActionResult::ArrayInitialization(array_name.clone());
-                    }
-
                     let expression = evaluate(state, requires, en);
 
                     if *expression == false_lit() {
@@ -1389,105 +1324,108 @@ pub fn init_symbolic_reference(
     type_ref: &RuntimeType,
     en: &mut Engine,
 ) {
-    let st = en.st;
     if !state.alias_map.contains_key(sym_ref) {
         debug!(state.logger, "Lazy initialisation of symbolic reference"; "ref" => #?sym_ref, "type" => #?type_ref);
-
-        // Symbolic objects are first ReferenceRuntimeType {type} (uninitialized)
-        // then if they are initialised by a single type they remain that
-        // if they become initialised by multiple types their type becomes REFRuntimeType (or a different one)
-        // Or aliasmap contains a flag whether all types are the same of the symbolic object or there are multipe types.
         match type_ref {
-            RuntimeType::ReferenceRuntimeType { type_ } => type_,
-            RuntimeType::ArrayRuntimeType { inner_type } => {
-                exec_array_initialisation(state, en, sym_ref.clone());
-                return;
-            },
-            _ => panic!("Cannot initialize type {:?}", type_ref)
-        };
-        let decl_name = if let RuntimeType::ReferenceRuntimeType { type_ } = type_ref {
-            type_
-        } else {
-            
-            panic!("Cannot initialize type {:?}", type_ref);
+            RuntimeType::ReferenceRuntimeType { type_ } => {
+                init_symbolic_object(type_, state, sym_ref, type_ref, en)
+            }
+            RuntimeType::ArrayRuntimeType { .. } => {
+                exec_array_initialisation(state, en, sym_ref.clone(), type_ref.clone())
+            }
+            _ => panic!("Cannot initialize type {:?}", type_ref),
         };
 
-        // initialise new objects, one for each possible type (sub)class of class_name
-        let new_object_references = st
-            .get_all_instance_types(decl_name)
-            .iter()
-            .map(|class_name| {
-                let fields = st
-                    .get_all_fields(&class_name)
-                    .iter()
-                    .map(|(field_name, type_)| {
-                        (
-                            field_name.clone(),
-                            Rc::new(initialize_symbolic_var(
-                                &field_name,
-                                &type_.type_of(),
-                                state.next_reference_id(),
-                                st,
-                            )),
-                        )
-                    })
-                    .collect();
-
-                let reference = state.allocate_on_heap(
-                    HeapValue::ObjectValue {
-                        fields,
-                        type_: RuntimeType::ReferenceRuntimeType {
-                            type_: class_name.clone(),
-                        },
-                    }
-                    .into(),
-                );
-
-                reference
-            })
-            .collect_vec();
-
-        // Find all other possible concrete references of the same type as sym_ref
-        let instance_types = st.get_all_instance_types(decl_name);
-
-        let has_unique_type = instance_types.len() == 1;
-
-        let existing_aliases = state
-            .alias_map
-            .values()
-            .filter_map(|x| {
-                if let Some(type_) = x.uniform_type() {
-                    if instance_types
-                        .contains(type_.as_reference_type().expect("expected reference type"))
-                    {
-                        Some(Either::Left(x.aliases.iter()))
-                    } else {
-                        None
-                    }
-                } else {
-                    Some(Either::Right(
-                        x.aliases.iter().filter(|x| x.type_of() == *type_ref),
-                    ))
-                }
-            })
-            .flat_map(|x| x.into_iter())
-            .unique();
-
-        let aliases = existing_aliases
-            .cloned()
-            .chain(std::iter::once(Expression::NULL.into()))
-            .chain(new_object_references.into_iter())
-            .collect();
-
-        state.alias_map.insert(
-            sym_ref.clone(),
-            AliasEntry {
-                aliases,
-                uniform_type: has_unique_type,
-            },
-        );
         debug!(state.logger, "Updated aliasentry"; "alias_map" => #?state.alias_map);
     }
+}
+
+fn init_symbolic_object(
+    decl_name: &Identifier,
+    state: &mut State,
+    sym_ref: &Identifier,
+    type_ref: &RuntimeType,
+    en: &mut Engine,
+) {
+    let st = en.st;
+    // initialise new objects, one for each possible type (sub)class of class_name
+    let new_object_references = st
+        .get_all_instance_types(decl_name)
+        .iter()
+        .map(|class_name| {
+            let fields = st
+                .get_all_fields(&class_name)
+                .iter()
+                .map(|(field_name, type_)| {
+                    (
+                        field_name.clone(),
+                        Rc::new(initialize_symbolic_var(
+                            &field_name,
+                            &type_.type_of(),
+                            state.next_reference_id(),
+                            st,
+                        )),
+                    )
+                })
+                .collect();
+
+            let reference = state.allocate_on_heap(
+                HeapValue::ObjectValue {
+                    fields,
+                    type_: RuntimeType::ReferenceRuntimeType {
+                        type_: class_name.clone(),
+                    },
+                }
+                .into(),
+            );
+
+            reference
+        })
+        .collect_vec();
+
+    // Find all other possible concrete references of the same type as sym_ref
+    let instance_types = st.get_all_instance_types(decl_name);
+
+    let has_unique_type = instance_types.len() == 1;
+
+    let existing_aliases = state
+        .alias_map
+        .values()
+        .filter_map(|x| {
+            if let Some(type_) = x.uniform_type() {
+                let ref_type = match type_ {
+                    RuntimeType::ReferenceRuntimeType { type_ } => type_,
+                    RuntimeType::ArrayRuntimeType { .. } => return None, // arrays cannot have the same type as objects, skip
+                    _ => panic!("expected reference type"),
+                };
+
+                if instance_types.contains(&ref_type) {
+                    Some(Either::Left(x.aliases.iter()))
+                } else {
+                    None
+                }
+            } else {
+                Some(Either::Right(
+                    x.aliases.iter().filter(|x| x.type_of() == *type_ref),
+                ))
+            }
+        })
+        .flat_map(|x| x.into_iter())
+        .unique();
+
+    let aliases = existing_aliases
+        .cloned()
+        .chain(std::iter::once(Expression::NULL.into()))
+        .chain(new_object_references.into_iter())
+        .collect();
+
+    state.alias_map.insert(
+        sym_ref.clone(),
+        AliasEntry {
+            aliases,
+            uniform_type: has_unique_type,
+        },
+    );
 }
 
 // can't you have a symbolic array, as in the a in a[i] is symbolic?
@@ -1572,11 +1510,7 @@ fn execute_assign(
                 .unwrap_or_else(|| panic!("infeasible, array does not exit"))
                 .clone();
 
-            // let int_value = if let Expression::Lit { lit: Lit::IntLit { int_value }, type_ } = index {
-            //     *int_value
-            // } else {
-            //     panic!("Array index is not an integer value");
-            // };
+            let ref_ = single_alias_elimination(ref_, &state.alias_map);
 
             match ref_.as_ref() {
                 Expression::Ref { ref_, type_, .. } => {
@@ -1586,7 +1520,6 @@ fn execute_assign(
                         Either::Left(index) => write_elem_symbolic_index(state, *ref_, index, e),
                         Either::Right(i) => write_elem_concrete_index(state, *ref_, i, e),
                     }
-                    // let size = evaluate(state, Rc::new(Expression::))
                 }
                 _ => panic!("expected array ref, found expr {:?}", &ref_),
             }
@@ -1624,6 +1557,8 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, en: &mut Engine) -> Rc<Expression> 
                 )
             }
         }
+        // We expect that this symbolic reference has been initialised into multiple states,
+        // where in each state the aliasmap is left with one concrete array.
         Rhs::RhsElem {
             var, index, type_, ..
         } => {
@@ -1634,8 +1569,6 @@ fn evaluateRhs(state: &mut State, rhs: &Rhs, en: &mut Engine) -> Rc<Expression> 
             } else {
                 panic!("Unexpected uninitialized array");
             }
-            //read_elem_concrete_index(state, ref_, index)
-            //
         }
         Rhs::RhsCall {
             invocation, type_, ..
@@ -1670,8 +1603,6 @@ fn exec_rhs_field(
             type_,
             info,
         } => {
-            // bedoelt hij hier niet exec true_ ipv execField true_ ?
-            // nope want hij wil nog steeds het field weten ervan
             let true_ = exec_rhs_field(state, true_, field, type_, en);
             let false_ = exec_rhs_field(state, false_, field, type_, en);
 
@@ -1712,14 +1643,18 @@ fn exec_rhs_elem(
     index: Rc<Expression>,
     en: &mut Engine,
 ) -> Rc<Expression> {
-    if let Expression::Ref { ref_, .. } = array.as_ref() {
-        let index = evaluateAsInt(state, index, en);
-        match index {
-            Either::Left(index) => read_elem_symbolic_index(state, *ref_, index),
-            Either::Right(index) => read_elem_concrete_index(state, *ref_, index),
+    let array = single_alias_elimination(array, &state.alias_map);
+    match array.as_ref() {
+        Expression::Ref { ref_, .. } => {
+            let index = evaluateAsInt(state, index, en);
+            match index {
+                Either::Left(index) => read_elem_symbolic_index(state, *ref_, index),
+                Either::Right(index) => read_elem_concrete_index(state, *ref_, index),
+            }
         }
-    } else {
-        panic!("Expected array reference");
+        _ => {
+            panic!("expected array ref, found expr {:?}", &array)
+        }
     }
 }
 
@@ -1904,6 +1839,21 @@ fn exec_assume(state: &mut State, assumption: Rc<Expression>, en: &mut Engine) -
         state.constraints.insert(expression.deref().clone());
     }
     true
+}
+
+/// Checks whether there is only one alias, if so return the alias otherwise return the expression.
+/// A single alias occurs for example when an array is initialised, split into multiple paths each with a different array size
+pub(crate) fn single_alias_elimination(
+    expr: Rc<Expression>,
+    alias_map: &AliasMap,
+) -> Rc<Expression> {
+    if let Expression::SymbolicRef { var, .. } = expr.as_ref() {
+        let alias = &alias_map[var];
+        if alias.aliases.len() == 1 {
+            return alias.aliases[0].clone();
+        }
+    }
+    expr
 }
 
 pub type Error = String;
