@@ -2,6 +2,8 @@ use derivative::Derivative;
 use ordered_float::NotNan;
 
 mod identifier;
+mod classes;
+mod interfaces;
 
 pub use identifier::*;
 
@@ -24,8 +26,6 @@ pub use self::{
     interfaces::InterfaceMember,
 };
 
-mod classes;
-mod interfaces;
 
 #[derive(Debug)]
 pub struct CompilationUnit {

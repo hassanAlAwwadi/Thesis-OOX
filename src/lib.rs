@@ -2,7 +2,6 @@
 
 mod lexer;
 mod stack;
-pub mod syntax;
 
 mod cfg;
 mod exec;

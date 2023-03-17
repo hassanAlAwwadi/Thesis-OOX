@@ -408,7 +408,7 @@ fn specification<'a>() -> Parser<'a, Token<'a>, Specification> {
     )
 }
 
-fn expression<'a>() -> Parser<'a, Token<'a>, Expression> {
+pub(super) fn expression<'a>() -> Parser<'a, Token<'a>, Expression> {
     expression1()
 }
 
