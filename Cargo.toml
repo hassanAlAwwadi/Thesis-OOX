@@ -29,6 +29,7 @@ derivative = "2.2.0"
 queues = "1.1.0"
 clap = { version = "4.1.7", features = ["derive"] }
 criterion = "0.4.0"
+pretty = "0.11.3"
 
 [[bench]]
 name = "OOX_benchmark"

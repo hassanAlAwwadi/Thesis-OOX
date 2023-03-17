@@ -1198,7 +1198,7 @@ where
 
 #[test]
 fn class_with_constructor() {
-    let file_content = include_str!("../examples/class_with_constructor.oox");
+    let file_content = include_str!("../../examples/class_with_constructor.oox");
 
     let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
@@ -1220,7 +1220,7 @@ fn test_statement() {
 
 #[test]
 fn class_with_methods() {
-    let file_content = include_str!("../examples/class_with_methods.oox");
+    let file_content = include_str!("../../examples/class_with_methods.oox");
 
     let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
@@ -1235,7 +1235,7 @@ fn class_with_methods() {
 
 #[test]
 fn bsort_test() {
-    let file_content = include_str!("../examples/bsort.oox");
+    let file_content = include_str!("../../examples/bsort.oox");
 
     let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();
@@ -1310,7 +1310,7 @@ fn forall() {
 }
 #[test]
 fn absolute_simplest() {
-    let file_content = include_str!("../examples/absolute_simplest.oox");
+    let file_content = include_str!("../../examples/absolute_simplest.oox");
 
     let tokens = tokens(file_content).unwrap();
     let as_ref = tokens.as_slice();

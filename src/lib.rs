@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 mod lexer;
-mod parser;
 mod stack;
 pub mod syntax;
 
@@ -17,6 +16,7 @@ mod z3_checker;
 mod resolver;
 
 mod pretty_print;
+mod language;
 
 mod utils;
 
@@ -29,6 +29,8 @@ mod symbol_table;
 mod typing;
 
 mod statistics;
+
+pub use language::*;
 
 #[macro_use]
 extern crate pest_derive;
