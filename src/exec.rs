@@ -237,7 +237,7 @@ pub enum SymResult {
     Invalid(SourcePos),
 }
 
-trait Engine {
+pub trait Engine {
     fn add_remaining_state(&mut self, state: State);
 
     /// Provides a unique path id, can be used when the state is split into a new path
@@ -275,7 +275,7 @@ impl Engine for DFSEngine<'_> {
 
 fn exec_array_initialisation(
     state: &mut State,
-    engine: &mut dyn Engine,
+    engine: &mut impl Engine,
     array_name: Identifier,
     array_type: RuntimeType,
 ) {
@@ -394,7 +394,7 @@ fn action(
     state: &mut State,
     program: &HashMap<u64, CFGStatement>,
     k: u64,
-    en: &mut DFSEngine,
+    en: &mut impl Engine,
 ) -> ActionResult {
     let pc = state.pc;
     let action = &program[&pc];
@@ -574,7 +574,7 @@ fn action(
     }
 }
 
-fn exec_throw(state: &mut State, en: &mut DFSEngine, message: &str) -> ActionResult {
+fn exec_throw(state: &mut State, en: &mut impl Engine, message: &str) -> ActionResult {
     if let Some(ExceptionHandlerEntry {
         catch_pc,
         mut current_depth,
@@ -617,10 +617,10 @@ fn exec_throw(state: &mut State, en: &mut DFSEngine, message: &str) -> ActionRes
     }
 }
 
-fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut DFSEngine) -> bool {
+fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl Engine) -> bool {
     // dbg!("invoke Z3 with:", &expression);
     // dbg!(&alias_map);
-    en.statistics.measure_veficiation();
+    en.statistics().measure_veficiation();
 
     if *expression == true_lit() {
         false
@@ -638,20 +638,20 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut DFSEng
             // dbg!(&symbolic_refs);
             let expressions = concretizations(expression.clone(), &symbolic_refs, &state.alias_map);
             // This introduces branching in computation for each concretization proposed:
-            en.statistics.measure_branches(expressions.len() as u32);
+            en.statistics().measure_branches(expressions.len() as u32);
             // dbg!(&expressions);
 
             for expression in expressions {
                 let expression = evaluate(state, expression, en);
                 if *expression == true_lit() {
                     // Invalid
-                    en.statistics.measure_local_solve();
+                    en.statistics().measure_local_solve();
                     return false;
                 } else if *expression == false_lit() {
                     // valid, continue
-                    en.statistics.measure_local_solve();
+                    en.statistics().measure_local_solve();
                 } else {
-                    en.statistics.measure_invoke_z3();
+                    en.statistics().measure_invoke_z3();
                     let result = z3_checker::verify(&expression);
                     if let SatResult::Unsat = result {
                         // valid, continue
@@ -671,7 +671,7 @@ fn exec_invocation(
     program: &HashMap<u64, CFGStatement>,
     return_point: u64,
     lhs: Option<Lhs>,
-    en: &mut DFSEngine,
+    en: &mut impl Engine,
 ) -> ActionResult {
     // dbg!(invocation);
 
@@ -765,7 +765,7 @@ fn exec_invocation(
                 &method.name,
                 argument_types,
                 program,
-                en.st,
+                en.symbol_table(),
             );
             ActionResult::FunctionCall(next_entry)
         }
@@ -806,7 +806,7 @@ fn exec_invocation(
                 &method.name,
                 argument_types,
                 program,
-                en.st,
+                en.symbol_table(),
             );
             ActionResult::FunctionCall(next_entry)
         }
@@ -869,7 +869,7 @@ fn exec_method(
     method: Rc<Method>,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
-    en: &mut DFSEngine,
+    en: &mut impl Engine,
     this: (RuntimeType, Identifier),
 ) {
     let this_param = Parameter::new(
@@ -902,7 +902,7 @@ fn exec_static_method(
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
-    en: &mut DFSEngine,
+    en: &mut impl Engine,
 ) {
     push_stack_frame(
         state,
@@ -921,13 +921,13 @@ fn exec_constructor(
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     class_name: &Identifier,
-    en: &mut DFSEngine,
+    en: &mut impl Engine,
     this_param: Parameter,
 ) {
     let parameters = std::iter::once(&this_param).chain(method.params.iter());
 
     let fields = en
-        .st
+        .symbol_table()
         .get_all_fields(class_name)
         .iter()
         .map(|(s, t)| (s.clone(), t.default().into()))
@@ -957,7 +957,7 @@ fn exec_super_constructor(
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
-    en: &mut DFSEngine,
+    en: &mut impl Engine,
     this_param: Parameter,
 ) {
     let parameters = std::iter::once(&this_param).chain(parameters.iter());
@@ -983,7 +983,7 @@ fn push_stack_frame<'a, P>(
     method: Rc<Method>,
     lhs: Option<Lhs>,
     params: P,
-    en: &mut DFSEngine,
+    en: &mut impl Engine,
 ) where
     P: Iterator<Item = (&'a Parameter, Rc<Expression>)>,
 {
@@ -1002,7 +1002,7 @@ fn push_stack_frame<'a, P>(
 fn prepare_assert_expression(
     state: &mut State,
     assertion: Rc<Expression>,
-    en: &mut DFSEngine,
+    en: &mut impl Engine,
 ) -> Rc<Expression> {
     let expression = if state.constraints.len() >= 1 {
         let assumptions = state
@@ -1155,7 +1155,7 @@ pub fn init_symbolic_reference(
     state: &mut State,
     sym_ref: &Identifier,
     type_ref: &RuntimeType,
-    en: &mut DFSEngine,
+    en: &mut impl Engine,
 ) {
     if !state.alias_map.contains_key(sym_ref) {
         debug!(state.logger, "Lazy initialisation of symbolic reference"; "ref" => #?sym_ref, "type" => #?type_ref);
@@ -1178,9 +1178,9 @@ fn init_symbolic_object(
     state: &mut State,
     sym_ref: &Identifier,
     type_ref: &RuntimeType,
-    en: &mut DFSEngine,
+    en: &mut impl Engine,
 ) {
-    let st = en.st;
+    let st = en.symbol_table();
     // initialise new objects, one for each possible type (sub)class of class_name
     let new_object_references = st
         .get_all_instance_types(decl_name)
@@ -1278,9 +1278,9 @@ fn execute_assign(
     state: &mut State,
     lhs: &Lhs,
     e: Rc<Expression>,
-    en: &mut DFSEngine,
+    en: &mut impl Engine,
 ) -> Option<ConditionalStateSplit> {
-    let st = en.st;
+    let st = en.symbol_table();
     match lhs {
         Lhs::LhsVar { var, type_, info } => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
@@ -1362,7 +1362,7 @@ fn execute_assign(
 }
 
 // fn evaluateRhs(state: &mut State, rhs: &Rhs) -> Expression {
-fn evaluateRhs(state: &mut State, rhs: &Rhs, en: &mut DFSEngine) -> Rc<Expression> {
+fn evaluateRhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expression> {
     match rhs {
         Rhs::RhsExpression { value, type_, .. } => {
             match value {
@@ -1426,7 +1426,7 @@ fn exec_rhs_field(
     object: &Expression,
     field: &Identifier,
     type_: &RuntimeType,
-    en: &mut DFSEngine,
+    en: &mut impl Engine,
 ) -> Rc<Expression> {
     match object {
         Expression::Conditional {
@@ -1474,7 +1474,7 @@ fn exec_rhs_elem(
     state: &mut State,
     array: Rc<Expression>,
     index: Rc<Expression>,
-    en: &mut DFSEngine,
+    en: &mut impl Engine,
 ) -> Rc<Expression> {
     let array = single_alias_elimination(array, &state.alias_map);
     match array.as_ref() {
@@ -1631,7 +1631,7 @@ fn exec_array_construction(
     array_type: &NonVoidType,
     sizes: &Vec<Expression>,
     type_: &RuntimeType,
-    en: &mut DFSEngine,
+    en: &mut impl Engine,
 ) -> Rc<Expression> {
     let ref_id = state.next_reference_id();
 
@@ -1663,7 +1663,7 @@ fn exec_array_construction(
 /// Helper function, does not invoke Z3 but tries to evaluate the assumption locally.
 /// Returns whether the assumption was found to be infeasible.
 /// Otherwise it inserts the assumption into the constraints.
-fn exec_assume(state: &mut State, assumption: Rc<Expression>, en: &mut DFSEngine) -> bool {
+fn exec_assume(state: &mut State, assumption: Rc<Expression>, en: &mut impl Engine) -> bool {
     let expression = evaluate(state, assumption, en);
 
     if *expression == false_lit() {
