@@ -29,6 +29,7 @@ mod symbol_table;
 mod typing;
 
 mod statistics;
+mod mutation;
 
 #[macro_use]
 extern crate pest_derive;
