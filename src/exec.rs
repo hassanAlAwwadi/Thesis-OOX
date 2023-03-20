@@ -23,6 +23,7 @@ use sloggers::{
 use z3::SatResult;
 
 mod invocation;
+mod heuristics;
 
 use crate::{
     cfg::{labelled_statements, CFGStatement},
@@ -45,6 +46,7 @@ use crate::{
     typing::type_compilation_unit,
     utils, z3_checker, FILE_NAMES,
 };
+
 
 const NULL: Expression = Expression::Lit {
     lit: Lit::NullLit,
@@ -235,218 +237,50 @@ pub enum SymResult {
     Invalid(SourcePos),
 }
 
-/// The main function for the symbolic execution, any path splitting due to the control flow graph or array initialization happens here.
-fn sym_exec(
-    state: State,
-    program: &HashMap<u64, CFGStatement>,
-    flows: &HashMap<u64, Vec<u64>>,
-    k: u64,
-    st: &SymbolTable,
-    root_logger: Logger,
-    path_counter: Rc<RefCell<IdCounter<u64>>>,
-    statistics: &mut Statistics,
-) -> SymResult {
-    let mut remaining_states: Vec<State> = vec![];
-    let mut state = state;
+trait Engine {
+    fn add_remaining_state(&mut self, state: State);
 
-    loop {
-        // dbg!(&remaining_states.len());
-        if state.path_length >= k {
-            // finishing current branch
-            statistics.measure_finish();
-            if let Some(next_state) = remaining_states.pop() {
-                state = next_state;
-            } else {
-                // Finished
-                return SymResult::Valid;
-            }
-        }
+    /// Provides a unique path id, can be used when the state is split into a new path
+    fn next_path_id(&mut self) -> u64;
 
-        let next = action(
-            &mut state,
-            program,
-            k,
-            &mut Engine {
-                remaining_states: &mut remaining_states,
-                path_counter: path_counter.clone(),
-                statistics,
-                st,
-            },
-        );
-        match next {
-            ActionResult::FunctionCall(next) => {
-                // function call or return
-                state.pc = next;
-            }
-            ActionResult::Return(return_pc) => {
-                if let Some(neighbours) = flows.get(&return_pc) {
-                    let mut neighbours = neighbours.iter();
-                    let first_neighbour = neighbours.next().unwrap();
-                    state.pc = *first_neighbour;
+    fn statistics(&mut self) -> &mut Statistics;
 
-                    for neighbour_pc in neighbours {
-                        let mut new_state = state.clone();
-                        new_state.pc = *neighbour_pc;
-
-                        remaining_states.push(new_state);
-                    }
-                } else {
-                    panic!("function pc does not exist");
-                }
-            }
-            ActionResult::Continue => {
-                if let Some(neighbours) = flows.get(&state.pc) {
-                    //dbg!(&neighbours);
-                    statistics.measure_branches((neighbours.len() - 1) as u32);
-
-                    let mut neighbours = neighbours.iter();
-                    let first_neighbour = neighbours.next().unwrap();
-                    state.pc = *first_neighbour;
-                    state.path_length += 1;
-
-                    let new_path_ids = (1..).map(|_| path_counter.borrow_mut().next_id());
-
-                    for (neighbour_pc, path_id) in neighbours.zip(new_path_ids) {
-                        let mut new_state = state.clone();
-                        new_state.path_id = path_id;
-                        new_state.pc = *neighbour_pc;
-
-                        remaining_states.push(new_state);
-                    }
-                } else {
-                    // Function exit of the main function under verification
-                    if let CFGStatement::FunctionExit { decl_name, .. } = &program[&state.pc] {
-                        // Valid program exit, continue
-                        statistics.measure_finish();
-                        if let Some(next_state) = remaining_states.pop() {
-                            state = next_state;
-                        } else {
-                            // Finished
-                            return SymResult::Valid;
-                        }
-                    } else {
-                        // Unexpected end of CFG
-                        panic!("Unexpected end of CFG");
-                    }
-                }
-            }
-            ActionResult::InvalidAssertion(info) => {
-                return SymResult::Invalid(info);
-            }
-            ActionResult::InfeasiblePath => {
-                // Finish this branch
-                statistics.measure_prune();
-                if let Some(next_state) = remaining_states.pop() {
-                    state = next_state;
-                } else {
-                    // Finished
-                    return SymResult::Valid;
-                }
-            }
-            ActionResult::Finish => {
-                statistics.measure_finish();
-                if let Some(next_state) = remaining_states.pop() {
-                    state = next_state;
-                } else {
-                    // Finished
-                    return SymResult::Valid;
-                }
-            }
-
-            ActionResult::StateSplit((guard, true_lhs, false_lhs, lhs_name)) => {
-                // split up the paths into two, one where guard == true and one where guard == false.
-                // Do not increase path_length
-                statistics.measure_branches(2);
-                let mut true_state = state.clone();
-                true_state.path_id = path_counter.borrow_mut().next_id();
-                let feasible_path = exec_assume(
-                    &mut true_state,
-                    guard.clone(),
-                    &mut Engine {
-                        remaining_states: &mut remaining_states,
-                        path_counter: path_counter.clone(),
-                        statistics,
-                        st,
-                    },
-                );
-                if feasible_path {
-                    write_to_stack(lhs_name.clone(), true_lhs, &mut true_state.stack);
-                    remaining_states.push(true_state);
-                }
-                // continue with false state
-                let mut false_state = &mut state;
-                let feasible_path = exec_assume(
-                    &mut false_state,
-                    guard,
-                    &mut Engine {
-                        remaining_states: &mut remaining_states,
-                        path_counter: path_counter.clone(),
-                        statistics,
-                        st,
-                    },
-                );
-                if feasible_path {
-                    write_to_stack(lhs_name, false_lhs, &mut false_state.stack);
-                }
-            }
-            ActionResult::StateSplitObjectTypes {
-                symbolic_object_ref,
-                resulting_alias,
-            } => {
-                let alias = &state.alias_map[&symbolic_object_ref];
-
-                assert!(resulting_alias.len() > 1);
-
-                statistics.measure_branches(resulting_alias.len() as u32);
-
-                debug!(state.logger, "Splitting up current path into {:?} paths due to polymorphic method invocation", resulting_alias.len();
-                    "object" => #?symbolic_object_ref,
-                    "resulting_split" => #?resulting_alias
-                );
-
-                let mut resulting_aliases = resulting_alias.into_iter();
-
-                // first set the current state
-                let (_, objects) = resulting_aliases.next().unwrap();
-                state
-                    .alias_map
-                    .insert(symbolic_object_ref.clone(), AliasEntry::new(objects));
-
-                // set remaining states
-                let new_path_ids = (1..).map(|_| path_counter.borrow_mut().next_id());
-                let new_states =
-                    resulting_aliases
-                        .zip(new_path_ids)
-                        .map(|((_, objects), path_id)| {
-                            let mut state = state.clone();
-                            state
-                                .alias_map
-                                .insert(symbolic_object_ref.clone(), AliasEntry::new(objects));
-                            state.path_id = path_id;
-                            state
-                        });
-
-                remaining_states.extend(new_states);
-            }
-        }
-    }
+    fn symbol_table(&self) -> &SymbolTable;
 }
 
-pub struct Engine<'a> {
+pub struct DFSEngine<'a> {
     remaining_states: &'a mut Vec<State>,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &'a mut Statistics,
     st: &'a SymbolTable,
 }
 
+impl Engine for DFSEngine<'_> {
+    fn add_remaining_state(&mut self, state: State) {
+        self.remaining_states.push(state);
+    }
+
+    fn next_path_id(&mut self) -> u64 {
+        self.path_counter.borrow_mut().next_id()
+    }
+
+    fn statistics(&mut self) -> &mut Statistics {
+        self.statistics
+    }
+
+    fn symbol_table(&self) -> &SymbolTable {
+        self.st
+    }
+}
+
 fn exec_array_initialisation(
     state: &mut State,
-    engine: &mut Engine,
+    engine: &mut dyn Engine,
     array_name: Identifier,
     array_type: RuntimeType,
 ) {
     const N: u64 = 3;
-    engine.statistics.measure_branches((N + 1) as u32); // including null, so + 1
+    engine.statistics().measure_branches((N + 1) as u32); // including null, so + 1
     info!(
         state.logger,
         "Symbolic array initialisation of {} into {} paths",
@@ -459,10 +293,9 @@ fn exec_array_initialisation(
         _ => panic!("Expected array type, found {:?}", array_type),
     };
 
-    let new_path_ids = (1..=N).map(|_| engine.path_counter.borrow_mut().next_id());
-
     // initialise new states with arrays 1..N
-    for (array_size, path_id) in (1..=N).zip(new_path_ids) {
+    for array_size in 1..=N {
+        let path_id = engine.next_path_id();
         let mut new_state = state.clone();
         new_state.path_id = path_id;
         array_initialisation(
@@ -471,11 +304,11 @@ fn exec_array_initialisation(
             array_size,
             array_type.clone(),
             *inner_type.clone(),
-            engine.st,
+            engine.symbol_table(),
         );
 
         // note path_length does not decrease, we stay at the same statement containing array access
-        engine.remaining_states.push(new_state);
+        engine.add_remaining_state(new_state);
     }
 
     // And a state for the case where the array is NULL
@@ -484,7 +317,7 @@ fn exec_array_initialisation(
         array_name.clone(),
         AliasEntry::new(vec![Expression::NULL.into()]),
     );
-    engine.remaining_states.push(null_state);
+    engine.add_remaining_state(null_state);
 
     // initialise array on the current state, with size 0
     array_initialisation(
@@ -493,7 +326,7 @@ fn exec_array_initialisation(
         0,
         array_type.clone(),
         *inner_type.clone(),
-        engine.st,
+        engine.symbol_table(),
     );
 }
 
@@ -561,7 +394,7 @@ fn action(
     state: &mut State,
     program: &HashMap<u64, CFGStatement>,
     k: u64,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) -> ActionResult {
     let pc = state.pc;
     let action = &program[&pc];
@@ -741,7 +574,7 @@ fn action(
     }
 }
 
-fn exec_throw(state: &mut State, en: &mut Engine, message: &str) -> ActionResult {
+fn exec_throw(state: &mut State, en: &mut DFSEngine, message: &str) -> ActionResult {
     if let Some(ExceptionHandlerEntry {
         catch_pc,
         mut current_depth,
@@ -784,7 +617,7 @@ fn exec_throw(state: &mut State, en: &mut Engine, message: &str) -> ActionResult
     }
 }
 
-fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut Engine) -> bool {
+fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut DFSEngine) -> bool {
     // dbg!("invoke Z3 with:", &expression);
     // dbg!(&alias_map);
     en.statistics.measure_veficiation();
@@ -838,7 +671,7 @@ fn exec_invocation(
     program: &HashMap<u64, CFGStatement>,
     return_point: u64,
     lhs: Option<Lhs>,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) -> ActionResult {
     // dbg!(invocation);
 
@@ -1036,7 +869,7 @@ fn exec_method(
     method: Rc<Method>,
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
-    en: &mut Engine,
+    en: &mut DFSEngine,
     this: (RuntimeType, Identifier),
 ) {
     let this_param = Parameter::new(
@@ -1069,7 +902,7 @@ fn exec_static_method(
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) {
     push_stack_frame(
         state,
@@ -1088,7 +921,7 @@ fn exec_constructor(
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     class_name: &Identifier,
-    en: &mut Engine,
+    en: &mut DFSEngine,
     this_param: Parameter,
 ) {
     let parameters = std::iter::once(&this_param).chain(method.params.iter());
@@ -1124,7 +957,7 @@ fn exec_super_constructor(
     lhs: Option<Lhs>,
     arguments: &[Rc<Expression>],
     parameters: &[Parameter],
-    en: &mut Engine,
+    en: &mut DFSEngine,
     this_param: Parameter,
 ) {
     let parameters = std::iter::once(&this_param).chain(parameters.iter());
@@ -1150,7 +983,7 @@ fn push_stack_frame<'a, P>(
     method: Rc<Method>,
     lhs: Option<Lhs>,
     params: P,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) where
     P: Iterator<Item = (&'a Parameter, Rc<Expression>)>,
 {
@@ -1169,7 +1002,7 @@ fn push_stack_frame<'a, P>(
 fn prepare_assert_expression(
     state: &mut State,
     assertion: Rc<Expression>,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) -> Rc<Expression> {
     let expression = if state.constraints.len() >= 1 {
         let assumptions = state
@@ -1322,7 +1155,7 @@ pub fn init_symbolic_reference(
     state: &mut State,
     sym_ref: &Identifier,
     type_ref: &RuntimeType,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) {
     if !state.alias_map.contains_key(sym_ref) {
         debug!(state.logger, "Lazy initialisation of symbolic reference"; "ref" => #?sym_ref, "type" => #?type_ref);
@@ -1345,7 +1178,7 @@ fn init_symbolic_object(
     state: &mut State,
     sym_ref: &Identifier,
     type_ref: &RuntimeType,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) {
     let st = en.st;
     // initialise new objects, one for each possible type (sub)class of class_name
@@ -1445,7 +1278,7 @@ fn execute_assign(
     state: &mut State,
     lhs: &Lhs,
     e: Rc<Expression>,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) -> Option<ConditionalStateSplit> {
     let st = en.st;
     match lhs {
@@ -1529,7 +1362,7 @@ fn execute_assign(
 }
 
 // fn evaluateRhs(state: &mut State, rhs: &Rhs) -> Expression {
-fn evaluateRhs(state: &mut State, rhs: &Rhs, en: &mut Engine) -> Rc<Expression> {
+fn evaluateRhs(state: &mut State, rhs: &Rhs, en: &mut DFSEngine) -> Rc<Expression> {
     match rhs {
         Rhs::RhsExpression { value, type_, .. } => {
             match value {
@@ -1593,7 +1426,7 @@ fn exec_rhs_field(
     object: &Expression,
     field: &Identifier,
     type_: &RuntimeType,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) -> Rc<Expression> {
     match object {
         Expression::Conditional {
@@ -1641,7 +1474,7 @@ fn exec_rhs_elem(
     state: &mut State,
     array: Rc<Expression>,
     index: Rc<Expression>,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) -> Rc<Expression> {
     let array = single_alias_elimination(array, &state.alias_map);
     match array.as_ref() {
@@ -1798,7 +1631,7 @@ fn exec_array_construction(
     array_type: &NonVoidType,
     sizes: &Vec<Expression>,
     type_: &RuntimeType,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) -> Rc<Expression> {
     let ref_id = state.next_reference_id();
 
@@ -1830,7 +1663,7 @@ fn exec_array_construction(
 /// Helper function, does not invoke Z3 but tries to evaluate the assumption locally.
 /// Returns whether the assumption was found to be infeasible.
 /// Otherwise it inserts the assumption into the constraints.
-fn exec_assume(state: &mut State, assumption: Rc<Expression>, en: &mut Engine) -> bool {
+fn exec_assume(state: &mut State, assumption: Rc<Expression>, en: &mut DFSEngine) -> bool {
     let expression = evaluate(state, assumption, en);
 
     if *expression == false_lit() {
@@ -1978,7 +1811,7 @@ pub fn verify(
     let path_counter = Rc::new(RefCell::new(IdCounter::new(0)));
     let mut statistics = Statistics::default();
 
-    let sym_result = sym_exec(
+    let sym_result = heuristics::sym_exec(
         state,
         &program,
         &flows,

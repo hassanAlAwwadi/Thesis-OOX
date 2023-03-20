@@ -7,7 +7,7 @@ use itertools::{Either, Itertools};
 use crate::{
     dsl::{and, ands, equal, ite, negate, negative, or, ors, toIntExpr},
     exec::{
-        get_element, init_symbolic_reference, single_alias_elimination, Engine, HeapValue, State,
+        get_element, init_symbolic_reference, single_alias_elimination, DFSEngine, HeapValue, State,
     },
     positioned::SourcePos,
     stack::{remove_from_stack, write_to_stack, StackFrame},
@@ -20,7 +20,7 @@ pub type EvaluationResult<T> = Either<Rc<Expression>, T>;
 pub fn evaluateAsInt(
     state: &mut State,
     expression: Rc<Expression>,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) -> EvaluationResult<i64> {
     let expression = evaluate(state, expression, en);
     if let Expression::Lit {
@@ -34,7 +34,7 @@ pub fn evaluateAsInt(
     }
 }
 
-pub fn evaluate(state: &mut State, expression: Rc<Expression>, en: &mut Engine) -> Rc<Expression> {
+pub fn evaluate(state: &mut State, expression: Rc<Expression>, en: &mut DFSEngine) -> Rc<Expression> {
     // dbg!(expression)
     let expression = eval_locally(state, expression, en);
     // dbg!(&expression);
@@ -42,7 +42,7 @@ pub fn evaluate(state: &mut State, expression: Rc<Expression>, en: &mut Engine) 
 }
 
 
-fn eval_locally(state: &mut State, expression: Rc<Expression>, en: &mut Engine) -> Rc<Expression> {
+fn eval_locally(state: &mut State, expression: Rc<Expression>, en: &mut DFSEngine) -> Rc<Expression> {
     match expression.as_ref() {
         Expression::BinOp {
             bin_op,
@@ -415,7 +415,7 @@ fn evaluate_quantifier<'a, F>(
     domain: &'a Identifier,
     formula: &'a Expression,
     state: &'a mut State,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) -> Rc<Expression>
 where
     F: Fn(Vec<Rc<Expression>>) -> Expression,

@@ -16,7 +16,7 @@ use crate::{
 
 use super::{
     exec_method, exec_static_method, find_entry_for_static_invocation, remove_symbolic_null,
-    ActionResult, Engine,
+    ActionResult, DFSEngine,
 };
 
 /// A static method, or a method that is not overriden anywhere (non-polymorphic)
@@ -29,7 +29,7 @@ pub(super) fn single_method_invocation(
     return_point: u64,
     lhs: Option<Lhs>,
     program: &HashMap<u64, CFGStatement>,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) -> u64 {
     let (declaration, resolved_method) = resolved;
     let class_name = &declaration.name();
@@ -92,7 +92,7 @@ pub(super) fn multiple_method_invocation(
     return_point: u64,
     lhs: Option<Lhs>,
     program: &HashMap<u64, CFGStatement>,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) -> ActionResult {
     let object = lookup_in_stack(invocation_lhs, &state.stack).unwrap();
     // object can be either a concrete reference to a heap object, or a symbolic object
@@ -226,7 +226,7 @@ fn non_static_resolved_method_invocation(
     return_point: u64,
     lhs: Option<Lhs>,
     program: &HashMap<u64, CFGStatement>,
-    en: &mut Engine,
+    en: &mut DFSEngine,
 ) -> u64 {
     debug!(state.logger, "non-static method invocation");
 
