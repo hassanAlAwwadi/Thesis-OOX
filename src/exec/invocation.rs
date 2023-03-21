@@ -8,7 +8,6 @@ use crate::{
     eval::evaluate,
     exec::State,
     stack::lookup_in_stack,
-    symbol_table::SymbolTable,
     syntax::{Declaration, Expression, Identifier, Invocation, Lhs, Method, RuntimeType},
     typeable::Typeable,
     utils,
@@ -16,7 +15,8 @@ use crate::{
 
 use super::{
     exec_method, exec_static_method, find_entry_for_static_invocation, remove_symbolic_null,
-    ActionResult, DFSEngine, Engine,
+    state_split::split_states_with_aliases,
+    ActionResult, Engine,
 };
 
 /// A static method, or a method that is not overriden anywhere (non-polymorphic)
@@ -189,10 +189,10 @@ pub(super) fn multiple_method_invocation(
                 //dbg!(resulting_alias.keys());
 
                 // We need to split states such that each resulting path has a single type for the object in the alias map.
-                return ActionResult::StateSplitObjectTypes {
-                    symbolic_object_ref: var.clone(),
-                    resulting_alias,
-                };
+                let symbolic_object_ref  = var.clone();
+                split_states_with_aliases(en, state, symbolic_object_ref, resulting_alias);
+                // Try again with updated states.
+                return multiple_method_invocation(state, invocation_lhs, invocation, potential_methods, return_point, lhs, program, en);
             }
         }
         _ => unreachable!("Expected Ref or SymbolicRef, found {:?}", object),

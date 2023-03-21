@@ -1,11 +1,16 @@
-use std::{collections::HashMap, rc::Rc, cell::RefCell};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use slog::{Logger, debug};
+use slog::{Logger};
 
-use crate::{cfg::CFGStatement, symbol_table::SymbolTable, statistics::Statistics, stack::write_to_stack};
+use crate::{
+    cfg::CFGStatement,
+    statistics::Statistics,
+    symbol_table::SymbolTable,
+};
 
-use super::{State, IdCounter, SymResult, ActionResult, exec_assume, DFSEngine, AliasEntry, action};
-
+use super::{
+    action, ActionResult, IdCounter, State, SymResult,
+};
 
 /// The main function for the symbolic execution, any path splitting due to the control flow graph or array initialization happens here.
 /// Depth first search, without using any other heuristic.
@@ -53,16 +58,10 @@ pub(crate) fn sym_exec(
             }
             ActionResult::Return(return_pc) => {
                 if let Some(neighbours) = flows.get(&return_pc) {
+                    debug_assert!(neighbours.len() == 1);
                     let mut neighbours = neighbours.iter();
                     let first_neighbour = neighbours.next().unwrap();
                     state.pc = *first_neighbour;
-
-                    for neighbour_pc in neighbours {
-                        let mut new_state = state.clone();
-                        new_state.pc = *neighbour_pc;
-
-                        remaining_states.push(new_state);
-                    }
                 } else {
                     panic!("function pc does not exist");
                 }
@@ -125,82 +124,7 @@ pub(crate) fn sym_exec(
                     return SymResult::Valid;
                 }
             }
-
-            ActionResult::StateSplit((guard, true_lhs, false_lhs, lhs_name)) => {
-                // split up the paths into two, one where guard == true and one where guard == false.
-                // Do not increase path_length
-                statistics.measure_branches(2);
-                let mut true_state = state.clone();
-                true_state.path_id = path_counter.borrow_mut().next_id();
-                let feasible_path = exec_assume(
-                    &mut true_state,
-                    guard.clone(),
-                    &mut DFSEngine {
-                        remaining_states: &mut remaining_states,
-                        path_counter: path_counter.clone(),
-                        statistics,
-                        st,
-                    },
-                );
-                if feasible_path {
-                    write_to_stack(lhs_name.clone(), true_lhs, &mut true_state.stack);
-                    remaining_states.push(true_state);
-                }
-                // continue with false state
-                let mut false_state = &mut state;
-                let feasible_path = exec_assume(
-                    &mut false_state,
-                    guard,
-                    &mut DFSEngine {
-                        remaining_states: &mut remaining_states,
-                        path_counter: path_counter.clone(),
-                        statistics,
-                        st,
-                    },
-                );
-                if feasible_path {
-                    write_to_stack(lhs_name, false_lhs, &mut false_state.stack);
-                }
-            }
-            ActionResult::StateSplitObjectTypes {
-                symbolic_object_ref,
-                resulting_alias,
-            } => {
-                let alias = &state.alias_map[&symbolic_object_ref];
-
-                assert!(resulting_alias.len() > 1);
-
-                statistics.measure_branches(resulting_alias.len() as u32);
-
-                debug!(state.logger, "Splitting up current path into {:?} paths due to polymorphic method invocation", resulting_alias.len();
-                    "object" => #?symbolic_object_ref,
-                    "resulting_split" => #?resulting_alias
-                );
-
-                let mut resulting_aliases = resulting_alias.into_iter();
-
-                // first set the current state
-                let (_, objects) = resulting_aliases.next().unwrap();
-                state
-                    .alias_map
-                    .insert(symbolic_object_ref.clone(), AliasEntry::new(objects));
-
-                // set remaining states
-                let new_path_ids = (1..).map(|_| path_counter.borrow_mut().next_id());
-                let new_states =
-                    resulting_aliases
-                        .zip(new_path_ids)
-                        .map(|((_, objects), path_id)| {
-                            let mut state = state.clone();
-                            state
-                                .alias_map
-                                .insert(symbolic_object_ref.clone(), AliasEntry::new(objects));
-                            state.path_id = path_id;
-                            state
-                        });
-
-                remaining_states.extend(new_states);
-            }
         }
     }
 }
+

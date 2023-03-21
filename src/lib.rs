@@ -38,5 +38,6 @@ use std::sync::Mutex;
 pub use z3_checker::playground;
 
 pub use exec::verify;
+pub use exec::Heuristic;
 
 static FILE_NAMES: Mutex<String> = Mutex::new(String::new());

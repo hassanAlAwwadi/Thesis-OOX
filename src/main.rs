@@ -3,7 +3,7 @@ use itertools::Itertools;
 use lib::verify;
 
 /// OOX symbolic verification
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 struct Args {
     // The OOX source file to verify
     source_path: String,
@@ -16,6 +16,10 @@ struct Args {
     // When quiet is passed, the only output returned is valid, invalid or error.
     #[arg(short, long, default_value_t = false)]
     quiet: bool,
+
+    // The heuristic used to choose branches
+    #[arg(value_enum, long, default_value_t = lib::Heuristic::DepthFirstSearch)]
+    heuristic: lib::Heuristic,
 }
 
 fn main() -> Result<(), String> {
@@ -28,6 +32,7 @@ fn main() -> Result<(), String> {
             method_name,
             args.k,
             args.quiet,
+            args.heuristic,
         )?;
     } else {
         println!("Entry point must be of the form 'class.method' and be unambiguous");
