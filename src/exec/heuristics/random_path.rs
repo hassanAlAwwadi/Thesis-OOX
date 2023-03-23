@@ -141,7 +141,7 @@ struct PathTree {
 fn random_path<'a>(
     mut tree: Rc<RefCell<N>>,
     rng: &'a mut impl Rng,
-) -> Option<(Vec<u64>, Rc<RefCell<N>>)> {
+) -> (Vec<u64>, Rc<RefCell<N>>) {
     let mut path = Vec::new();
     loop {
         let node = tree.clone();
@@ -153,15 +153,14 @@ fn random_path<'a>(
             } => {
                 path.push(*statement);
 
+                dbg!(children.len());
+
                 let idx = rng.gen_range(0..children.len());
                 tree = children[idx].clone();
             }
             N::Leaf { states, statement, .. } => {
-                if states.len() == 0 {
-                    return None;
-                }
                 path.push(*statement);
-                return Some((path, tree));
+                return (path, tree);
             }
         };
     }
@@ -263,13 +262,7 @@ pub(crate) fn sym_exec(
     loop {
         // pointer to the leaf with states chosen by the heuristic
 
-        let (path_pcs, states_node) = if let Some((path_pcs, states_node)) = random_path(tree.clone(), &mut rng) {
-            (path_pcs, states_node) 
-        } else {
-            // We have explored all states.
-            debug!(root_logger, "all states explored");
-            return SymResult::Valid;
-        };
+        let (path_pcs, states_node) = random_path(tree.clone(), &mut rng);
         let current_pc = *path_pcs.last().unwrap();
         let chosen_state = states_node.borrow_mut().into_states().unwrap();
 
@@ -312,12 +305,17 @@ pub(crate) fn sym_exec(
                         // } else {
                         //     dbg!("no parent");
                         // }
-                        if (finish_state_in_path(states_node.clone(), path_pcs)) {
-                            *tree.borrow_mut() = N::Leaf {
-                                parent: Weak::new(),
-                                statement: 0,
-                                states: vec![],
-                            };
+                        let is_finished = finish_state_in_path(states_node.clone(), path_pcs);
+                        if is_finished {
+                            // *tree.borrow_mut() = N::Leaf {
+                            //     parent: Weak::new(),
+                            //     statement: 0,
+                            //     states: vec![],
+                            // };
+
+                            // We have explored all states.
+                            debug!(root_logger, "all states explored");
+                            return SymResult::Valid;
                         }
                         
                     }
