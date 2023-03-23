@@ -5,7 +5,7 @@ use std::{collections::HashMap, ops::Deref, rc::Rc};
 use itertools::{Either, Itertools};
 
 use crate::{
-    dsl::{and, ands, equal, ite, negate, negative, or, ors, toIntExpr},
+    dsl::{and, ands, equal, ite, negate, negative, or, ors, to_int_expr},
     exec::{
         get_element, init_symbolic_reference, single_alias_elimination, DFSEngine, HeapValue, State, Engine,
     },
@@ -453,7 +453,7 @@ where
             let formulas = (0..len)
                 .map(|i| {
                     let element = get_element(i, *ref_, &state.heap);
-                    let index = toIntExpr(i as i64);
+                    let index = to_int_expr(i as i64);
 
                     write_to_stack(elem.clone(), element.clone(), &mut state.stack);
                     write_to_stack(range.clone(), index, &mut state.stack);

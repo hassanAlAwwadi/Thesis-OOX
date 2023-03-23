@@ -1,8 +1,12 @@
+//! This module contains functions that split up the state, for reasons other than due to an if/while statement in the code.
+//! This includes conditional state splitting, splitting of state due to different typing of an object, 
+//! and array initialisation.
+
 use std::{rc::Rc, collections::HashMap};
 
-use slog::debug;
+use slog::{debug, info};
 
-use crate::{syntax::{Expression, Identifier}, exec::AliasEntry};
+use crate::{syntax::{Expression, Identifier, RuntimeType}, exec::{AliasEntry, array_initialisation}};
 
 use super::{State, Engine, exec_assume, write_to_stack};
 
@@ -72,4 +76,63 @@ pub(super) fn split_states_with_aliases(
         state.path_id = en.next_path_id();
         en.add_remaining_state(state);
     }
+}
+
+
+/// Splits the current state into N + 1 states, each with a single concrete array with increasing concrete size, or a null.
+pub(super) fn exec_array_initialisation(
+    state: &mut State,
+    engine: &mut impl Engine,
+    array_name: Identifier,
+    array_type: RuntimeType,
+) {
+    const N: u64 = 3;
+    engine.statistics().measure_branches((N + 1) as u32); // including null, so + 1
+    info!(
+        state.logger,
+        "Symbolic array initialisation of {} into {} paths",
+        array_name,
+        N + 1
+    );
+
+    let inner_type = match array_type.clone() {
+        RuntimeType::ArrayRuntimeType { inner_type } => inner_type,
+        _ => panic!("Expected array type, found {:?}", array_type),
+    };
+
+    // initialise new states with arrays 1..N
+    for array_size in 1..=N {
+        let path_id = engine.next_path_id();
+        let mut new_state = state.clone();
+        new_state.path_id = path_id;
+        array_initialisation(
+            &mut new_state,
+            &array_name,
+            array_size,
+            array_type.clone(),
+            *inner_type.clone(),
+            engine.symbol_table(),
+        );
+
+        // note path_length does not decrease, we stay at the same statement containing array access
+        engine.add_remaining_state(new_state);
+    }
+
+    // And a state for the case where the array is NULL
+    let mut null_state = state.clone();
+    null_state.alias_map.insert(
+        array_name.clone(),
+        AliasEntry::new(vec![Expression::NULL.into()]),
+    );
+    engine.add_remaining_state(null_state);
+
+    // initialise array on the current state, with size 0
+    array_initialisation(
+        state,
+        &array_name,
+        0,
+        array_type.clone(),
+        *inner_type.clone(),
+        engine.symbol_table(),
+    );
 }

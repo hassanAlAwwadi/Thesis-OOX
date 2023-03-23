@@ -148,7 +148,7 @@ where
     iter.into_iter().fold(Expression::TRUE, and)
 }
 
-pub(crate) fn toIntExpr(int_value: i64) -> Expression {
+pub(crate) fn to_int_expr(int_value: i64) -> Expression {
     Expression::Lit {
         lit: Lit::IntLit { int_value },
         type_: RuntimeType::IntRuntimeType,
