@@ -1,3 +1,6 @@
+use std::rc::Rc;
+
+use pom::set::Set;
 use pretty::{docs, Arena, BoxAllocator, DocAllocator, DocBuilder};
 
 // use super::{BinOp, Expression};
@@ -5,6 +8,93 @@ use pretty::{docs, Arena, BoxAllocator, DocAllocator, DocBuilder};
 use crate::{lexer::tokens, parser::expression, syntax::Identifier, typeable::Typeable};
 
 use super::syntax::*;
+
+
+impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a CompilationUnit {
+    fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+        todo!()
+    }
+}
+
+impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a DeclarationMember {
+    fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+        match self {
+            DeclarationMember::Constructor(method) => pretty_constructor(method, allocator),
+            DeclarationMember::Method(method) => method.pretty(allocator),
+            DeclarationMember::Field { type_, name, info } => {
+                docs![
+                    allocator,
+                    type_.type_of().pretty(allocator),
+                    " ",
+                    name.to_string(),
+                    ";"
+                ]
+            },
+        }
+    }
+}
+
+fn pretty_constructor<'a, D: DocAllocator<'a>>(method: &'a Method, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+    use pretty::Pretty;
+    let body = method.body.borrow();
+    docs![
+        allocator,
+        method.name.to_string(),
+        " ",
+        pretty_parameters(&method.params, allocator),
+        " {",
+        allocator.hardline(),
+        body.pretty(allocator),
+        allocator.hardline(),
+        "}"
+
+    ]
+}
+
+impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a Method {
+    fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+        let body = self.body.borrow();
+        docs![
+            allocator,
+            if self.is_static { "static" } else { "" },
+            " ",
+            self.name.to_string(),
+            " ",
+            pretty_parameters(&self.params, allocator),
+            " {",
+            allocator.hardline(),
+            body.pretty(allocator),
+            allocator.hardline(),
+            "}"
+
+        ]
+    }
+}
+
+fn pretty_parameters<'a, D: DocAllocator<'a>>(parameters: &'a Vec<Parameter>, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+    use pretty::Pretty;
+    let mut parameters = parameters.iter();
+    if let Some(parameter) = parameters.next() {
+        let mut parameters_text = parameter.pretty(allocator);
+        for parameter in parameters {
+            parameters_text = parameters_text.append(", ").append(parameter.pretty(allocator));
+        }
+        return parameters_text.parens();
+    }
+    allocator.nil().parens()
+
+}
+
+impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a Parameter {
+    fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+        docs![
+            allocator,
+            self.type_of(),
+            " ",
+            self.name.to_string()
+        ]
+    }
+}
 
 impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Expression {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
@@ -128,59 +218,189 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Statement {
                 true_body,
                 false_body,
                 ..
-            } => allocator.text("if").append(allocator.space()).append(guard.pretty(allocator).parens())
-            .append(allocator.space())
-            .append(
-                allocator.text("{")
-            ).append(allocator.line())
-            .append(allocator.)
-            Statement::Continue { info } => todo!(),
-            Statement::Break { info } => todo!(),
-            Statement::Return { expression, info } => todo!(),
-            Statement::Throw { message, info } => todo!(),
+            } => allocator
+                .text("if")
+                .append(allocator.space())
+                .append(guard.pretty(allocator).parens())
+                .append(allocator.space())
+                .append(allocator.text("{"))
+                .append(allocator.line())
+                .append(true_body.pretty(allocator))
+                .append(allocator.line())
+                .append(allocator.text("}")),
+            Statement::Continue { .. } => allocator.text("continue;"),
+            Statement::Break { .. } => allocator.text("break;"),
+            Statement::Return { expression, .. } => {
+                if let Some(expression) = expression {
+                    allocator
+                        .text("return")
+                        .append(allocator.space())
+                        .append(expression.pretty(allocator))
+                        .append(semicolon())
+                } else {
+                    allocator.text("return;")
+                }
+            }
+            Statement::Throw { message, .. } => allocator
+                .text("throw")
+                .append(allocator.text(message.to_string()).double_quotes())
+                .append(semicolon()),
             Statement::Try {
                 try_body,
                 catch_body,
-                info,
-            } => todo!(),
-            Statement::Block { body } => todo!(),
-            Statement::Seq { stat1, stat2 } => todo!(),
+                ..
+            } => allocator
+                .text("try")
+                .append(allocator.space())
+                .append(try_body.pretty(allocator).braces())
+                .append(allocator.space())
+                .append(allocator.text("catch"))
+                .append(allocator.space())
+                .append(catch_body.pretty(allocator).braces()),
+            Statement::Block { body } => body.pretty(allocator),
+            Statement::Seq { stat1, stat2 } => stat1
+                .pretty(allocator)
+                .append(allocator.text(";"))
+                .append(allocator.hardline())
+                .append(stat2.pretty(allocator)),
         }
     }
 }
 
 impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Lhs {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
-        todo!()
+        match self {
+            Lhs::LhsVar { var, .. } => allocator.text(var.to_string()),
+            Lhs::LhsField {
+                var,
+                field,..
+            } => allocator.text(format!("{}.{}", var, field)),
+            Lhs::LhsElem {
+                var,
+                index, ..
+            } => allocator
+                .text(var.to_string())
+                .append(index.pretty(allocator).brackets()),
+        }
     }
 }
 
 impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Rhs {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
-        todo!()
+        match self {
+            Rhs::RhsExpression { value, type_, info } => value.pretty(allocator),
+            Rhs::RhsField {
+                var,
+                field,
+                type_,
+                info,
+            } => var.pretty(allocator),
+            Rhs::RhsElem {
+                var,
+                index,
+                type_,
+                info,
+            } => var
+                .pretty(allocator)
+                .append(index.pretty(allocator).brackets()),
+            Rhs::RhsCall {
+                invocation,
+                type_,
+                info,
+            } => invocation.pretty(allocator),
+            Rhs::RhsArray {
+                array_type,
+                sizes,
+                type_,
+                info,
+            } => {
+                let mut result = type_.pretty(allocator);
+                for size in sizes {
+                    result = result.append(size.pretty(allocator).brackets());
+                }
+                result
+            }
+        }
     }
 }
 
 impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Invocation {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
-        todo!()
+        match self {
+            Invocation::InvokeMethod {
+                lhs,
+                rhs,
+                arguments,
+                resolved,
+                info,
+            } => {
+                let mut result = allocator
+                    .text(lhs.to_string())
+                    .append(allocator.text("."))
+                    .append(allocator.text(rhs.to_string()));
+                result.append(pretty_arguments(arguments, allocator))
+            }
+            Invocation::InvokeSuperMethod {
+                rhs,
+                arguments,
+                resolved,
+                info,
+            } => {
+                let mut result = allocator
+                    .text("super")
+                    .append(allocator.text("."))
+                    .append(allocator.text(rhs.to_string()));
+                
+                    result.append(pretty_arguments(arguments, allocator))
+            },
+            Invocation::InvokeConstructor {
+                class_name,
+                arguments,
+                resolved,
+                info,
+            } => {
+                let mut result = allocator
+                    .text(class_name.to_string());
+                result.append(pretty_arguments(arguments, allocator))
+            },
+            Invocation::InvokeSuperConstructor {
+                arguments,
+                resolved,
+                info,
+            } => {
+                let mut result = allocator
+                    .text("super");
+                result.append(pretty_arguments(arguments, allocator))
+            },
+        }
     }
 }
 
-#[test]
-fn test() {
-    let arena = &Arena::<()>::new();
-    let doc = docs![
-        arena,
-        "let",
-        arena.softline(),
-        "x",
-        arena.softline(),
-        "=",
-        arena.softline(),
-        Some("123"),
-    ];
-    assert_eq!(doc.1.pretty(80).to_string(), "let x = 123");
+fn pretty_arguments<'a, D: DocAllocator<'a>>(arguments: &Vec<Rc<Expression>>, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+    use pretty::Pretty;
+    let mut arguments = arguments.iter();
+    if let Some(arg) = arguments.next() {
+        
+        let mut arguments_text = arg.pretty(allocator);
+        for arg in arguments {
+            arguments_text = arguments_text.append(", ").append(arg.pretty(allocator));
+        }
+        return arguments_text.parens();
+    }
+    allocator.nil().parens()
+}
+
+
+impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for RuntimeType {
+    fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+        (&self).pretty(allocator)
+    }
+}
+
+impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &RuntimeType {
+    fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+        allocator.text(self.to_string())
+    }
 }
 
 #[test]
