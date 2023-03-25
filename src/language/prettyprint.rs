@@ -1,18 +1,68 @@
-use std::rc::Rc;
+use std::{fs::read_to_string, rc::Rc};
 
+use itertools::Itertools;
 use pom::set::Set;
 use pretty::{docs, Arena, BoxAllocator, DocAllocator, DocBuilder};
 
 // use super::{BinOp, Expression};
 
-use crate::{lexer::tokens, parser::expression, syntax::Identifier, typeable::Typeable};
+use crate::{lexer::tokens, parse, parser::expression, syntax::Identifier, typeable::Typeable};
 
 use super::syntax::*;
 
-
 impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a CompilationUnit {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
-        todo!()
+        docs![
+            allocator,
+            allocator.concat(self.members.iter().map(|decl| decl.pretty(allocator)))
+        ]
+    }
+}
+
+impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a Declaration {
+    fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+        match self {
+            Declaration::Class(class) => {
+                docs![
+                    allocator,
+                    "class ",
+                    class.name.to_string(),
+                    " ",
+                    class
+                        .extends
+                        .clone()
+                        .map(|extends| format!("extends {}", extends)),
+                    if class.implements.len() > 0 {
+                        if class.extends.is_some() {
+                            format!(
+                                ", implements {}",
+                                class
+                                    .implements
+                                    .iter()
+                                    .map(Identifier::to_string)
+                                    .join(", ")
+                            )
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    },
+                    allocator.softline_(),
+                    "{",
+                    docs![
+                        allocator,
+                        
+                    allocator.hardline(),
+                    allocator
+                        .concat(class.members.iter().map(|member| member.pretty(allocator)))
+                        ].nest(2),
+                    allocator.hardline(),
+                    "}"
+                ]
+            }
+            Declaration::Interface(_) => todo!(),
+        }
     }
 }
 
@@ -29,12 +79,15 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a DeclarationMember {
                     name.to_string(),
                     ";"
                 ]
-            },
+            }
         }
     }
 }
 
-fn pretty_constructor<'a, D: DocAllocator<'a>>(method: &'a Method, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+fn pretty_constructor<'a, D: DocAllocator<'a>>(
+    method: &'a Method,
+    allocator: &'a D,
+) -> DocBuilder<'a, D, ()> {
     use pretty::Pretty;
     let body = method.body.borrow();
     docs![
@@ -47,7 +100,6 @@ fn pretty_constructor<'a, D: DocAllocator<'a>>(method: &'a Method, allocator: &'
         body.pretty(allocator),
         allocator.hardline(),
         "}"
-
     ]
 }
 
@@ -58,41 +110,43 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a Method {
             allocator,
             if self.is_static { "static" } else { "" },
             " ",
-            self.name.to_string(),
+            self.return_type.type_of(),
             " ",
+            self.name.to_string(),
             pretty_parameters(&self.params, allocator),
             " {",
-            allocator.hardline(),
-            body.pretty(allocator),
+            docs![
+                allocator,
+                allocator.hardline(),
+                body.pretty(allocator),
+            ].nest(2),
             allocator.hardline(),
             "}"
-
         ]
     }
 }
 
-fn pretty_parameters<'a, D: DocAllocator<'a>>(parameters: &'a Vec<Parameter>, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+fn pretty_parameters<'a, D: DocAllocator<'a>>(
+    parameters: &'a Vec<Parameter>,
+    allocator: &'a D,
+) -> DocBuilder<'a, D, ()> {
     use pretty::Pretty;
     let mut parameters = parameters.iter();
     if let Some(parameter) = parameters.next() {
         let mut parameters_text = parameter.pretty(allocator);
         for parameter in parameters {
-            parameters_text = parameters_text.append(", ").append(parameter.pretty(allocator));
+            parameters_text = parameters_text
+                .append(", ")
+                .append(parameter.pretty(allocator));
         }
         return parameters_text.parens();
     }
     allocator.nil().parens()
-
 }
 
 impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a Parameter {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
-        docs![
-            allocator,
-            self.type_of(),
-            " ",
-            self.name.to_string()
-        ]
+        docs![allocator, self.type_of(), " ", self.name.to_string()]
     }
 }
 
@@ -202,10 +256,12 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Statement {
             Statement::Skip => allocator.text(";"),
             Statement::Assert { assertion, .. } => allocator
                 .text("assert")
+                .append(allocator.space())
                 .append(assertion.pretty(allocator))
                 .append(semicolon()),
             Statement::Assume { assumption, .. } => allocator
                 .text("assume")
+                .append(allocator.space())
                 .append(assumption.pretty(allocator))
                 .append(semicolon()),
             Statement::While { guard, body, .. } => allocator
@@ -260,7 +316,6 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Statement {
             Statement::Block { body } => body.pretty(allocator),
             Statement::Seq { stat1, stat2 } => stat1
                 .pretty(allocator)
-                .append(allocator.text(";"))
                 .append(allocator.hardline())
                 .append(stat2.pretty(allocator)),
         }
@@ -271,14 +326,8 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Lhs {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
         match self {
             Lhs::LhsVar { var, .. } => allocator.text(var.to_string()),
-            Lhs::LhsField {
-                var,
-                field,..
-            } => allocator.text(format!("{}.{}", var, field)),
-            Lhs::LhsElem {
-                var,
-                index, ..
-            } => allocator
+            Lhs::LhsField { var, field, .. } => allocator.text(format!("{}.{}", var, field)),
+            Lhs::LhsElem { var, index, .. } => allocator
                 .text(var.to_string())
                 .append(index.pretty(allocator).brackets()),
         }
@@ -350,37 +399,37 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Invocation {
                     .text("super")
                     .append(allocator.text("."))
                     .append(allocator.text(rhs.to_string()));
-                
-                    result.append(pretty_arguments(arguments, allocator))
-            },
+
+                result.append(pretty_arguments(arguments, allocator))
+            }
             Invocation::InvokeConstructor {
                 class_name,
                 arguments,
                 resolved,
                 info,
             } => {
-                let mut result = allocator
-                    .text(class_name.to_string());
+                let mut result = allocator.text(class_name.to_string());
                 result.append(pretty_arguments(arguments, allocator))
-            },
+            }
             Invocation::InvokeSuperConstructor {
                 arguments,
                 resolved,
                 info,
             } => {
-                let mut result = allocator
-                    .text("super");
+                let mut result = allocator.text("super");
                 result.append(pretty_arguments(arguments, allocator))
-            },
+            }
         }
     }
 }
 
-fn pretty_arguments<'a, D: DocAllocator<'a>>(arguments: &Vec<Rc<Expression>>, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+fn pretty_arguments<'a, D: DocAllocator<'a>>(
+    arguments: &Vec<Rc<Expression>>,
+    allocator: &'a D,
+) -> DocBuilder<'a, D, ()> {
     use pretty::Pretty;
     let mut arguments = arguments.iter();
     if let Some(arg) = arguments.next() {
-        
         let mut arguments_text = arg.pretty(allocator);
         for arg in arguments {
             arguments_text = arguments_text.append(", ").append(arg.pretty(allocator));
@@ -389,7 +438,6 @@ fn pretty_arguments<'a, D: DocAllocator<'a>>(arguments: &Vec<Rc<Expression>>, al
     }
     allocator.nil().parens()
 }
-
 
 impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for RuntimeType {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
@@ -409,6 +457,20 @@ fn feature() {
     let exp = expression().parse(&tokens).unwrap();
     let allocator = BoxAllocator;
     println!("{}", pretty::Pretty::pretty(&exp, &allocator).1.pretty(10));
+}
+
+#[test]
+fn pretty_class() {
+    let path = "./examples/absolute_simplest.oox";
+    let file_content = std::fs::read_to_string(path).unwrap();
+    let tokens = tokens(&file_content).unwrap();
+    let class = parse(&tokens).unwrap();
+
+    let allocator = BoxAllocator;
+    println!(
+        "{}",
+        pretty::Pretty::pretty(&class, &allocator).1.pretty(50)
+    );
 }
 
 fn bin_op_to_str(bin_op: &BinOp) -> &'static str {
