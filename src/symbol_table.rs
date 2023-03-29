@@ -51,6 +51,7 @@ impl InheritanceTable {
     }
 }
 
+/// A table containing useful information about the program, such as what classes are defined, which fields does each class have etc.
 #[derive(Debug)]
 pub struct SymbolTable {
     pub class_to_fields: HashMap<Identifier, Fields>,
@@ -200,22 +201,27 @@ impl SymbolTable {
         Self::get_class_from_declarations(&self.declarations, class_name)
     }
 
+    /// Returns the class that is extended by `class_name`, if any
     pub fn class_extends(&self, class_name: &Identifier) -> Option<Rc<Class>> {
         self.inheritance_table.class[class_name].extends.clone()
     }
 
+    /// Returns the interfaces that are implemented by `class_name`
     pub fn class_implements(&self, class_name: &Identifier) -> &Vec<Rc<Interface>> {
         &self.inheritance_table.class[class_name].implements
     }
 
+    /// Returns a list of classes that implement the interface `interface_name`
     pub fn interface_implemented(&self, interface_name: &Identifier) -> &Vec<Rc<Class>> {
         &self.inheritance_table.interface[interface_name].implemented
     }
 
+    /// Returns a list of classes that extend the class `class_name`
     pub fn subclasses(&self, class_name: &Identifier) -> &Vec<Rc<Class>> {
         &self.inheritance_table.class[class_name].subclasses
     }
 
+    /// Returns a list of interfaces that extend the interface `interface_name`
     pub fn interface_extends(&self, interface_name: &Identifier) -> &Vec<Rc<Interface>> {
         &self.inheritance_table.interface[interface_name].extends
     }

@@ -102,7 +102,7 @@ type PathConstraints = HashSet<Expression>;
 // nope it can't, refactor this!
 pub type AliasMap = HashMap<Identifier, AliasEntry>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AliasEntry {
     pub aliases: Vec<Rc<Expression>>,
     uniform_type: bool, // whether all aliases have the same type, or subclasses appear.
@@ -697,7 +697,6 @@ fn exec_invocation(
                 .map(|arg| evaluate(state, arg.clone(), en))
                 .collect::<Vec<_>>();
 
-            // Zis is problems with interfaces
             let this_param = Parameter::new(
                 NonVoidType::ReferenceType {
                     identifier: class_name.clone(),
@@ -739,7 +738,6 @@ fn exec_invocation(
                 .map(|arg| evaluate(state, arg.clone(), en))
                 .collect::<Vec<_>>();
 
-            // zis is trouble with interfaces
             let this_param = Parameter::new(
                 NonVoidType::ReferenceType {
                     identifier: class_name.clone(),
@@ -785,6 +783,8 @@ fn exec_invocation(
     }
 }
 
+/// Given a class name and method name, lookup the entry node in the Control Flow Graph
+/// Also checks if the argument types are consistent.
 fn find_entry_for_static_invocation(
     class_name: &str,
     method_name: &str,
@@ -1693,7 +1693,6 @@ pub fn verify(
             )
         })?;
 
-    let mut i = 0;
     let symbol_table = SymbolTable::from_ast(&c)?;
     if !quiet {
         println!("Symbol table completed");
@@ -1704,7 +1703,7 @@ pub fn verify(
         println!("Typing completed");
     }
 
-    let (result, flw) = labelled_statements(c, &mut i);
+    let (result, flw) = labelled_statements(c);
 
     let program = result.into_iter().collect();
 

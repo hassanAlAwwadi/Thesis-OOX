@@ -17,8 +17,8 @@ use super::{State, Engine, exec_assume, write_to_stack};
 /// A lhs becomes a conditional for example when `Point p := a[i];` where `i` is a symbolic variable.
 /// When later on p is referenced, e.g. `p.x` is called, it must be determined which element of a is referred to.
 pub fn conditional_state_split(state: &mut State, en: &mut impl Engine, guard: Rc<Expression>, true_lhs: Rc<Expression>, false_lhs: Rc<Expression>, lhs_name: Identifier) {
-    // split up the paths into two, one where guard == true and one where guard == false.
-    // Do not increase path_length
+    // split up the states into two, one where we assume guard == true and one where we assume guard == false.
+    // Program counter is untouched, path length not increased.
     en.statistics().measure_branches(2);
     let mut true_state = state.clone();
     true_state.path_id = en.next_path_id();

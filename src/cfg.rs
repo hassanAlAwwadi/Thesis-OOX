@@ -7,9 +7,13 @@ use crate::{
 
 const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
 
+/// A statement in the control flow graph, with special cases for branching statements.
+/// 
+/// CFGStatement is separated from Statement to avoid having to add labels to the Statement type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CFGStatement {
-    Statement(Statement), // without Seq
+    /// Can be any Statement minus any of the branching statements in this enum
+    Statement(Statement), 
     Ite(Expression, u64, u64),
     While(Expression, u64),
     TryCatch(u64, u64, u64, u64), // l1: entry try body, l2: exit try body, l3: entry catch body, l4: exit catch body
@@ -30,10 +34,13 @@ pub enum CFGStatement {
     },
 }
 
+
+/// Takes the syntax tree of a program, returns a tuple containing the control flow graph and flow of the program.
+/// The control flow graph is a mapping from program counter (aka label) --> Program statement.
 pub fn labelled_statements(
-    compilation_unit: CompilationUnit,
-    i: &mut u64,
+    compilation_unit: CompilationUnit
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
+    let mut i = 0;
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
     let mut flow: Vec<(u64, u64)> = vec![];
 
@@ -42,7 +49,7 @@ pub fn labelled_statements(
             Declaration::Class(class) => {
                 for member in &class.members {
                     let (mut member_statements, mut member_flow) =
-                        memberCFG(class.name.clone(), &member, i);
+                        memberCFG(class.name.clone(), &member, &mut i);
                     labelled_statements.append(&mut member_statements);
                     flow.append(&mut member_flow);
                 }
@@ -50,7 +57,7 @@ pub fn labelled_statements(
             Declaration::Interface(interface) => {
                 for member in &interface.members {
                     let (mut member_statements, mut member_flow) =
-                        interface_member_cfg(interface.name.clone(), &member, i);
+                        interface_member_cfg(interface.name.clone(), &member, &mut i);
                     labelled_statements.append(&mut member_statements);
                     flow.append(&mut member_flow);
                 }
@@ -565,8 +572,7 @@ fn cfg_for_min() {
 
     // //dbg!(&c);
 
-    let mut i = 0;
-    let (result, flw) = labelled_statements(c, &mut i);
+    let (result, flw) = labelled_statements(c);
 
     // //dbg!(&result);
 
@@ -599,8 +605,7 @@ fn cfg_for_try_catch() {
 
     // dbg!(&c);
 
-    let mut i = 0;
-    let (result, flw) = labelled_statements(c, &mut i);
+    let (result, flw) = labelled_statements(c);
 
     dbg!(&result);
 

@@ -207,34 +207,34 @@ fn random_path<'a>(
 //     }
 // }
 
-pub struct RandomPathEngine<'a> {
-    remaining_states: &'a mut Vec<State>,
-    path_counter: Rc<RefCell<IdCounter<u64>>>,
-    statistics: &'a mut Statistics,
-    st: &'a SymbolTable,
-}
+// pub struct RandomPathEngine<'a> {
+//     remaining_states: &'a mut Vec<State>,
+//     path_counter: Rc<RefCell<IdCounter<u64>>>,
+//     statistics: &'a mut Statistics,
+//     st: &'a SymbolTable,
+// }
 
-impl Engine for RandomPathEngine<'_> {
-    fn add_remaining_state(&mut self, state: State) {
-        self.remaining_states.push(state);
-    }
+// impl Engine for RandomPathEngine<'_> {
+//     fn add_remaining_state(&mut self, state: State) {
+//         self.remaining_states.push(state);
+//     }
 
-    fn add_remaining_states(&mut self, states: impl Iterator<Item = State>) {
-        self.remaining_states.extend(states);
-    }
+//     fn add_remaining_states(&mut self, states: impl Iterator<Item = State>) {
+//         self.remaining_states.extend(states);
+//     }
 
-    fn next_path_id(&mut self) -> u64 {
-        self.path_counter.borrow_mut().next_id()
-    }
+//     fn next_path_id(&mut self) -> u64 {
+//         self.path_counter.borrow_mut().next_id()
+//     }
 
-    fn statistics(&mut self) -> &mut Statistics {
-        self.statistics
-    }
+//     fn statistics(&mut self) -> &mut Statistics {
+//         self.statistics
+//     }
 
-    fn symbol_table(&self) -> &SymbolTable {
-        self.st
-    }
-}
+//     fn symbol_table(&self) -> &SymbolTable {
+//         self.st
+//     }
+// }
 
 /// The main function for the symbolic execution, any path splitting due to the control flow graph or array initialization happens here.
 /// Depth first search, without using any other heuristic.
@@ -256,8 +256,6 @@ pub(crate) fn sym_exec(
         statement: state.pc,
         states: vec![state],
     }));
-    // why am i setting tree as it's own parent?
-    // tree.borrow_mut().set_parent(Rc::<_>::downgrade(&tree));
 
     loop {
         // pointer to the leaf with states chosen by the heuristic
@@ -325,6 +323,7 @@ pub(crate) fn sym_exec(
 
                         // let mut tree = Rc::new(RefCell::new(N::Leaf(Weak::new(), states)));
                         // tree.borrow_mut().set_parent(Rc::<_>::downgrade(&tree));
+                        assert_all_aliasmaps_are_equivalent(&states);
                         states_node.borrow_mut().set_states(states);
 
                         // *states_node.borrow_mut() = N::Leaf { parent: Weak::new(), states };
@@ -341,6 +340,11 @@ pub(crate) fn sym_exec(
                             new_states.into_iter().collect_tuple().unwrap();
 
                         assert!(true_.len() > 0 && false_.len() > 0);
+
+
+                        // testing whether all aliasmaps are equivalent, can be removed later
+                        assert_all_aliasmaps_are_equivalent(&true_);
+                        assert_all_aliasmaps_are_equivalent(&false_);
 
                         let parent = states_node.borrow().parent();
                         *states_node.borrow_mut() = N::Node {
@@ -513,6 +517,8 @@ fn execute_instruction(
 /// If there are no states left in the parent after this, this means that all paths under that branch have been explored,
 /// meaning that we can remove that branch as well, repeating the process.
 /// 
+/// Returns whether the root node was reached, in that case the entire search space is explored (up to given limit k).
+/// 
 /// TODO:
 /// Removing any branching node where there is only one unpruned/unfinished state left.
 fn finish_state_in_path(mut leaf: Rc<RefCell<N>>, path: Vec<ProgramCounter>,) -> bool {
@@ -608,3 +614,8 @@ fn finish_state_in_path(mut leaf: Rc<RefCell<N>>, path: Vec<ProgramCounter>,) ->
 //         }
 //     }
 // }
+
+
+fn assert_all_aliasmaps_are_equivalent(states: &Vec<State>) -> bool {
+    states.iter().map(|s| &s.alias_map).all_equal()
+}

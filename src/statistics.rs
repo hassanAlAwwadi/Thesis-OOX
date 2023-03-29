@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 pub struct Statistics {
     pub number_of_branches: u32,
     pub number_of_prunes: u32,

@@ -17,7 +17,7 @@ use std::{
     str::FromStr,
 };
 
-use crate::positioned::SourcePos;
+use crate::{positioned::SourcePos, typeable::Typeable};
 
 pub use self::{
     classes::Class, interfaces::find_interface_method, interfaces::Interface,
@@ -269,8 +269,8 @@ pub enum Statement {
 #[derive(Clone, Derivative)]
 #[derivative(PartialEq, Eq)]
 pub enum Invocation {
+    /// in OOX: `f.method(..), this.method(..), Foo.method(..);`
     InvokeMethod {
-        // f.method(..), this.method(..), Foo.method(..);
         lhs: Identifier,
         rhs: Identifier,
         arguments: Vec<Rc<Expression>>,
@@ -280,8 +280,8 @@ pub enum Invocation {
         #[derivative(PartialEq = "ignore")]
         info: SourcePos,
     },
+    /// in OOX: `super.method(..);`
     InvokeSuperMethod {
-        // super.method(..);
         rhs: Identifier,
         arguments: Vec<Rc<Expression>>,
 
@@ -290,8 +290,8 @@ pub enum Invocation {
         #[derivative(PartialEq = "ignore")]
         info: SourcePos,
     },
+    /// in OOX: `new Foo(..)`
     InvokeConstructor {
-        // new Foo(..)
         class_name: Identifier,
         arguments: Vec<Rc<Expression>>,
 
@@ -312,15 +312,28 @@ pub enum Invocation {
 }
 
 impl Invocation {
-    // pub fn resolved(&self) -> impl Iterator<Item=&(Declaration, DeclarationMember)>{
+    // pub fn resolved(&self) -> Box<dyn Iterator<Item=&(Declaration, Rc<Method>)>> {
     //     match &self {
-    //         Invocation::InvokeMethod { resolved, .. } => resolved.as_ref().unwrap().iter(),
-    //         Invocation::InvokeConstructor { resolved, .. } => resolved.as_ref().map(Box::as_ref).map(std::iter::once),
+    //         Invocation::InvokeMethod { resolved, .. } => Box::new(resolved.as_ref().unwrap().iter()),
+    //         Invocation::InvokeConstructor { resolved, .. } => {
+    //             todo!()
+    //             // Box::new(resolved.as_ref().map(Box::as_ref).map(std::iter::once))
+    //         },
     //         Invocation::InvokeSuperConstructor { resolved, .. } => {
-    //             resolved.as_ref().map(Box::as_ref)
-    //         }
+    //             todo!()
+    //             // Box::new(resolved.as_ref().map(Box::as_ref))
+    //         },
+    //         _ => todo!(),
     //     }
     // }
+
+    pub fn argument_types(&self) -> impl ExactSizeIterator<Item=RuntimeType> + '_ + Clone {
+        self
+            .arguments()
+            .iter()
+            .map(AsRef::as_ref)
+            .map(Typeable::type_of)
+    }
 
     pub fn arguments(&self) -> &Vec<Rc<Expression>> {
         match &self {

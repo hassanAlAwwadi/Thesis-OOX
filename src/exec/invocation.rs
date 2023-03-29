@@ -51,15 +51,10 @@ pub(super) fn single_method_invocation(
             &resolved_method.params,
             en,
         );
-        let argument_types = invocation
-            .arguments()
-            .iter()
-            .map(AsRef::as_ref)
-            .map(Typeable::type_of);
         let next_entry = find_entry_for_static_invocation(
             class_name,
             invocation.identifier(),
-            argument_types,
+            invocation.argument_types(),
             program,
             en.symbol_table(),
         );
@@ -260,15 +255,11 @@ fn non_static_resolved_method_invocation(
         en,
         this,
     );
-    let argument_types = invocation
-        .arguments()
-        .iter()
-        .map(AsRef::as_ref)
-        .map(Typeable::type_of);
+    
     let next_entry = find_entry_for_static_invocation(
         class_name,
         invocation.identifier(),
-        argument_types,
+        invocation.argument_types(),
         program,
         en.symbol_table(),
     );
