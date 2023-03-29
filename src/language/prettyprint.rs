@@ -6,7 +6,7 @@ use pretty::{docs, Arena, BoxAllocator, DocAllocator, DocBuilder};
 
 // use super::{BinOp, Expression};
 
-use crate::{lexer::tokens, parse, parser::expression, syntax::Identifier, typeable::Typeable};
+use crate::{ syntax::Identifier, typeable::Typeable};
 
 use super::syntax::*;
 
@@ -52,11 +52,14 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a Declaration {
                     "{",
                     docs![
                         allocator,
-                        
-                    allocator.hardline(),
-                    allocator
-                        .concat(class.members.iter().map(|member| member.pretty(allocator)))
-                        ].nest(2),
+                        allocator.hardline(),
+                        allocator.concat(
+                            class.members.iter().map(|member| member
+                                .pretty(allocator)
+                                .append(allocator.hardline()))
+                        )
+                    ]
+                    .nest(2),
                     allocator.hardline(),
                     "}"
                 ]
@@ -92,12 +95,12 @@ fn pretty_constructor<'a, D: DocAllocator<'a>>(
     let body = method.body.borrow();
     docs![
         allocator,
+        allocator.hardline(),
         method.name.to_string(),
         " ",
         pretty_parameters(&method.params, allocator),
         " {",
-        allocator.hardline(),
-        body.pretty(allocator),
+        docs![allocator, allocator.hardline(), body.pretty(allocator),].nest(2),
         allocator.hardline(),
         "}"
     ]
@@ -108,22 +111,60 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a Method {
         let body = self.body.borrow();
         docs![
             allocator,
-            if self.is_static { "static" } else { "" },
-            " ",
+            allocator.hardline(),
+            if self.is_static { "static " } else { "" },
             self.return_type.type_of(),
             " ",
             self.name.to_string(),
             pretty_parameters(&self.params, allocator),
-            " {",
-            docs![
-                allocator,
-                allocator.hardline(),
-                body.pretty(allocator),
-            ].nest(2),
+            allocator.space(),
+            specifications(&self.specification, allocator),
+            "{",
+            docs![allocator, allocator.hardline(), body.pretty(allocator),].nest(2),
             allocator.hardline(),
             "}"
         ]
     }
+}
+
+fn specifications<'a, D: DocAllocator<'a>>(
+    specification: &'a Specification,
+    allocator: &'a D,
+) -> DocBuilder<'a, D, ()> {
+    use pretty::Pretty;
+    if !(specification.requires.is_some() || specification.ensures.is_some() || specification.exceptional.is_some()) {
+        return allocator.nil();
+    }
+    
+    docs![ // specifications
+        allocator,
+        specification.requires.clone().map(|requires| 
+            docs![
+                allocator,
+                allocator.hardline(),
+                "requires", 
+                requires.pretty(allocator).parens(),
+            ]
+        ),
+        specification.ensures.clone().map(|requires| 
+            docs![
+                allocator,
+                allocator.hardline(),
+                "ensures", 
+                requires.pretty(allocator).parens(),
+            ]
+        ),
+        
+        specification.exceptional.clone().map(|requires| 
+            docs![
+                allocator,
+                allocator.hardline(),
+                "exceptional", 
+                requires.pretty(allocator).parens(),
+            ]
+        )
+    ].nest(2)
+    .append(allocator.hardline())
 }
 
 fn pretty_parameters<'a, D: DocAllocator<'a>>(
@@ -159,12 +200,15 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Expression {
             Expression::Var { var, .. } => allocator.text(var.to_string()),
             Expression::BinOp {
                 bin_op, lhs, rhs, ..
-            } => lhs
-                .pretty(allocator)
-                .append(allocator.space())
-                .append(bin_op_to_str(bin_op))
-                .append(allocator.space())
-                .append(rhs.pretty(allocator)),
+            } => docs![
+                allocator,
+                lhs.pretty(allocator),
+                allocator.space(),
+                bin_op_to_str(bin_op),
+                allocator.space(),
+                rhs.pretty(allocator)
+            ],
+
             Expression::UnOp { un_op, value, .. } => {
                 let un_op_str = match un_op {
                     UnOp::Negative => "-",
@@ -192,45 +236,50 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Expression {
                 true_,
                 false_,
                 ..
-            } => allocator.text("ite").append(
-                guard
-                    .pretty(allocator)
-                    .append(comma())
-                    .append(true_.pretty(allocator))
-                    .append(comma())
-                    .append(false_.pretty(allocator))
-                    .parens(),
-            ),
+            } => docs![
+                allocator,
+                "ite",
+                guard.pretty(allocator).append(comma()),
+                true_.pretty(allocator).append(comma()),
+                false_.pretty(allocator)
+            ]
+            .parens(),
             Expression::Forall {
                 elem,
                 range,
                 domain,
                 formula,
                 ..
-            } => allocator
-                .text("forall")
-                .append(elem.to_string())
-                .append(comma())
-                .append(range.to_string())
-                .append(colon())
-                .append(domain.to_string())
-                .append(colon())
-                .append(formula.pretty(allocator)),
+            } => docs![
+                allocator,
+                "forall ",
+                elem.to_string(),
+                ", ",
+                range.to_string(),
+                ": ",
+                domain.to_string(),
+                ": ",
+                formula.pretty(allocator)
+            ],
+
             Expression::Exists {
                 elem,
                 range,
                 domain,
                 formula,
                 ..
-            } => allocator
-                .text("exists")
-                .append(elem.to_string())
-                .append(comma())
-                .append(range.to_string())
-                .append(colon())
-                .append(domain.to_string())
-                .append(colon())
-                .append(formula.pretty(allocator)),
+            } => docs![
+                allocator,
+                "exists ",
+                elem.to_string(),
+                ", ",
+                range.to_string(),
+                ": ",
+                domain.to_string(),
+                ": ",
+                formula.pretty(allocator)
+            ],
+
             Expression::SymbolicRef { var, .. } => allocator.text(var.to_string()),
         }
     }
@@ -240,50 +289,71 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Statement {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
         let semicolon = || allocator.text(";");
         match self {
-            Statement::Declare { type_, var, .. } => allocator
-                .text(type_.type_of().to_string())
-                .append(allocator.space())
-                .append(var.to_string())
-                .append(semicolon()),
-            Statement::Assign { lhs, rhs, .. } => lhs
-                .pretty(allocator)
-                .append(allocator.space())
-                .append(allocator.text(":="))
-                .append(allocator.space())
-                .append(rhs.pretty(allocator))
-                .append(allocator.text(";")),
+            Statement::Declare { type_, var, .. } => docs![
+                allocator,
+                type_.type_of().to_string(),
+                " ",
+                var.to_string(),
+                semicolon()
+            ],
+
+            Statement::Assign { lhs, rhs, .. } => docs![
+                allocator,
+                lhs.pretty(allocator),
+                " ",
+                ":=",
+                " ",
+                rhs.pretty(allocator),
+                semicolon()
+            ],
+
             Statement::Call { invocation, .. } => invocation.pretty(allocator).append(semicolon()),
             Statement::Skip => allocator.text(";"),
-            Statement::Assert { assertion, .. } => allocator
-                .text("assert")
-                .append(allocator.space())
-                .append(assertion.pretty(allocator))
-                .append(semicolon()),
-            Statement::Assume { assumption, .. } => allocator
-                .text("assume")
-                .append(allocator.space())
-                .append(assumption.pretty(allocator))
-                .append(semicolon()),
-            Statement::While { guard, body, .. } => allocator
-                .text("while")
-                .append(allocator.space())
-                .append(guard.pretty(allocator).parens())
-                .append(body.pretty(allocator).braces()),
+            Statement::Assert { assertion, .. } => docs![
+                allocator,
+                "assert",
+                " ",
+                assertion.pretty(allocator),
+                semicolon()
+            ],
+
+            Statement::Assume { assumption, .. } => docs![
+                allocator,
+                "assume",
+                " ",
+                assumption.pretty(allocator),
+                semicolon()
+            ],
+            Statement::While { guard, body, .. } => {
+                docs![
+                    allocator,
+                    "while",
+                    " ",
+                    guard.pretty(allocator).parens(),
+                    " ",
+                    "{",
+                    docs![allocator, allocator.hardline(), body.pretty(allocator),].nest(2),
+                    allocator.hardline(),
+                    "}"
+                ]
+            }
+
             Statement::Ite {
                 guard,
                 true_body,
                 false_body,
                 ..
-            } => allocator
-                .text("if")
-                .append(allocator.space())
-                .append(guard.pretty(allocator).parens())
-                .append(allocator.space())
-                .append(allocator.text("{"))
-                .append(allocator.line())
-                .append(true_body.pretty(allocator))
-                .append(allocator.line())
-                .append(allocator.text("}")),
+            } => docs![
+                allocator,
+                "if",
+                " ",
+                guard.pretty(allocator).parens(),
+                " ",
+                "{",
+                docs![allocator, allocator.hardline(), true_body.pretty(allocator)].nest(2),
+                allocator.hardline(),
+                "}"
+            ],
             Statement::Continue { .. } => allocator.text("continue;"),
             Statement::Break { .. } => allocator.text("break;"),
             Statement::Return { expression, .. } => {
@@ -298,26 +368,31 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Statement {
                 }
             }
             Statement::Throw { message, .. } => allocator
-                .text("throw")
+                .text("throw ")
                 .append(allocator.text(message.to_string()).double_quotes())
                 .append(semicolon()),
             Statement::Try {
                 try_body,
                 catch_body,
                 ..
-            } => allocator
-                .text("try")
-                .append(allocator.space())
-                .append(try_body.pretty(allocator).braces())
-                .append(allocator.space())
-                .append(allocator.text("catch"))
-                .append(allocator.space())
-                .append(catch_body.pretty(allocator).braces()),
+            } => docs![
+                allocator,
+                "try",
+                " ",
+                try_body.pretty(allocator).braces(),
+                " ",
+                "catch",
+                " ",
+                catch_body.pretty(allocator).braces()
+            ],
+
             Statement::Block { body } => body.pretty(allocator),
-            Statement::Seq { stat1, stat2 } => stat1
-                .pretty(allocator)
-                .append(allocator.hardline())
-                .append(stat2.pretty(allocator)),
+            Statement::Seq { stat1, stat2 } => docs![
+                allocator,
+                stat1.as_ref(),
+                allocator.hardline(),
+                stat2.as_ref()
+            ],
         }
     }
 }
@@ -453,6 +528,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &RuntimeType {
 
 #[test]
 fn feature() {
+    use crate::{lexer::tokens, parser::expression };
     let tokens = tokens("x && y").unwrap();
     let exp = expression().parse(&tokens).unwrap();
     let allocator = BoxAllocator;
@@ -461,7 +537,8 @@ fn feature() {
 
 #[test]
 fn pretty_class() {
-    let path = "./examples/absolute_simplest.oox";
+    use crate::{lexer::tokens, parse };
+    let path = "./examples/intLinkedList.oox";
     let file_content = std::fs::read_to_string(path).unwrap();
     let tokens = tokens(&file_content).unwrap();
     let class = parse(&tokens).unwrap();

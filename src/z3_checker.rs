@@ -134,7 +134,7 @@ impl<'ctx> AstNode<'ctx> {
         ))
     }
 
-    fn conditional(self, true_: AstNode<'ctx>, false_: AstNode<'ctx>) -> Result<AstNode, ()> {
+    fn conditional(self, true_: AstNode<'ctx>, false_: AstNode<'ctx>) -> Result<AstNode<'ctx>, ()> {
         let guard = Bool::try_from(self)?;
 
         guard.ite(&guard, &guard);
