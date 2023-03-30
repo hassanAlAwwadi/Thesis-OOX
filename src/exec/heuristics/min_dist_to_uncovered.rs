@@ -1,22 +1,24 @@
-use std::{collections::{HashMap}, rc::{Rc, Weak}, cell::RefCell};
+use std::{collections::{HashMap}, rc::{Rc, Weak}, cell::RefCell, ops::Deref};
 
 use itertools::Itertools;
-use pathfinding::prelude::{dijkstra_partial, count_paths};
+use rand::{Rng, distributions::{uniform::UniformInt, WeightedIndex}, prelude::Distribution};
 use slog::{Logger, debug};
 
 use crate::{
-    cfg::CFGStatement,
-    exec::{find_entry_for_static_invocation, State, IdCounter, SymResult},
+    exec::{State, IdCounter, SymResult, heuristics::{finish_state_in_path, Cost}},
     symbol_table::SymbolTable,
-    syntax::{Declaration, Invocation, Method, Rhs, Statement}, statistics::Statistics,
+    syntax::{Declaration, Invocation, Method, Rhs, Statement}, statistics::Statistics, cfg::CFGStatement,
 };
 
+use crate::exec::heuristics::execute_instruction_for_all_statements;
+
+use super::{R, ProgramCounter, N};
+
 /// edge cost in dijkstra's algorithm
-type Cost = u64;
-type ProgramCounter = u64;
 
-
-fn choice(tree: Rc<RefCell<N>>, md2u: HashMap<ProgramCounter, Cost>) {
+/// Make a weighted stochastic choice, where the weight is calculated based on the distance to a newly uncovered branch.
+fn choice<'a>(mut tree: Rc<RefCell<N>>, md2u: HashMap<ProgramCounter, Cost>, 
+    rng: &'a mut impl Rng) -> Rc<RefCell<N>> {
     let mut path = Vec::new();
     loop {
         let node = tree.clone();
@@ -27,92 +29,22 @@ fn choice(tree: Rc<RefCell<N>>, md2u: HashMap<ProgramCounter, Cost>) {
                 ..
             } => {
                 path.push(*statement);
-
-                dbg!(children.len());
-
-                let idx = rng.gen_range(0..children.len());
+                // I expect here that some elements are not in md2u, they should be assigned 0 in the weights.
+                // We should move weighted index to somewhere it is created only once.
+                let weights = children.iter().map(|child| 1.0 / md2u[&child.borrow().statement()] as f32);
+                let wi = WeightedIndex::new(weights).unwrap();
+                let idx = wi.sample(rng);
+                
                 tree = children[idx].clone();
             }
-            N::Leaf { states, statement, .. } => {
+            N::Leaf { statement, .. } => {
                 path.push(*statement);
-                return (path, tree);
+                return tree;
             }
         };
     }
-
-    todo!()
 }
 
-// sane alternative?
-#[derive(Debug)]
-enum N {
-    Node {
-        parent: Weak<RefCell<N>>,
-        statement: u64,
-        children: Vec<Rc<RefCell<N>>>,
-    },
-    Leaf {
-        parent: Weak<RefCell<N>>,
-        statement: u64,
-        states: Vec<State>,
-    },
-}
-
-impl N {
-    fn parent(&self) -> Weak<RefCell<N>> {
-        match self {
-            N::Node { parent, .. } => parent.clone(),
-            N::Leaf { parent, .. } => parent.clone(),
-        }
-    }
-
-    fn statement(&self) -> u64 {
-        match self {
-            N::Node { statement, .. } => *statement,
-            N::Leaf { statement, .. } => *statement,
-        }
-    }
-    /// Assume it is a leaf and take out the states.
-    fn into_states(&mut self) -> Option<Vec<State>> {
-        if let N::Leaf { states, .. } = self {
-            // Take the state, leaving an empty array
-            let states = std::mem::take(states);
-            Some(states)
-        } else {
-            None
-        }
-    }
-
-    fn set_states(&mut self, mut new_states: Vec<State>) {
-        if let N::Leaf { states, .. } = self {
-            // Set the states
-            *states = new_states;
-        } else {
-            panic!()
-        }
-    }
-
-    fn set_parent(&mut self, new_parent: Weak<RefCell<N>>) {
-        match self {
-            N::Node {
-                parent,
-                statement,
-                children,
-            } => *parent = new_parent,
-            N::Leaf { parent, .. } => *parent = new_parent,
-        }
-    }
-}
-
-enum R {
-    /// The new states at one increased path counter, this occurs when there is no branch statement.
-    /// Often this will be just one state, but it may happen that states are split due to e.g. array initialisation.
-    Step(Vec<State>),
-    /// A branch statement (if, while, foo.bar() dynamic dispatch to different functions)
-    StateSplit(HashMap<u64, Vec<State>>),
-    /// The path is finished, pruned or an invalid assert occured.
-    Exit(SymResult),
-}
 
 /// Explores all nodes in the tree, if the path is finished, we don't insert it into the result.
 /// Returns for each program counter with a reachable path to an unexplored statement the distance to that statement.
@@ -247,7 +179,147 @@ fn min_distance_to_uncovered<'a, FS, FN>(start: u64, mut goal: FS, mut successor
 //     }
 // }
 
+/// The main function for the symbolic execution, any path splitting due to the control flow graph or array initialization happens here.
+/// Depth first search, without using any other heuristic.
+pub(crate) fn sym_exec(
+    state: State,
+    program: &HashMap<u64, CFGStatement>,
+    flows: &HashMap<u64, Vec<u64>>,
+    k: u64,
+    st: &SymbolTable,
+    root_logger: Logger,
+    path_counter: Rc<RefCell<IdCounter<u64>>>,
+    statistics: &mut Statistics,
+) -> SymResult {
+    let mut rng = rand::thread_rng();
+    let mut md2u = HashMap::new();
 
+    // let mut paths = PathTree {root: state.pc, nodes: HashMap::from([(state.pc, TreeNode::Leaf(vec![state]))]) };
+    let mut tree = Rc::new(RefCell::new(N::Leaf {
+        parent: Weak::new(),
+        statement: state.pc,
+        states: vec![state],
+    }));
+
+    loop {
+        // pointer to the leaf with states chosen by the heuristic
+
+        let states_node = choice(tree.clone(), md2u, &mut rng);
+        let current_pc = states_node.borrow().statement();
+        let chosen_state = states_node.borrow_mut().into_states().unwrap();
+
+        let mut states = chosen_state;
+
+        let r = execute_instruction_for_all_statements(
+            states,
+            program,
+            flows,
+            k,
+            st,
+            root_logger.clone(),
+            path_counter.clone(),
+            statistics,
+        );
+
+        match r {
+            R::Step(_) => todo!(),
+            R::StateSplit(new_states) => {
+                assert!(new_states.len() <= 2);
+                for (pc, states) in &new_states {
+                    debug!(
+                        root_logger,
+                        "all pcs should be equal {}, {:?}",
+                        pc,
+                        states.iter().map(|s| s.pc).collect_vec()
+                    );
+                    if (!states.iter().all(|s| s.pc == *pc)) {
+                        loop {}
+                    }
+                    assert!(states.iter().all(|s| s.pc == *pc));
+                }
+
+                match new_states.len() {
+                    0 => {
+                        // Branch finished due to "throw"
+                        dbg!(current_pc, &program[&current_pc]);
+                        // if let Some(parent) = states_node.borrow().parent().upgrade() {
+                        //     dbg!(parent.borrow().deref().statement());
+                        // } else {
+                        //     dbg!("no parent");
+                        // }
+                        let is_finished = finish_state_in_path(states_node.clone(), path_pcs);
+                        if is_finished {
+                            // *tree.borrow_mut() = N::Leaf {
+                            //     parent: Weak::new(),
+                            //     statement: 0,
+                            //     states: vec![],
+                            // };
+
+                            // We have explored all states.
+                            debug!(root_logger, "all states explored");
+                            return SymResult::Valid;
+                        }
+                        
+                    }
+                    1 => {
+                        let (pc, states) = new_states.into_iter().next().unwrap();
+                        debug!(root_logger, "new state {:?}", pc);
+
+                        // let mut tree = Rc::new(RefCell::new(N::Leaf(Weak::new(), states)));
+                        // tree.borrow_mut().set_parent(Rc::<_>::downgrade(&tree));
+                        
+                        states_node.borrow_mut().set_states(states);
+
+                        // *states_node.borrow_mut() = N::Leaf { parent: Weak::new(), states };
+                    }
+                    2 => {
+                        // Branching, split up states
+                        debug!(
+                            root_logger,
+                            "new states: {:?}",
+                            new_states.iter().map(|(pc, _)| pc).collect_vec()
+                        );
+
+                        let ((true_pc, true_), (false_pc, false_)) =
+                            new_states.into_iter().collect_tuple().unwrap();
+
+                        assert!(true_.len() > 0 && false_.len() > 0);
+
+
+                        let parent = states_node.borrow().parent();
+                        *states_node.borrow_mut() = N::Node {
+                            parent,
+                            statement: current_pc,
+                            children: vec![
+                                Rc::new(RefCell::new(N::Leaf {
+                                    parent: Rc::downgrade(&states_node),
+                                    statement: true_pc,
+                                    states: true_,
+                                })),
+                                Rc::new(RefCell::new(N::Leaf {
+                                    parent: Rc::downgrade(&states_node),
+                                    statement: false_pc,
+                                    states: false_,
+                                })),
+                            ],
+                        }
+
+                        // paths.nodes.insert(k, v)
+                        // paths.nodes[current_pc] = TreeNode::Node(())
+                        // *chosen_state = BTree::Node {
+                        //     statement: current_pc,
+                        //     false_: Some(Box::new(BTree::Leaf(false_))),
+                        //     true_: Some(Box::new(BTree::Leaf(true_))),
+                        // }
+                    }
+                    x => panic!("got {:?}", x),
+                }
+            }
+            // Think i need to check here if it is valid or not, if valid we should not return but just prune/finish that path in the tree of paths?
+            R::Exit(result) => return result,
+        }
+    }
+}
 
 #[test]
 fn test_partial_dijkstra() {

@@ -30,7 +30,6 @@ queues = "1.1.0"
 clap = { version = "4.1.7", features = ["derive"] }
 criterion = "0.4.0"
 rand = "0.8.5"
-pathfinding = "4.2.1"
 
 [[bench]]
 name = "OOX_benchmark"

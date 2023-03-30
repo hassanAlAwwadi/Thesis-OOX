@@ -2,6 +2,7 @@ use std::{rc::Rc};
 
 use crate::syntax::{BinOp, Expression, Identifier, Lit, Reference, RuntimeType, UnOp};
 
+
 #[allow(unused_variables)]
 pub trait ExprFoldCollection<'a, R>
 where
