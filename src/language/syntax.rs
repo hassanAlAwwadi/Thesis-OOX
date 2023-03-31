@@ -2,6 +2,8 @@ use derivative::Derivative;
 use ordered_float::NotNan;
 
 mod identifier;
+mod classes;
+mod interfaces;
 
 pub use identifier::*;
 
@@ -24,10 +26,9 @@ pub use self::{
     interfaces::InterfaceMember,
 };
 
-mod classes;
-mod interfaces;
 
-#[derive(Debug)]
+#[derive(Debug, Derivative)]
+#[derivative(PartialEq, Eq)]
 pub struct CompilationUnit {
     pub members: Vec<Declaration>,
 }
@@ -60,7 +61,8 @@ impl CompilationUnit {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Derivative)]
+#[derivative(PartialEq, Eq)]
 pub enum Declaration {
     Class(Rc<Class>),
     Interface(Rc<Interface>),
@@ -84,7 +86,8 @@ impl Declaration {
 }
 
 /// Non-abstract, with concrete body
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Derivative)]
+#[derivative(PartialEq, Eq)]
 pub struct Method {
     pub is_static: bool,
     pub return_type: Type,
@@ -92,6 +95,8 @@ pub struct Method {
     pub params: Vec<Parameter>,
     pub specification: Specification,
     pub body: RefCell<Statement>, // This is a RefCell to allow interior mutability for inserting the exceptional clauses and types
+
+    #[derivative(PartialEq = "ignore")]
     pub info: SourcePos,
 }
 
@@ -110,7 +115,7 @@ impl Method {
 }
 
 /// Abstract method, has no body implementation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AbstractMethod {
     pub is_static: bool,
     pub return_type: Type,
@@ -119,7 +124,8 @@ pub struct AbstractMethod {
     pub specification: Specification,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Derivative)]
+#[derivative(PartialEq, Eq)]
 pub enum DeclarationMember {
     /// Note: is_static is always false for constructors
     Constructor(Rc<Method>),
@@ -127,6 +133,7 @@ pub enum DeclarationMember {
     Field {
         type_: NonVoidType,
         name: Identifier,
+        #[derivative(PartialEq = "ignore")]
         info: SourcePos,
     },
 }
@@ -164,10 +171,13 @@ impl DeclarationMember {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Derivative)]
+#[derive(Eq, PartialEq)]
 pub struct Parameter {
     pub type_: NonVoidType,
     pub name: Identifier,
+
+    #[derivative(PartialEq = "ignore")]
     pub info: SourcePos,
 }
 
