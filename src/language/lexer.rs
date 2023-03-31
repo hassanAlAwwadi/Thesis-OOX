@@ -8,11 +8,6 @@ use crate::positioned::{SourcePos, WithPosition};
 #[grammar = "oox.pest"]
 struct OOXLexer;
 
-// pub struct Token {
-//     pub token: String,
-//     pub position: (usize, usize),
-// }
-
 #[derive(Debug, Copy, Clone)]
 pub enum Token<'a> {
     Identifier(&'a str, SourcePos),
@@ -51,7 +46,7 @@ impl<'a> Display for Token<'a> {
 }
 
 // pub fn tokens(file: &str) -> Vec<(Token, (usize, usize))> {
-pub fn tokens<'a>(file: &'a str) -> Result<Vec<Token<'a>>, (usize, usize)> {
+pub(crate) fn tokens<'a>(file: &'a str) -> Result<Vec<Token<'a>>, (usize, usize)> {
     let file = OOXLexer::parse(Rule::input, file)
         .map_err(|error| match error.line_col {
             pest::error::LineColLocation::Pos((line, col)) => (line, col),

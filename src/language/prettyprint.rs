@@ -528,27 +528,13 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &RuntimeType {
 
 #[test]
 fn feature() {
-    use crate::{lexer::tokens, parser::expression };
+    use crate::{language::lexer::tokens, parser::expression };
     let tokens = tokens("x && y").unwrap();
     let exp = expression().parse(&tokens).unwrap();
     let allocator = BoxAllocator;
     println!("{}", pretty::Pretty::pretty(&exp, &allocator).1.pretty(10));
 }
 
-#[test]
-fn pretty_class() {
-    use crate::{lexer::tokens, parse };
-    let path = "./examples/intLinkedList.oox";
-    let file_content = std::fs::read_to_string(path).unwrap();
-    let tokens = tokens(&file_content).unwrap();
-    let class = parse(&tokens).unwrap();
-
-    let allocator = BoxAllocator;
-    println!(
-        "{}",
-        pretty::Pretty::pretty(&class, &allocator).1.pretty(50)
-    );
-}
 
 fn bin_op_to_str(bin_op: &BinOp) -> &'static str {
     match bin_op {

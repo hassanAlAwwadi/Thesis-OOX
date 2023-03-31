@@ -1,8 +1,8 @@
 // use std::intrinsics::unreachable;
 
 use crate::{
-    exec::this_str, lexer::tokens, parser::parse, positioned::SourcePos, syntax::*,
-    typeable::Typeable,
+    exec::this_str, positioned::SourcePos, syntax::*,
+    typeable::Typeable
 };
 
 const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
@@ -555,12 +555,10 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
 
 #[test]
 fn cfg_for_min() {
+    use crate::language;
     let file_content = include_str!("../examples/psv/min.oox");
 
-    let tokens = tokens(file_content).unwrap();
-    let as_ref = tokens.as_slice();
-
-    let c = parse(&tokens);
+    let c = language::parse_program(file_content, true);
     let c = c.unwrap();
 
     // //dbg!(&c);
@@ -589,12 +587,10 @@ fn cfg_for_min() {
 
 #[test]
 fn cfg_for_try_catch() {
+    use crate::language;
     let file_content = include_str!("../examples/simple_try_catch.oox");
 
-    let tokens = tokens(file_content).unwrap();
-    let as_ref = tokens.as_slice();
-
-    let c = parse(&tokens);
+    let c = language::parse_program(file_content, true);
     let c = c.unwrap();
 
     // dbg!(&c);

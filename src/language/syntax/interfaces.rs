@@ -1,13 +1,14 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{ rc::Rc};
 
-use itertools::Itertools;
+use derivative::Derivative;
 
 use super::{
-    classes::Class, AbstractMethod, Identifier, Method, NonVoidType, Parameter, Statement, Type,
+     AbstractMethod, Identifier, Method, 
 };
 use std::fmt::Debug;
 
-#[derive(Clone)]
+#[derive(Clone, Derivative)]
+#[derivative(PartialEq, Eq)]
 pub struct Interface {
     pub name: Identifier,
     pub members: Vec<InterfaceMember>,
@@ -15,7 +16,8 @@ pub struct Interface {
     pub extends: Vec<Identifier>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Derivative)]
+#[derivative(PartialEq, Eq)]
 pub enum InterfaceMember {
     DefaultMethod(Rc<Method>),
     AbstractMethod(Rc<AbstractMethod>),

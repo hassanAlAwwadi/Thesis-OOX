@@ -13,16 +13,20 @@ use crate::exec::this_str;
 use crate::positioned::{SourcePos, WithPosition};
 use crate::syntax::*;
 
-use crate::lexer::*;
 
 use self::interface::interface;
+use super::lexer::*;
 
 mod interface;
 
-pub fn parse<'a>(tokens: &[Token<'a>]) -> Result<CompilationUnit, pom::Error> {
+/// Main entrypoint for parsing a program, 
+pub fn parse<'a>(tokens: &[Token<'a>], with_exceptional_clauses: bool) -> Result<CompilationUnit, pom::Error> {
     (program() - end()).parse(tokens).map(|c| {
-        let c = insert_exceptional_clauses(c);
-        c
+        if with_exceptional_clauses {
+            insert_exceptional_clauses(c)
+        } else {
+            c
+        }
     })
 }
 
@@ -1433,7 +1437,7 @@ fn parsing_exceptions() {
     let tokens = tokens(&file_content).unwrap();
     let as_ref = tokens.as_slice();
     dbg!(as_ref);
-    let c = parse(&as_ref).unwrap();
+    let c = parse(&as_ref, true).unwrap();
     dbg!(&c);
 }
 
@@ -1457,6 +1461,6 @@ fn parsing_array1() {
     let tokens = tokens(&file_content).unwrap();
     let as_ref = tokens.as_slice();
     dbg!(as_ref);
-    let c = parse(&as_ref).unwrap();
+    let c = parse(&as_ref, true).unwrap();
     dbg!(&c);
 }

@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-mod lexer;
 mod stack;
 
 mod cfg;
@@ -38,6 +37,6 @@ use std::sync::Mutex;
 
 pub use z3_checker::playground;
 
-pub use exec::verify;
+pub use exec::{verify, Options};
 
 static FILE_NAMES: Mutex<String> = Mutex::new(String::new());
