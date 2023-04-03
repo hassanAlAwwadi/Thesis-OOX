@@ -1,24 +1,42 @@
-use std::{collections::{HashMap}, rc::{Rc, Weak}, cell::RefCell, ops::Deref};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    ops::Deref,
+    rc::{Rc, Weak},
+};
 
 use itertools::Itertools;
-use rand::{Rng, distributions::{uniform::UniformInt, WeightedIndex}, prelude::Distribution};
-use slog::{Logger, debug};
+use rand::{
+    distributions::{WeightedIndex},
+    prelude::Distribution,
+    Rng,
+};
+use slog::{debug, Logger};
 
 use crate::{
-    exec::{State, IdCounter, SymResult, heuristics::{finish_state_in_path, Cost}, find_entry_for_static_invocation},
+    cfg::CFGStatement,
+    exec::{
+        find_entry_for_static_invocation,
+        heuristics::{finish_state_in_path, Cost},
+        IdCounter, State, SymResult,
+    },
+    statistics::Statistics,
     symbol_table::SymbolTable,
-    syntax::{Declaration, Invocation, Method, Rhs, Statement}, statistics::Statistics, cfg::CFGStatement,
+    syntax::{Declaration, Invocation, Method, Rhs, Statement},
 };
 
 use crate::exec::heuristics::execute_instruction_for_all_statements;
 
-use super::{R, ProgramCounter, N};
+use super::{ProgramCounter, N, R};
 
 /// edge cost in dijkstra's algorithm
 
 /// Make a weighted stochastic choice, where the weight is calculated based on the distance to a newly uncovered branch.
-fn choice<'a>(mut tree: Rc<RefCell<N>>, md2u: HashMap<ProgramCounter, Cost>, 
-    rng: &'a mut impl Rng) -> Rc<RefCell<N>> {
+fn choice<'a>(
+    mut tree: Rc<RefCell<N>>,
+    md2u: &HashMap<ProgramCounter, Cost>,
+    rng: &'a mut impl Rng,
+) -> Rc<RefCell<N>> {
     let mut path = Vec::new();
     loop {
         let node = tree.clone();
@@ -31,10 +49,12 @@ fn choice<'a>(mut tree: Rc<RefCell<N>>, md2u: HashMap<ProgramCounter, Cost>,
                 path.push(*statement);
                 // I expect here that some elements are not in md2u, they should be assigned 0 in the weights.
                 // We should move weighted index to somewhere it is created only once.
-                let weights = children.iter().map(|child| 1.0 / md2u[&child.borrow().statement()] as f32);
+                let weights = children
+                    .iter()
+                    .map(|child| 1.0 / md2u[&child.borrow().statement()] as f32);
                 let wi = WeightedIndex::new(weights).unwrap();
                 let idx = wi.sample(rng);
-                
+
                 tree = children[idx].clone();
             }
             N::Leaf { statement, .. } => {
@@ -45,45 +65,64 @@ fn choice<'a>(mut tree: Rc<RefCell<N>>, md2u: HashMap<ProgramCounter, Cost>,
     }
 }
 
-
 /// Explores all nodes in the tree, if the path is finished, we don't insert it into the result.
 /// Returns for each program counter with a reachable path to an unexplored statement the distance to that statement.
-fn min_distance_to_uncovered<'a, FN>(start: u64, 
-    coverage: &HashMap<ProgramCounter, usize>, mut successors: FN) -> HashMap<ProgramCounter, Cost>
-    where
-    FN: FnMut(&ProgramCounter) -> Box<dyn Iterator<Item = (u64, u64)> + 'a>  {
+fn min_distance_to_uncovered<'a, FN>(
+    start: u64,
+    coverage: &HashMap<ProgramCounter, usize>,
+    mut successors: FN,
+) -> HashMap<ProgramCounter, Cost>
+where
+    FN: FnMut(&ProgramCounter) -> Box<dyn Iterator<Item = (u64, u64)> + 'a>,
+{
+    fn goal(pc: &ProgramCounter, coverage: &HashMap<ProgramCounter, usize>) -> bool {
+        coverage.contains_key(pc)
+    }
 
-    |n: ProgramCounter| {  coverage.contains(&n) };
 
     struct T<'a> {
         pc: u64,
         cost: u64,
-        children_left: Box<dyn Iterator<Item = (u64, u64)> + 'a> ,
+        children_left: Box<dyn Iterator<Item = (u64, u64)> + 'a>,
     }
     // we implicitly assume that start is not a goal,
 
-
     let mut pc_to_cost = HashMap::new();
-    
 
     let mut stack = Vec::new();
 
-    stack.push(T {pc:start, cost: u64::MAX, children_left: successors(&start)});
+    stack.push(T {
+        pc: start,
+        cost: u64::MAX,
+        children_left: successors(&start),
+    });
 
     // dfs
-    while let Some(T {pc, cost, mut children_left}) = stack.pop() {
-
+    while let Some(T {
+        pc,
+        cost,
+        mut children_left,
+    }) = stack.pop()
+    {
         // Check next successor
         if let Some((successor, _)) = children_left.next() {
             // We will come back later to check other children.
-            stack.push(T {pc, cost, children_left});
-        
-            if goal(&successor) {
-                // Insert the cost and we are done 
+            stack.push(T {
+                pc,
+                cost,
+                children_left,
+            });
+
+            if goal(&successor, coverage) {
+                // Insert the cost and we are done
                 pc_to_cost.insert(successor, 0);
             } else {
                 // We still have to check its children
-                stack.push(T {pc: successor, cost: u64::MAX, children_left: successors(&start)});
+                stack.push(T {
+                    pc: successor,
+                    cost: u64::MAX,
+                    children_left: successors(&start),
+                });
             }
         } else {
             let children = successors(&pc);
@@ -94,13 +133,11 @@ fn min_distance_to_uncovered<'a, FN>(start: u64,
             if let Some(cost) = cost {
                 pc_to_cost.insert(pc, *cost + 1);
             }
-
         }
     }
 
     pc_to_cost
 }
-
 
 // /// Computes the minimal distance from the given program counter to any uncovered (= not seen before) statement.
 // ///
@@ -116,7 +153,7 @@ fn min_distance_to_uncovered<'a, FN>(start: u64,
 //     let goal_fn = |pc: &ProgramCounter| coverage[pc] == false;
 
 //     let path = pathfinding::prelude::dijkstra(&pc, successors_fn, goal_fn);
-    
+
 //     path.map(|(path, _goal)| path.len() as u64)
 // }
 
@@ -176,8 +213,7 @@ fn successors<'a>(
             }
 
             // Otherwise take the flow
-            _ => Box::new(flow[pc].iter().copied()
-            .map(with_cost)),
+            _ => Box::new(flow[pc].iter().copied().map(with_cost)),
         }
     }
 }
@@ -209,8 +245,10 @@ pub(crate) fn sym_exec(
     loop {
         // pointer to the leaf with states chosen by the heuristic
 
-        let states_node = choice(tree.clone(), md2u, &mut rng);
+        let states_node = choice(tree.clone(), &md2u, &mut rng);
         let current_pc = states_node.borrow().statement();
+        // Update the coverage
+        *coverage.entry(current_pc).or_insert(0) += 1;
         let chosen_state = states_node.borrow_mut().into_states().unwrap();
 
         let mut states = chosen_state;
@@ -264,7 +302,6 @@ pub(crate) fn sym_exec(
                             debug!(root_logger, "all states explored");
                             return SymResult::Valid;
                         }
-                        
                     }
                     1 => {
                         let (pc, states) = new_states.into_iter().next().unwrap();
@@ -272,7 +309,7 @@ pub(crate) fn sym_exec(
 
                         // let mut tree = Rc::new(RefCell::new(N::Leaf(Weak::new(), states)));
                         // tree.borrow_mut().set_parent(Rc::<_>::downgrade(&tree));
-                        
+
                         states_node.borrow_mut().set_states(states);
 
                         // *states_node.borrow_mut() = N::Leaf { parent: Weak::new(), states };
@@ -289,7 +326,6 @@ pub(crate) fn sym_exec(
                             new_states.into_iter().collect_tuple().unwrap();
 
                         assert!(true_.len() > 0 && false_.len() > 0);
-
 
                         let parent = states_node.borrow().parent();
                         *states_node.borrow_mut() = N::Node {
@@ -329,16 +365,27 @@ pub(crate) fn sym_exec(
 #[test]
 fn test_partial_dijkstra() {
     use std::collections::HashSet;
-    let neighbours: HashMap<u64, Vec<u64>> = HashMap::from([(4, vec![3, 2]), (3, vec![]), (2, vec![1, 5]), (1, vec![6]), (5, vec![124124]), (6, vec![1234])]);
+    let neighbours: HashMap<u64, Vec<u64>> = HashMap::from([
+        (4, vec![3, 2]),
+        (3, vec![]),
+        (2, vec![1, 5]),
+        (1, vec![6]),
+        (5, vec![124124]),
+        (6, vec![1234]),
+    ]);
     let goal = HashSet::from([4, 5, 6]);
-
 
     /// Explores all nodes in the tree, if the path is finished, we don't insert it into the result.
     /// Returns for each program counter with a reachable path to an unexplored statement the distance to that statement.
-    fn doesit<'a, FS, FN>(start: u64, mut goal: FS, mut successors: FN) -> HashMap<ProgramCounter, Cost>
-        where
+    fn doesit<'a, FS, FN>(
+        start: u64,
+        mut goal: FS,
+        mut successors: FN,
+    ) -> HashMap<ProgramCounter, Cost>
+    where
         FS: FnMut(&ProgramCounter) -> bool,
-        FN: FnMut(&ProgramCounter) -> &'a Vec<u64> {
+        FN: FnMut(&ProgramCounter) -> &'a Vec<u64>,
+    {
         struct T {
             pc: u64,
             cost: u64,
@@ -346,44 +393,62 @@ fn test_partial_dijkstra() {
         }
         // we implicitly assume that start is not a goal,
 
-
         let mut pc_to_cost = HashMap::new();
 
         let mut stack = Vec::new();
 
-        stack.push(T {pc:start, cost: u64::MAX, children_checked: 0});
+        stack.push(T {
+            pc: start,
+            cost: u64::MAX,
+            children_checked: 0,
+        });
 
         // dfs
-        while let Some(T {pc, cost, children_checked}) = stack.pop() {
+        while let Some(T {
+            pc,
+            cost,
+            children_checked,
+        }) = stack.pop()
+        {
             let successors = successors(&pc);
 
             if children_checked >= successors.len().try_into().unwrap() {
                 // This node has checked all its children
                 // Find the minimal cost of its children, if any
-                let cost = successors.iter().filter_map(|succ| pc_to_cost.get(succ)).min();
+                let cost = successors
+                    .iter()
+                    .filter_map(|succ| pc_to_cost.get(succ))
+                    .min();
                 if let Some(cost) = cost {
                     pc_to_cost.insert(pc, *cost + 1);
                 }
             } else {
                 // We will come back later to check other children.
-                stack.push(T {pc, cost, children_checked: children_checked + 1});
+                stack.push(T {
+                    pc,
+                    cost,
+                    children_checked: children_checked + 1,
+                });
 
                 // Check next successor
                 let successor = successors[children_checked as usize];
-            
+
                 if goal(&successor) {
-                    // Insert the cost and we are done 
+                    // Insert the cost and we are done
                     pc_to_cost.insert(successor, 0);
                 } else {
                     // We still have to check its children
-                    stack.push(T {pc: successor, cost: u64::MAX, children_checked: 0});
+                    stack.push(T {
+                        pc: successor,
+                        cost: u64::MAX,
+                        children_checked: 0,
+                    });
                 }
             }
         }
 
         pc_to_cost
     }
-
 
     let result = doesit(4, |pc| goal.contains(pc), |pc| &neighbours[pc]);
     dbg!(result);

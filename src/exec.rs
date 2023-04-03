@@ -1,21 +1,16 @@
 use core::panic;
 use std::{
-    array,
     cell::RefCell,
     collections::{HashMap, HashSet},
     ops::{AddAssign, Deref},
     rc::Rc,
-    string,
-    sync::Mutex,
     time::Instant,
 };
 
 use clap::ValueEnum;
 use itertools::{Either, Itertools};
 use num::One;
-use ordered_float::NotNan;
-use slog::{debug, error, info, log, o, Drain, Level, Logger, Value};
-use slog::{Key, Record, Result, Serializer};
+use slog::{debug, error, info, o, Logger};
 use sloggers::{
     terminal::{Destination, TerminalLoggerBuilder},
     types::Severity,
@@ -35,8 +30,7 @@ use crate::{
     dsl::{equal, ite, negate, or, to_int_expr},
     eval::{self, evaluate, evaluateAsInt},
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
-    lexer::tokens,
-    parser::parse,
+    parser::{ parse},
     positioned::{SourcePos, WithPosition},
     stack::{lookup_in_stack, write_to_stack, StackFrame},
     statistics::Statistics,
@@ -47,7 +41,7 @@ use crate::{
     },
     typeable::{runtime_to_nonvoidtype, Typeable},
     typing::type_compilation_unit,
-    utils, z3_checker, FILE_NAMES,
+    utils, z3_checker, FILE_NAMES, parse_program, language,
 };
 
 use crate::exec::state_split::exec_array_initialisation;
@@ -1654,16 +1648,33 @@ pub enum Heuristic {
     RandomPath,
 }
 
+#[derive(Copy, Clone)]
+pub struct Options {
+    pub k: u64,
+    pub quiet: bool,
+    pub with_exceptional_clauses: bool,
+    pub heuristic: Heuristic,
+}
+
+impl Options {
+    fn default_with_k(k: u64) -> Options {
+        Options {
+            k,
+            quiet: false,
+            with_exceptional_clauses: true,
+            heuristic: Heuristic::DepthFirstSearch,
+        }
+    }
+}
+
 pub fn verify(
     path: &str,
     class_name: &str,
     method_name: &str,
-    k: u64,
-    quiet: bool,
-    heuristic: Heuristic,
+    options: Options,
 ) -> std::result::Result<SymResult, Error> {
     let start = Instant::now();
-    if !quiet {
+    if !options.quiet {
         println!("Starting up");
     }
 
@@ -1672,15 +1683,16 @@ pub fn verify(
     // Set global file names
     *FILE_NAMES.lock().unwrap() = path.to_string();
 
-    let tokens = tokens(&file_content)
-        .map_err(|(line, col)| format!("Lexer error at {}:{}:{}", path.to_string(), line, col))?;
-    let as_ref = tokens.as_slice();
-    // dbg!(as_ref);
-    let c = parse(&tokens);
-    let c = c.unwrap();
 
+    let c = parse_program(&file_content, options.with_exceptional_clauses)
+        .map_err(|error| match error {
+            language::Error::ParseError(err) => err.to_string(),
+            language::Error::LexerError((line, col)) => format!("Lexer error at {}:{}:{}", path.to_string(), line, col),
+        })?;
+    
+    
     // dbg!(&c);
-    if !quiet {
+    if !options.quiet {
         println!("Parsing completed");
     }
 
@@ -1694,12 +1706,12 @@ pub fn verify(
         })?;
 
     let symbol_table = SymbolTable::from_ast(&c)?;
-    if !quiet {
+    if !options.quiet {
         println!("Symbol table completed");
     }
 
     let c = type_compilation_unit(c, &symbol_table)?;
-    if !quiet {
+    if !options.quiet {
         println!("Typing completed");
     }
 
@@ -1775,7 +1787,7 @@ pub fn verify(
     let mut statistics = Statistics::default();
 
     // Choose between heuristic function (with matching parameters)
-    let sym_exec = match heuristic {
+    let sym_exec = match options.heuristic {
         Heuristic::DepthFirstSearch => heuristics::depth_first_search::sym_exec,
         Heuristic::RandomPath => heuristics::random_path::sym_exec,
     };
@@ -1783,7 +1795,7 @@ pub fn verify(
         state,
         &program,
         &flows,
-        k,
+        options.k,
         &symbol_table,
         root_logger,
         path_counter.clone(),
@@ -1800,9 +1812,9 @@ pub fn verify(
         SymResult::Invalid(SourcePos::UnknownPosition) => "INVALID at unknown position".to_string(),
     };
 
-    if quiet && sym_result != SymResult::Valid {
+    if options.quiet && sym_result != SymResult::Valid {
         println!("{}", result_text);
-    } else if !quiet {
+    } else if !options.quiet {
         println!("Statistics");
         println!("  Final result:     {}", result_text);
         println!("  time:             {:?}s", duration.as_secs_f64());
@@ -1829,8 +1841,9 @@ pub fn verify(
 #[test]
 fn sym_exec_of_absolute_simplest() {
     let path = "./examples/absolute_simplest.oox";
+    let options = Options::default_with_k(20);
     assert_eq!(
-        verify(path, "Foo", "f", 20, false, Heuristic::DepthFirstSearch).unwrap(),
+        verify(path, "Foo", "f", options).unwrap(),
         SymResult::Valid
     );
 }
@@ -1839,7 +1852,7 @@ fn sym_exec_of_absolute_simplest() {
 fn sym_exec_min() {
     let path = "./examples/psv/min.oox";
     assert_eq!(
-        verify(path, "Foo", "min", 20, false, Heuristic::DepthFirstSearch).unwrap(),
+        verify(path, "Foo", "min", Options::default_with_k(20)).unwrap(),
         SymResult::Valid
     );
 }
@@ -1848,7 +1861,7 @@ fn sym_exec_min() {
 fn sym_exec_method() {
     let path = "./examples/psv/method.oox";
     assert_eq!(
-        verify(path, "Main", "min", 20, false, Heuristic::DepthFirstSearch).unwrap(),
+        verify(path, "Main", "min", Options::default_with_k(20)).unwrap(),
         SymResult::Valid
     );
 }
@@ -1863,15 +1876,7 @@ fn sym_exec_method() {
 fn sym_test_failure() {
     let path = "./examples/psv/test.oox";
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "main",
-            30,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "main", Options::default_with_k(30)).unwrap(),
         SymResult::Invalid(SourcePos::SourcePos { line: 10, col: 24 })
     );
 }
@@ -1881,15 +1886,7 @@ fn sym_exec_div_by_n() {
     let path = "./examples/psv/divByN.oox";
     // so this one is invalid at k = 100, in OOX it's invalid at k=105, due to exceptions (more if statements are added)
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "divByN_invalid",
-            100,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "divByN_invalid", Options::default_with_k(100)).unwrap(),
         SymResult::Invalid(SourcePos::new(73, 16))
     );
 }
@@ -1898,7 +1895,7 @@ fn sym_exec_div_by_n() {
 fn sym_exec_nonstatic_function() {
     let path = "./examples/nonstatic_function.oox";
     assert_eq!(
-        verify(&path, "Main", "f", 20, false, Heuristic::DepthFirstSearch).unwrap(),
+        verify(&path, "Main", "f", Options::default_with_k(20)).unwrap(),
         SymResult::Valid
     );
 }
@@ -1907,15 +1904,7 @@ fn sym_exec_nonstatic_function() {
 fn sym_exec_this_method() {
     let path = "./examples/this_method.oox";
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "main",
-            30,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "main", Options::default_with_k(30)).unwrap(),
         SymResult::Valid
     );
 }
@@ -1924,15 +1913,7 @@ fn sym_exec_this_method() {
 fn sym_exec_linked_list1() {
     let path = "./examples/intLinkedList.oox";
     assert_eq!(
-        verify(
-            &path,
-            "Node",
-            "test2",
-            90,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Node", "test2", Options::default_with_k(90)).unwrap(),
         SymResult::Valid
     );
 }
@@ -1941,15 +1922,7 @@ fn sym_exec_linked_list1() {
 fn sym_exec_linked_list1_invalid() {
     let path = "./examples/intLinkedList.oox";
     assert_eq!(
-        verify(
-            &path,
-            "Node",
-            "test2_invalid",
-            90,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Node", "test2_invalid", Options::default_with_k(90)).unwrap(),
         SymResult::Invalid(SourcePos::new(109, 16))
     );
 }
@@ -1959,15 +1932,7 @@ fn sym_exec_linked_list3_invalid() {
     let path = "./examples/intLinkedList.oox";
     // at k=80 it fails, after ~170 sec in hs oox, rs oox does this in ~90 sec
     assert_eq!(
-        verify(
-            &path,
-            "Node",
-            "test3_invalid1",
-            110,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Node", "test3_invalid1", Options::default_with_k(110)).unwrap(),
         SymResult::Invalid(SourcePos::new(141, 18))
     );
 }
@@ -1976,15 +1941,7 @@ fn sym_exec_linked_list3_invalid() {
 fn sym_exec_linked_list4() {
     let path = "./examples/intLinkedList.oox";
     assert_eq!(
-        verify(
-            &path,
-            "Node",
-            "test4",
-            90,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Node", "test4", Options::default_with_k(90)).unwrap(),
         SymResult::Valid
     );
 }
@@ -1993,15 +1950,7 @@ fn sym_exec_linked_list4() {
 fn sym_exec_linked_list4_invalid() {
     let path = "./examples/intLinkedList.oox";
     assert_eq!(
-        verify(
-            &path,
-            "Node",
-            "test4_invalid",
-            90,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Node", "test4_invalid", Options::default_with_k(90)).unwrap(),
         SymResult::Invalid(SourcePos::new(11, 21))
     );
 }
@@ -2010,15 +1959,7 @@ fn sym_exec_linked_list4_invalid() {
 fn sym_exec_linked_list4_if_problem() {
     let path = "./examples/intLinkedList.oox";
     assert_eq!(
-        verify(
-            &path,
-            "Node",
-            "test4_if_problem",
-            90,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Node", "test4_if_problem", Options::default_with_k(90)).unwrap(),
         SymResult::Valid
     );
 }
@@ -2028,31 +1969,15 @@ fn sym_exec_exceptions1() {
     let path = "./examples/exceptions.oox";
 
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test1",
-            20,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test1", Options::default_with_k(20)).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test1_invalid",
-            20,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test1_invalid", Options::default_with_k(20)).unwrap(),
         SymResult::Invalid(SourcePos::new(15, 21))
     );
     assert_eq!(
-        verify(&path, "Main", "div", 30, false, Heuristic::DepthFirstSearch).unwrap(),
+        verify(&path, "Main", "div", Options::default_with_k(30)).unwrap(),
         SymResult::Valid
     );
 }
@@ -2062,19 +1987,11 @@ fn sym_exec_exceptions_m0() {
     let path = "./examples/exceptions.oox";
 
     assert_eq!(
-        verify(&path, "Main", "m0", 20, false, Heuristic::DepthFirstSearch).unwrap(),
+        verify(&path, "Main", "m0", Options::default_with_k(20)).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "m0_invalid",
-            20,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "m0_invalid", Options::default_with_k(20)).unwrap(),
         SymResult::Invalid(SourcePos::new(49, 17))
     );
 }
@@ -2084,19 +2001,11 @@ fn sym_exec_exceptions_m1() {
     let path = "./examples/exceptions.oox";
 
     assert_eq!(
-        verify(&path, "Main", "m1", 20, false, Heuristic::DepthFirstSearch).unwrap(),
+        verify(&path, "Main", "m1", Options::default_with_k(20)).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "m1_invalid",
-            20,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "m1_invalid", Options::default_with_k(20)).unwrap(),
         SymResult::Invalid(SourcePos::new(68, 17))
     );
 }
@@ -2106,7 +2015,7 @@ fn sym_exec_exceptions_m2() {
     let path = "./examples/exceptions.oox";
 
     assert_eq!(
-        verify(&path, "Main", "m2", 20, false, Heuristic::DepthFirstSearch).unwrap(),
+        verify(&path, "Main", "m2", Options::default_with_k(20)).unwrap(),
         SymResult::Valid
     );
 }
@@ -2116,31 +2025,15 @@ fn sym_exec_exceptions_m3() {
     let path = "./examples/exceptions.oox";
 
     assert_eq!(
-        verify(&path, "Main", "m3", 30, false, Heuristic::DepthFirstSearch).unwrap(),
+        verify(&path, "Main", "m3", Options::default_with_k(30)).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "m3_invalid1",
-            30,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "m3_invalid1", Options::default_with_k(30)).unwrap(),
         SymResult::Invalid(SourcePos::new(94, 17))
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "m3_invalid2",
-            30,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "m3_invalid2", Options::default_with_k(30)).unwrap(),
         SymResult::Invalid(SourcePos::new(102, 21))
     );
 }
@@ -2150,27 +2043,11 @@ fn sym_exec_exceptions_null() {
     let path = "./examples/exceptions.oox";
 
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "nullExc1",
-            30,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "nullExc1", Options::default_with_k(30)).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "nullExc2",
-            30,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "nullExc2", Options::default_with_k(30)).unwrap(),
         SymResult::Valid
     );
     // assert_eq!(verify_file(&file_content, "m3_invalid1", 30), SymResult::Invalid);
@@ -2182,132 +2059,52 @@ fn sym_exec_array1() {
     let path = "./examples/array/array1.oox";
 
     assert_eq!(
-        verify(&path, "Main", "foo", 50, false, Heuristic::DepthFirstSearch).unwrap(),
+        verify(&path, "Main", "foo", Options::default_with_k(50)).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "foo_invalid",
-            50,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "foo_invalid", Options::default_with_k(50)).unwrap(),
         SymResult::Invalid(SourcePos::new(33, 16))
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "sort",
-            300,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "sort", Options::default_with_k(300)).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "sort_invalid1",
-            50,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "sort_invalid1", Options::default_with_k(50)).unwrap(),
         SymResult::Invalid(SourcePos::new(62, 17))
     );
     assert_eq!(
-        verify(&path, "Main", "max", 50, false, Heuristic::DepthFirstSearch).unwrap(),
+        verify(&path, "Main", "max", Options::default_with_k(50)).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "max_invalid1",
-            50,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "max_invalid1", Options::default_with_k(50)).unwrap(),
         SymResult::Invalid(SourcePos::new(104, 21))
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "max_invalid2",
-            50,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "max_invalid2", Options::default_with_k(50)).unwrap(),
         SymResult::Invalid(SourcePos::new(120, 17))
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "exists_valid",
-            50,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "exists_valid", Options::default_with_k(50)).unwrap(),
         SymResult::Valid
     );
     // assert_eq!(verify_file(&file_content, "exists_invalid1", 50), SymResult::Invalid);
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "exists_invalid2",
-            50,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "exists_invalid2", Options::default_with_k(50)).unwrap(),
         SymResult::Invalid(SourcePos::new(160, 17))
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "array_creation1",
-            50,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "array_creation1", Options::default_with_k(50)).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "array_creation2",
-            50,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "array_creation2", Options::default_with_k(50)).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "array_creation_invalid",
-            50,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "array_creation_invalid", Options::default_with_k(50)).unwrap(),
         SymResult::Invalid(SourcePos::new(193, 17))
     );
 }
@@ -2317,51 +2114,19 @@ fn sym_exec_array2() {
     let path = "./examples/array/array2.oox";
 
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "foo1",
-            50,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "foo1", Options::default_with_k(50)).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "foo1_invalid",
-            50,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "foo1_invalid", Options::default_with_k(50)).unwrap(),
         SymResult::Invalid(SourcePos::new(37, 15))
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "foo2_invalid",
-            50,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "foo2_invalid", Options::default_with_k(50)).unwrap(),
         SymResult::Invalid(SourcePos::new(51, 18))
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "sort",
-            100,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "sort", Options::default_with_k(100)).unwrap(),
         SymResult::Valid
     );
 }
@@ -2370,130 +2135,51 @@ fn sym_exec_array2() {
 fn sym_exec_inheritance() {
     let path = "./examples/inheritance/inheritance.oox";
     let k = 150;
+    let options = Options::default_with_k(k);
 
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test1",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test1", options).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test1_invalid",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test1_invalid", options).unwrap(),
         SymResult::Invalid(SourcePos::new(25, 16))
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test2a",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test2a", options).unwrap(),
         SymResult::Valid
     );
 
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test2b",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test2b", options).unwrap(),
         SymResult::Valid
     );
 
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test2b_invalid",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test2b_invalid", options).unwrap(),
         SymResult::Invalid(SourcePos::new(68, 16))
     );
 
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test3",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test3", options).unwrap(),
         SymResult::Valid
     );
 
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test4_valid",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test4_valid", options).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test4_invalid",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test4_invalid", options).unwrap(),
         SymResult::Invalid(SourcePos::new(25, 16))
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test5",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test5", options).unwrap(),
         SymResult::Valid
     );
 
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test6",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test6", options).unwrap(),
         SymResult::Valid
     );
 }
@@ -2502,28 +2188,13 @@ fn sym_exec_inheritance() {
 fn sym_exec_inheritance_specifications() {
     let path = "./examples/inheritance/specifications.oox";
     let k = 150;
+    let options = Options::default_with_k(k);
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test_valid",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test_valid", options).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test_invalid",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test_invalid", options).unwrap(),
         SymResult::Invalid(SourcePos::new(3, 18))
     );
 }
@@ -2532,35 +2203,20 @@ fn sym_exec_inheritance_specifications() {
 fn sym_exec_interface() {
     let path = "./examples/inheritance/interface.oox";
     let k = 150;
+    let options = Options::default_with_k(k);
 
     println!("hello");
 
     assert_eq!(
-        verify(&path, "Main", "main", k, false, Heuristic::DepthFirstSearch).unwrap(),
+        verify(&path, "Main", "main", options).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test1_valid",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test1_valid", options).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Main",
-            "test1_invalid",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Main", "test1_invalid", options).unwrap(),
         SymResult::Invalid(SourcePos::new(35, 12))
     );
 }
@@ -2569,53 +2225,22 @@ fn sym_exec_interface() {
 fn sym_exec_interface2() {
     let path = "./examples/inheritance/interface2.oox";
     let k = 150;
+    let options = Options::default_with_k(k);
 
     assert_eq!(
-        verify(
-            &path,
-            "Foo",
-            "test_valid",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Foo", "test_valid", options).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Foo1",
-            "test_invalid",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Foo1", "test_invalid", options).unwrap(),
         SymResult::Invalid(SourcePos::new(3, 16))
     );
     assert_eq!(
-        verify(
-            &path,
-            "Foo2",
-            "test_valid",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Foo2", "test_valid", options).unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(
-            &path,
-            "Foo3",
-            "test_invalid",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify(&path, "Foo3", "test_invalid", options).unwrap(),
         SymResult::Invalid(SourcePos::new(37, 16))
     );
     //assert_eq!(verify(&file_content, "Foo4", "test_valid", k), SymResult::Valid);
@@ -2624,14 +2249,12 @@ fn sym_exec_interface2() {
 #[test]
 fn sym_exec_polymorphic() {
     let k = 150;
+    let options = Options::default_with_k(k);
     assert_eq!(
         verify(
             "./examples/inheritance/sym_exec_polymorphic.oox",
             "Main",
-            "main",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
+            "main",options
         )
         .unwrap(),
         SymResult::Valid
@@ -2641,14 +2264,12 @@ fn sym_exec_polymorphic() {
 #[test]
 fn benchmark_col_25() {
     let k = 15000;
+    let options = Options::default_with_k(k);
     assert_eq!(
         verify(
             "./benchmark_programs/defects4j/collections_25.oox",
             "Test",
-            "test",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
+            "test",options
         )
         .unwrap(),
         SymResult::Invalid(SourcePos::new(352, 21))
@@ -2658,14 +2279,12 @@ fn benchmark_col_25() {
 #[test]
 fn benchmark_col_25_symbolic() {
     let k = 15000;
+    let options = Options::default_with_k(k);
     assert_eq!(
         verify(
             "./benchmark_programs/defects4j/collections_25.oox",
             "Test",
-            "test_symbolic",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
+            "test_symbolic",options
         )
         .unwrap(),
         SymResult::Invalid(SourcePos::new(395, 21))
@@ -2675,14 +2294,12 @@ fn benchmark_col_25_symbolic() {
 #[test]
 fn benchmark_col_25_test3() {
     let k = 15000;
+    let options = Options::default_with_k(k);
     assert_eq!(
         verify(
             "./benchmark_programs/defects4j/collections_25.oox",
             "Test",
-            "test3",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
+            "test3",options
         )
         .unwrap(),
         SymResult::Valid
@@ -2692,14 +2309,12 @@ fn benchmark_col_25_test3() {
 #[test]
 fn any_linked_list() {
     let k = 40;
+    let options = Options::default_with_k(k);
     assert_eq!(
         verify(
             "./benchmark_programs/experiment1/1Node.oox",
             "Main",
-            "test2",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
+            "test2",options
         )
         .unwrap(),
         SymResult::Valid
@@ -2709,16 +2324,9 @@ fn any_linked_list() {
 #[test]
 fn supertest() {
     let k = 50;
+    let options = Options::default_with_k(k);
     assert_eq!(
-        verify(
-            "./examples/supertest.oox",
-            "Main",
-            "test",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify("./examples/supertest.oox", "Main", "test", options).unwrap(),
         SymResult::Valid
     )
 }
@@ -2726,14 +2334,12 @@ fn supertest() {
 #[test]
 fn multiple_constructors() {
     let k = 50;
+    let options = Options::default_with_k(k);
     assert_eq!(
         verify(
             "./examples/multiple_constructors.oox",
             "Foo",
-            "test",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
+            "test",options
         )
         .unwrap(),
         SymResult::Valid
@@ -2743,16 +2349,9 @@ fn multiple_constructors() {
 #[test]
 fn arrays3() {
     let k = 50;
+    let options = Options::default_with_k(k);
     assert_eq!(
-        verify(
-            "./examples/array/array3.oox",
-            "Main",
-            "test",
-            k,
-            false,
-            Heuristic::DepthFirstSearch
-        )
-        .unwrap(),
+        verify("./examples/array/array3.oox", "Main", "test", options).unwrap(),
         SymResult::Valid
     )
 }

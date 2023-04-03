@@ -1,9 +1,6 @@
 #![allow(dead_code)]
 
-mod lexer;
-mod parser;
 mod stack;
-pub mod syntax;
 
 mod cfg;
 mod exec;
@@ -17,6 +14,7 @@ mod z3_checker;
 mod resolver;
 
 mod pretty_print;
+mod language;
 
 mod utils;
 
@@ -30,6 +28,8 @@ mod typing;
 
 mod statistics;
 
+pub use language::*;
+
 #[macro_use]
 extern crate pest_derive;
 
@@ -37,7 +37,6 @@ use std::sync::Mutex;
 
 pub use z3_checker::playground;
 
-pub use exec::verify;
-pub use exec::Heuristic;
+pub use exec::{verify, Options, Heuristic};
 
 static FILE_NAMES: Mutex<String> = Mutex::new(String::new());

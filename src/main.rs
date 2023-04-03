@@ -1,6 +1,6 @@
 use clap::Parser;
 use itertools::Itertools;
-use lib::verify;
+use lib::{verify, Options};
 
 /// OOX symbolic verification
 #[derive(Parser)]
@@ -26,13 +26,13 @@ fn main() -> Result<(), String> {
     let args = Args::parse();
 
     if let Some((class_name, method_name)) = args.function.split(".").collect_tuple() {
+        let options = Options {k: args.k, quiet: args.quiet, with_exceptional_clauses: true, heuristic: 
+            args.heuristic};
         verify(
             &args.source_path,
             class_name,
             method_name,
-            args.k,
-            args.quiet,
-            args.heuristic,
+            options
         )?;
     } else {
         println!("Entry point must be of the form 'class.method' and be unambiguous");
