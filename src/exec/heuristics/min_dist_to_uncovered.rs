@@ -5,7 +5,7 @@ use rand::{Rng, distributions::{uniform::UniformInt, WeightedIndex}, prelude::Di
 use slog::{Logger, debug};
 
 use crate::{
-    exec::{State, IdCounter, SymResult, heuristics::{finish_state_in_path, Cost}},
+    exec::{State, IdCounter, SymResult, heuristics::{finish_state_in_path, Cost}, find_entry_for_static_invocation},
     symbol_table::SymbolTable,
     syntax::{Declaration, Invocation, Method, Rhs, Statement}, statistics::Statistics, cfg::CFGStatement,
 };
@@ -48,10 +48,12 @@ fn choice<'a>(mut tree: Rc<RefCell<N>>, md2u: HashMap<ProgramCounter, Cost>,
 
 /// Explores all nodes in the tree, if the path is finished, we don't insert it into the result.
 /// Returns for each program counter with a reachable path to an unexplored statement the distance to that statement.
-fn min_distance_to_uncovered<'a, FS, FN>(start: u64, mut goal: FS, mut successors: FN) -> HashMap<ProgramCounter, Cost>
+fn min_distance_to_uncovered<'a, FN>(start: u64, 
+    coverage: &HashMap<ProgramCounter, usize>, mut successors: FN) -> HashMap<ProgramCounter, Cost>
     where
-    FS: FnMut(&ProgramCounter) -> bool,
     FN: FnMut(&ProgramCounter) -> Box<dyn Iterator<Item = (u64, u64)> + 'a>  {
+
+    |n: ProgramCounter| {  coverage.contains(&n) };
 
     struct T<'a> {
         pc: u64,
@@ -118,66 +120,67 @@ fn min_distance_to_uncovered<'a, FS, FN>(start: u64, mut goal: FS, mut successor
 //     path.map(|(path, _goal)| path.len() as u64)
 // }
 
-// fn with_cost(pc: ProgramCounter) -> (ProgramCounter, Cost) {
-//     (pc, 1)
-// }
+fn with_cost(pc: ProgramCounter) -> (ProgramCounter, Cost) {
+    (pc, 1)
+}
 
-// /// Returns a function that is used by the pathfinding algorithm to find successors for each node.
-// /// What the returned function does is given a node, return all the neighbouring nodes with their cost.
-// fn successors<'a>(
-//     program: &'a HashMap<ProgramCounter, CFGStatement>,
-//     flow: &'a HashMap<ProgramCounter, Vec<ProgramCounter>>,
-//     st: &'a SymbolTable,
-// ) -> impl Fn(&u64) -> Box<dyn Iterator<Item = (u64, u64)> + 'a> {
-//     move |pc: &u64| {
-//         let statement = &program[pc];
-//         match statement {
-//             CFGStatement::Statement(Statement::Call { invocation, .. })
-//             | CFGStatement::Statement(Statement::Assign {
-//                 rhs: Rhs::RhsCall { invocation, .. },
-//                 ..
-//             }) => {
-//                 let resolved_to_pc = |(decl, method): &(Declaration, Rc<Method>)| {
-//                     find_entry_for_static_invocation(
-//                         &decl.name(),
-//                         &method.name,
-//                         invocation.argument_types(),
-//                         program,
-//                         st,
-//                     )
-//                 };
-//                 match invocation {
-//                     Invocation::InvokeMethod { resolved, .. } => {
-//                         // A regular method can resolve to multiple different methods due to dynamic dispatch, depending on the runtime type of the object.
-//                         // We make here the assumption that any object can be represented and thus consider each resolved method.
+/// Returns a function that is used by the pathfinding algorithm to find successors for each node.
+/// What the returned function does is given a node, return all the neighbouring nodes with their cost.
+fn successors<'a>(
+    program: &'a HashMap<ProgramCounter, CFGStatement>,
+    flow: &'a HashMap<ProgramCounter, Vec<ProgramCounter>>,
+    st: &'a SymbolTable,
+) -> impl Fn(&u64) -> Box<dyn Iterator<Item = (ProgramCounter, Cost)> + 'a> {
+    move |pc: &u64| {
+        let statement = &program[pc];
+        match statement {
+            CFGStatement::Statement(Statement::Call { invocation, .. })
+            | CFGStatement::Statement(Statement::Assign {
+                rhs: Rhs::RhsCall { invocation, .. },
+                ..
+            }) => {
+                let resolved_to_pc = |(decl, method): &(Declaration, Rc<Method>)| {
+                    find_entry_for_static_invocation(
+                        &decl.name(),
+                        &method.name,
+                        invocation.argument_types(),
+                        program,
+                        st,
+                    )
+                };
+                match invocation {
+                    Invocation::InvokeMethod { resolved, .. } => {
+                        // A regular method can resolve to multiple different methods due to dynamic dispatch, depending on the runtime type of the object.
+                        // We make here the assumption that any object can be represented and thus consider each resolved method.
 
-//                         // We also need to lookup the program counter for each method. (CANT WE DO THIS BEFOREHAND?)
-//                         Box::new(
-//                             resolved
-//                                 .iter()
-//                                 .flat_map(HashMap::iter)
-//                                 .map(|(_, resolved)| resolved)
-//                                 .map(resolved_to_pc)
-//                                 .map(with_cost),
-//                         )
-//                     }
-//                     Invocation::InvokeSuperMethod { resolved, .. }
-//                     | Invocation::InvokeConstructor { resolved, .. }
-//                     | Invocation::InvokeSuperConstructor { resolved, .. } => Box::new(
-//                         resolved
-//                             .iter()
-//                             .map(AsRef::as_ref)
-//                             .map(resolved_to_pc)
-//                             .map(with_cost),
-//                     ),
-//                 }
-//             }
+                        // We also need to lookup the program counter for each method. (CANT WE DO THIS BEFOREHAND?)
+                        Box::new(
+                            resolved
+                                .iter()
+                                .flat_map(HashMap::iter)
+                                .map(|(_, resolved)| resolved)
+                                .map(resolved_to_pc)
+                                .map(with_cost),
+                        )
+                    }
+                    Invocation::InvokeSuperMethod { resolved, .. }
+                    | Invocation::InvokeConstructor { resolved, .. }
+                    | Invocation::InvokeSuperConstructor { resolved, .. } => Box::new(
+                        resolved
+                            .iter()
+                            .map(AsRef::as_ref)
+                            .map(resolved_to_pc)
+                            .map(with_cost),
+                    ),
+                }
+            }
 
-//             // Otherwise take the flow
-//             _ => Box::new(flow[pc].iter().copied().map(with_cost)),
-//         }
-//     }
-// }
+            // Otherwise take the flow
+            _ => Box::new(flow[pc].iter().copied()
+            .map(with_cost)),
+        }
+    }
+}
 
 /// The main function for the symbolic execution, any path splitting due to the control flow graph or array initialization happens here.
 /// Depth first search, without using any other heuristic.
@@ -190,9 +193,11 @@ pub(crate) fn sym_exec(
     root_logger: Logger,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &mut Statistics,
+    flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
 ) -> SymResult {
     let mut rng = rand::thread_rng();
-    let mut md2u = HashMap::new();
+    let mut coverage = HashMap::new();
+    let mut md2u = min_distance_to_uncovered(state.pc, &coverage, successors(program, flow, st));
 
     // let mut paths = PathTree {root: state.pc, nodes: HashMap::from([(state.pc, TreeNode::Leaf(vec![state]))]) };
     let mut tree = Rc::new(RefCell::new(N::Leaf {
@@ -247,7 +252,7 @@ pub(crate) fn sym_exec(
                         // } else {
                         //     dbg!("no parent");
                         // }
-                        let is_finished = finish_state_in_path(states_node.clone(), path_pcs);
+                        let is_finished = finish_state_in_path(states_node.clone(), Vec::new());
                         if is_finished {
                             // *tree.borrow_mut() = N::Leaf {
                             //     parent: Weak::new(),
