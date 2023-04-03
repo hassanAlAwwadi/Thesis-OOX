@@ -8,10 +8,7 @@ use super::{State, SymResult, IdCounter};
 
 pub mod depth_first_search;
 pub mod random_path;
-
-
-
-mod min_dist_to_uncovered;
+pub mod min_dist_to_uncovered;
 
 
 type Cost = u64;
@@ -60,8 +57,9 @@ impl N {
     }
 
     fn set_states(&mut self, mut new_states: Vec<State>) {
-        if let N::Leaf { states, .. } = self {
+        if let N::Leaf { states, statement, .. } = self {
             // Set the states
+            *statement = new_states[0].pc;
             *states = new_states;
         } else {
             panic!()
@@ -240,9 +238,9 @@ fn finish_state_in_path(mut leaf: Rc<RefCell<N>>, path: Vec<ProgramCounter>,) ->
         
         match parent.borrow_mut().deref_mut() {
             N::Node { children, .. } => {
-                dbg!("here");
-                children.retain(|child| child.borrow().statement() != leaf.borrow().statement());
-                dbg!("& here");
+                
+                children.retain(|child| !Rc::ptr_eq(child, &leaf));
+                
                 if children.len() == 0 {
                     leaf = parent.clone();
                 } else {

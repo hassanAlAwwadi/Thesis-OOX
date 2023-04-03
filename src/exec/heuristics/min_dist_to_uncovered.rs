@@ -29,7 +29,6 @@ use crate::exec::heuristics::execute_instruction_for_all_statements;
 
 use super::{ProgramCounter, N, R};
 
-/// edge cost in dijkstra's algorithm
 
 /// Make a weighted stochastic choice, where the weight is calculated based on the distance to a newly uncovered branch.
 fn choice<'a>(
@@ -48,10 +47,11 @@ fn choice<'a>(
             } => {
                 path.push(*statement);
                 // I expect here that some elements are not in md2u, they should be assigned 0 in the weights.
+                // When are they not in md2u? if they are finished paths?
                 // We should move weighted index to somewhere it is created only once.
                 let weights = children
                     .iter()
-                    .map(|child| 1.0 / md2u[&child.borrow().statement()] as f32);
+                    .map(|child| 1.0 / *md2u.get(&child.borrow().statement()).expect(&format!("expected{:?} {:?} in md2u", statement, child.borrow().statement())) as f32);
                 let wi = WeightedIndex::new(weights).unwrap();
                 let idx = wi.sample(rng);
 
@@ -76,9 +76,8 @@ where
     FN: FnMut(&ProgramCounter) -> Box<dyn Iterator<Item = (u64, u64)> + 'a>,
 {
     fn goal(pc: &ProgramCounter, coverage: &HashMap<ProgramCounter, usize>) -> bool {
-        coverage.contains_key(pc)
+        !coverage.contains_key(pc)
     }
-
 
     struct T<'a> {
         pc: u64,
@@ -106,6 +105,7 @@ where
     {
         // Check next successor
         if let Some((successor, _)) = children_left.next() {
+            assert_ne!(pc, successor);
             // We will come back later to check other children.
             stack.push(T {
                 pc,
@@ -115,13 +115,13 @@ where
 
             if goal(&successor, coverage) {
                 // Insert the cost and we are done
-                pc_to_cost.insert(successor, 0);
+                pc_to_cost.insert(successor, 1);
             } else {
                 // We still have to check its children
                 stack.push(T {
                     pc: successor,
                     cost: u64::MAX,
-                    children_left: successors(&start),
+                    children_left: successors(&successor),
                 });
             }
         } else {
@@ -138,24 +138,6 @@ where
 
     pc_to_cost
 }
-
-// /// Computes the minimal distance from the given program counter to any uncovered (= not seen before) statement.
-// ///
-// /// This is achieved through pathfinding algorithm.
-// fn min_distance_to_uncovered(
-//     pc: ProgramCounter,
-//     coverage: &HashMap<ProgramCounter, bool>,
-//     program: &HashMap<ProgramCounter, CFGStatement>,
-//     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
-//     st: &SymbolTable,
-// ) -> Option<u64> {
-//     let successors_fn = successors(program, flow, st);
-//     let goal_fn = |pc: &ProgramCounter| coverage[pc] == false;
-
-//     let path = pathfinding::prelude::dijkstra(&pc, successors_fn, goal_fn);
-
-//     path.map(|(path, _goal)| path.len() as u64)
-// }
 
 fn with_cost(pc: ProgramCounter) -> (ProgramCounter, Cost) {
     (pc, 1)
@@ -213,7 +195,11 @@ fn successors<'a>(
             }
 
             // Otherwise take the flow
-            _ => Box::new(flow[pc].iter().copied().map(with_cost)),
+            _ => if flow.contains_key(pc) {
+                Box::new(flow[pc].iter().copied().map(with_cost))
+            } else {
+                Box::new(std::iter::empty())
+            }
         }
     }
 }
@@ -229,11 +215,14 @@ pub(crate) fn sym_exec(
     root_logger: Logger,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &mut Statistics,
-    flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
 ) -> SymResult {
+    // dbg!(flows);
+    // dbg!(program);
+
+    let root_pc = state.pc;
     let mut rng = rand::thread_rng();
     let mut coverage = HashMap::new();
-    let mut md2u = min_distance_to_uncovered(state.pc, &coverage, successors(program, flow, st));
+    let mut md2u;
 
     // let mut paths = PathTree {root: state.pc, nodes: HashMap::from([(state.pc, TreeNode::Leaf(vec![state]))]) };
     let mut tree = Rc::new(RefCell::new(N::Leaf {
@@ -244,7 +233,12 @@ pub(crate) fn sym_exec(
 
     loop {
         // pointer to the leaf with states chosen by the heuristic
-
+        md2u = min_distance_to_uncovered(root_pc, &coverage, successors(program, flows, st));
+        if md2u.is_empty() {
+            // Could not find any reachable uncovered program points
+            return SymResult::Valid;
+        }
+        
         let states_node = choice(tree.clone(), &md2u, &mut rng);
         let current_pc = states_node.borrow().statement();
         // Update the coverage
@@ -292,11 +286,6 @@ pub(crate) fn sym_exec(
                         // }
                         let is_finished = finish_state_in_path(states_node.clone(), Vec::new());
                         if is_finished {
-                            // *tree.borrow_mut() = N::Leaf {
-                            //     parent: Weak::new(),
-                            //     statement: 0,
-                            //     states: vec![],
-                            // };
 
                             // We have explored all states.
                             debug!(root_logger, "all states explored");
@@ -435,7 +424,7 @@ fn test_partial_dijkstra() {
 
                 if goal(&successor) {
                     // Insert the cost and we are done
-                    pc_to_cost.insert(successor, 0);
+                    pc_to_cost.insert(successor, 1);
                 } else {
                     // We still have to check its children
                     stack.push(T {
@@ -452,4 +441,25 @@ fn test_partial_dijkstra() {
 
     let result = doesit(4, |pc| goal.contains(pc), |pc| &neighbours[pc]);
     dbg!(result);
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::Options;
+
+    use super::*;
+
+    #[test]
+    fn min() {
+        
+        let path = "./examples/psv/min.oox";
+        let k = 150;
+        let options = Options::default_with_k_and_heuristic(k, crate::Heuristic::MinDist2Uncovered);
+
+        assert_eq!(
+            crate::verify(&path, "Foo", "min", options).unwrap(),
+            SymResult::Valid
+        );
+    }
 }

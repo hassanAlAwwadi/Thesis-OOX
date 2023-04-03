@@ -14,7 +14,7 @@ use slog::{debug, error, info, o, Logger};
 use sloggers::{
     terminal::{Destination, TerminalLoggerBuilder},
     types::Severity,
-    Build,
+    Build, file::FileLoggerBuilder,
 };
 use z3::SatResult;
 
@@ -349,6 +349,7 @@ enum ActionResult {
     Finish,
 }
 
+/// Execute one statement for one state
 fn action(
     state: &mut State,
     program: &HashMap<u64, CFGStatement>,
@@ -1646,6 +1647,7 @@ pub type Error = String;
 pub enum Heuristic {
     DepthFirstSearch,
     RandomPath,
+    MinDist2Uncovered
 }
 
 #[derive(Copy, Clone)]
@@ -1663,6 +1665,15 @@ impl Options {
             quiet: false,
             with_exceptional_clauses: true,
             heuristic: Heuristic::DepthFirstSearch,
+        }
+    }
+
+    fn default_with_k_and_heuristic(k: u64, heuristic: Heuristic) -> Options {
+        Options {
+            k,
+            quiet: false,
+            with_exceptional_clauses: true,
+            heuristic: heuristic,
         }
     }
 }
@@ -1755,10 +1766,10 @@ pub fn verify(
     //     Mutex::new(slog_bunyan::default(std::io::stderr()).filter_level(Level::Debug)).fuse(),
     //     o!(),
     // );
-
-    let mut builder = TerminalLoggerBuilder::new();
+    let mut builder = FileLoggerBuilder::new("logs");
+    // let mut builder = TerminalLoggerBuilder::new();
+    // builder.destination(Destination::Stdout);
     builder.level(Severity::Debug);
-    builder.destination(Destination::Stdout);
     builder.format(sloggers::types::Format::Full);
     builder.source_location(sloggers::types::SourceLocation::FileAndLine);
 
@@ -1790,6 +1801,7 @@ pub fn verify(
     let sym_exec = match options.heuristic {
         Heuristic::DepthFirstSearch => heuristics::depth_first_search::sym_exec,
         Heuristic::RandomPath => heuristics::random_path::sym_exec,
+        Heuristic::MinDist2Uncovered => heuristics::min_dist_to_uncovered::sym_exec
     };
     let sym_result = sym_exec(
         state,
