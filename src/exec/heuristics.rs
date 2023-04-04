@@ -4,6 +4,8 @@ use slog::{Logger, debug};
 
 use crate::{cfg::CFGStatement, symbol_table::SymbolTable, statistics::Statistics, exec::{action, ActionResult}};
 
+use n::N;
+
 use super::{State, SymResult, IdCounter};
 
 pub mod depth_first_search;
@@ -15,69 +17,7 @@ type Cost = u64;
 type ProgramCounter = u64;
 
 
-// sane alternative?
-#[derive(Debug)]
-enum N {
-    Node {
-        parent: Weak<RefCell<N>>,
-        statement: u64,
-        children: Vec<Rc<RefCell<N>>>,
-    },
-    Leaf {
-        parent: Weak<RefCell<N>>,
-        statement: u64,
-        states: Vec<State>,
-    },
-}
-
-
-impl N {
-    fn parent(&self) -> Weak<RefCell<N>> {
-        match self {
-            N::Node { parent, .. } => parent.clone(),
-            N::Leaf { parent, .. } => parent.clone(),
-        }
-    }
-
-    fn statement(&self) -> u64 {
-        match self {
-            N::Node { statement, .. } => *statement,
-            N::Leaf { statement, .. } => *statement,
-        }
-    }
-    /// Assume it is a leaf and take out the states.
-    fn into_states(&mut self) -> Option<Vec<State>> {
-        if let N::Leaf { states, .. } = self {
-            // Take the state, leaving an empty array
-            let states = std::mem::take(states);
-            Some(states)
-        } else {
-            None
-        }
-    }
-
-    fn set_states(&mut self, mut new_states: Vec<State>) {
-        if let N::Leaf { states, statement, .. } = self {
-            // Set the states
-            *statement = new_states[0].pc;
-            *states = new_states;
-        } else {
-            panic!()
-        }
-    }
-
-    fn set_parent(&mut self, new_parent: Weak<RefCell<N>>) {
-        match self {
-            N::Node {
-                parent,
-                statement,
-                children,
-            } => *parent = new_parent,
-            N::Leaf { parent, .. } => *parent = new_parent,
-        }
-    }
-}
-
+mod n;
 
 enum R {
     /// The new states at one increased path counter, this occurs when there is no branch statement.
@@ -110,7 +50,6 @@ fn execute_instruction_for_all_statements(
         &remaining_states.len()
     );
     assert!(remaining_states.len() > 0);
-    let mut finished = false;
 
     while let Some(mut state) = remaining_states.pop() {
         if let Some(current_pc) = current_pc {
@@ -183,7 +122,6 @@ fn execute_instruction_for_all_statements(
                     if let CFGStatement::FunctionExit { decl_name, .. } = &program[&state.pc] {
                         // Valid program exit, continue
                         statistics.measure_finish();
-                        finished = true;
                     } else {
                         // Unexpected end of CFG
                         panic!("Unexpected end of CFG");

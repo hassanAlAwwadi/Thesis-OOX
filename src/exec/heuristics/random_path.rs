@@ -1,7 +1,7 @@
 use std::{
     cell::RefCell,
     collections::HashMap,
-    ops::{Deref, DerefMut},
+    ops::{Deref},
     rc::{Rc, Weak},
 };
 
@@ -9,9 +9,9 @@ use itertools::Itertools;
 use rand::Rng;
 use slog::{debug, Logger};
 
-use crate::{cfg::CFGStatement, exec::{Engine, heuristics::N}, statistics::Statistics, symbol_table::SymbolTable};
+use crate::{cfg::CFGStatement, statistics::Statistics, symbol_table::SymbolTable};
 
-use super::{action, ActionResult, IdCounter, State, SymResult, execute_instruction_for_all_statements, R, finish_state_in_path, ProgramCounter};
+use super::{IdCounter, State, SymResult, execute_instruction_for_all_statements, R, finish_state_in_path, ProgramCounter, n::N};
 
 // We also need to consider that there are a lot of branches that end quickly, like due to if (x == null) { throw exception; } guard insertions.
 enum BTree {
@@ -96,7 +96,7 @@ fn random_path<'a>(
                 let idx = rng.gen_range(0..children.len());
                 tree = children[idx].clone();
             }
-            N::Leaf { states, statement, .. } => {
+            N::Leaf { statement, .. } => {
                 path.push(*statement);
                 return (path, tree);
             }
@@ -189,7 +189,7 @@ pub(crate) fn sym_exec(
     let mut rng = rand::thread_rng();
 
     // let mut paths = PathTree {root: state.pc, nodes: HashMap::from([(state.pc, TreeNode::Leaf(vec![state]))]) };
-    let mut tree = Rc::new(RefCell::new(N::Leaf {
+    let tree = Rc::new(RefCell::new(N::Leaf {
         parent: Weak::new(),
         statement: state.pc,
         states: vec![state],
@@ -202,7 +202,7 @@ pub(crate) fn sym_exec(
         let current_pc = *path_pcs.last().unwrap();
         let chosen_state = states_node.borrow_mut().into_states().unwrap();
 
-        let mut states = chosen_state;
+        let states = chosen_state;
 
         let r = execute_instruction_for_all_statements(
             states,
@@ -226,7 +226,7 @@ pub(crate) fn sym_exec(
                         pc,
                         states.iter().map(|s| s.pc).collect_vec()
                     );
-                    if (!states.iter().all(|s| s.pc == *pc)) {
+                    if !states.iter().all(|s| s.pc == *pc) {
                         loop {}
                     }
                     assert!(states.iter().all(|s| s.pc == *pc));

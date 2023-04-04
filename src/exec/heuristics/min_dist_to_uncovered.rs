@@ -1,16 +1,12 @@
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ops::Deref,
     rc::{Rc, Weak},
 };
 
 use itertools::Itertools;
-use rand::{
-    distributions::{WeightedIndex},
-    prelude::Distribution,
-    Rng,
-};
+use rand::{distributions::WeightedIndex, prelude::Distribution, Rng};
 use slog::{debug, Logger};
 
 use crate::{
@@ -27,48 +23,33 @@ use crate::{
 
 use crate::exec::heuristics::execute_instruction_for_all_statements;
 
-use super::{ProgramCounter, N, R};
-
+use super::{n::N, ProgramCounter, R};
 
 /// Make a weighted stochastic choice, where the weight is calculated based on the distance to a newly uncovered branch.
+/// Choose between all leafs (states on different program points)
 fn choice<'a>(
-    mut tree: Rc<RefCell<N>>,
+    leafs: &Vec<Rc<RefCell<N>>>,
     md2u: &HashMap<ProgramCounter, Cost>,
     rng: &'a mut impl Rng,
 ) -> Rc<RefCell<N>> {
-    let mut path = Vec::new();
-    loop {
-        let node = tree.clone();
-        match node.borrow().deref() {
-            N::Node {
-                statement,
-                children,
-                ..
-            } => {
-                path.push(*statement);
-                // I expect here that some elements are not in md2u, they should be assigned 0 in the weights.
-                // When are they not in md2u? if they are finished paths?
-                // We should move weighted index to somewhere it is created only once.
-                let weights = children
-                    .iter()
-                    .map(|child| 1.0 / *md2u.get(&child.borrow().statement()).expect(&format!("expected{:?} {:?} in md2u", statement, child.borrow().statement())) as f32);
-                let wi = WeightedIndex::new(weights).unwrap();
-                let idx = wi.sample(rng);
-
-                tree = children[idx].clone();
-            }
-            N::Leaf { statement, .. } => {
-                path.push(*statement);
-                return tree;
-            }
-        };
+    // Find for each leaf the md2u, construct a WeightedIndex and sample one leaf.
+    if md2u.len() == 0 {
+        let idx = rng.gen_range(0..leafs.len());
+        return leafs[idx].clone();
     }
+    let weights = leafs
+        .iter()
+        .map(|n| n.borrow().statement())
+        .map(|pc| md2u.get(&pc).map(|v| 1.0 / *v as f32).unwrap_or(0.0));
+    let wi = WeightedIndex::new(weights).unwrap();
+    let idx = wi.sample(rng);
+    return leafs[idx].clone();
 }
 
 /// Explores all nodes in the tree, if the path is finished, we don't insert it into the result.
 /// Returns for each program counter with a reachable path to an unexplored statement the distance to that statement.
 fn min_distance_to_uncovered<'a, FN>(
-    start: u64,
+    start: &Vec<Rc<RefCell<N>>>, // leafs
     coverage: &HashMap<ProgramCounter, usize>,
     mut successors: FN,
 ) -> HashMap<ProgramCounter, Cost>
@@ -77,6 +58,20 @@ where
 {
     fn goal(pc: &ProgramCounter, coverage: &HashMap<ProgramCounter, usize>) -> bool {
         !coverage.contains_key(pc)
+    }
+
+    fn next_unvisited_successor<'a>(
+        children_left: &mut dyn Iterator<Item = (u64, u64)>,
+        visited: &HashSet<u64>,
+        pc_to_cost: &HashMap<u64, u64>,
+    ) -> Option<(u64, u64)> {
+        // Find next unvisited successor
+        while let Some((successor, cost)) = children_left.next() {
+            if !visited.contains(&successor) && !pc_to_cost.contains_key(&successor) {
+                return Some((successor, cost));
+            }
+        }
+        None
     }
 
     struct T<'a> {
@@ -88,54 +83,69 @@ where
 
     let mut pc_to_cost = HashMap::new();
 
-    let mut stack = Vec::new();
+    for node in start {
+        let start = node.borrow().statement();
 
-    stack.push(T {
-        pc: start,
-        cost: u64::MAX,
-        children_left: successors(&start),
-    });
+        if let Some(x) = pc_to_cost.get(&start) {
+            // we have already explored this pc, so we can skip
+            continue;
+        }
 
-    // dfs
-    while let Some(T {
-        pc,
-        cost,
-        mut children_left,
-    }) = stack.pop()
-    {
-        // Check next successor
-        if let Some((successor, _)) = children_left.next() {
-            assert_ne!(pc, successor);
-            // We will come back later to check other children.
-            stack.push(T {
-                pc,
-                cost,
-                children_left,
-            });
+        let mut stack = Vec::new();
+        let mut visited = HashSet::from([start]);
 
-            if goal(&successor, coverage) {
-                // Insert the cost and we are done
-                pc_to_cost.insert(successor, 1);
-            } else {
-                // We still have to check its children
+        stack.push(T {
+            pc: start,
+            cost: u64::MAX,
+            children_left: successors(&start),
+        });
+
+        // dfs
+        while let Some(T {
+            pc,
+            cost,
+            mut children_left,
+        }) = stack.pop()
+        {
+            // Find next unvisited successor
+            let next_unvisited_successor =
+                next_unvisited_successor(&mut children_left, &visited, &pc_to_cost);
+
+            // Check next successor
+            if let Some((successor, _)) = next_unvisited_successor {
+                assert_ne!(pc, successor);
+
+                // We will come back later to check other children.
                 stack.push(T {
-                    pc: successor,
-                    cost: u64::MAX,
-                    children_left: successors(&successor),
+                    pc,
+                    cost,
+                    children_left,
                 });
-            }
-        } else {
-            let children = successors(&pc);
 
-            // This node has checked all its children
-            // Find the minimal cost of its children, if any
-            let cost = children.filter_map(|(succ, _)| pc_to_cost.get(&succ)).min();
-            if let Some(cost) = cost {
-                pc_to_cost.insert(pc, *cost + 1);
+                if goal(&successor, coverage) {
+                    // Insert the cost and we are done
+                    pc_to_cost.insert(successor, 1);
+                } else {
+                    // We still have to check its children
+                    visited.insert(successor);
+                    stack.push(T {
+                        pc: successor,
+                        cost: u64::MAX,
+                        children_left: successors(&successor),
+                    });
+                }
+            } else {
+                let children = successors(&pc);
+
+                // This node has checked all its children
+                // Find the minimal cost of its children, if any
+                let cost = children.filter_map(|(succ, _)| pc_to_cost.get(&succ)).min();
+                if let Some(cost) = cost {
+                    pc_to_cost.insert(pc, *cost + 1);
+                }
             }
         }
     }
-
     pc_to_cost
 }
 
@@ -195,10 +205,12 @@ fn successors<'a>(
             }
 
             // Otherwise take the flow
-            _ => if flow.contains_key(pc) {
-                Box::new(flow[pc].iter().copied().map(with_cost))
-            } else {
-                Box::new(std::iter::empty())
+            _ => {
+                if flow.contains_key(pc) {
+                    Box::new(flow[pc].iter().copied().map(with_cost))
+                } else {
+                    Box::new(std::iter::empty())
+                }
             }
         }
     }
@@ -219,33 +231,30 @@ pub(crate) fn sym_exec(
     // dbg!(flows);
     // dbg!(program);
 
-    let root_pc = state.pc;
     let mut rng = rand::thread_rng();
     let mut coverage = HashMap::new();
     let mut md2u;
 
     // let mut paths = PathTree {root: state.pc, nodes: HashMap::from([(state.pc, TreeNode::Leaf(vec![state]))]) };
-    let mut tree = Rc::new(RefCell::new(N::Leaf {
+    let tree = Rc::new(RefCell::new(N::Leaf {
         parent: Weak::new(),
         statement: state.pc,
         states: vec![state],
     }));
 
     loop {
+        let leafs = N::leafs(tree.clone());
         // pointer to the leaf with states chosen by the heuristic
-        md2u = min_distance_to_uncovered(root_pc, &coverage, successors(program, flows, st));
-        if md2u.is_empty() {
-            // Could not find any reachable uncovered program points
-            return SymResult::Valid;
-        }
-        
-        let states_node = choice(tree.clone(), &md2u, &mut rng);
+        md2u = min_distance_to_uncovered(&leafs, &coverage, successors(program, flows, st));
+
+        let states_node = choice(&leafs, &md2u, &mut rng);
+
         let current_pc = states_node.borrow().statement();
         // Update the coverage
         *coverage.entry(current_pc).or_insert(0) += 1;
         let chosen_state = states_node.borrow_mut().into_states().unwrap();
 
-        let mut states = chosen_state;
+        let states = chosen_state;
 
         let r = execute_instruction_for_all_statements(
             states,
@@ -269,7 +278,7 @@ pub(crate) fn sym_exec(
                         pc,
                         states.iter().map(|s| s.pc).collect_vec()
                     );
-                    if (!states.iter().all(|s| s.pc == *pc)) {
+                    if !states.iter().all(|s| s.pc == *pc) {
                         loop {}
                     }
                     assert!(states.iter().all(|s| s.pc == *pc));
@@ -278,7 +287,7 @@ pub(crate) fn sym_exec(
                 match new_states.len() {
                     0 => {
                         // Branch finished due to "throw"
-                        dbg!(current_pc, &program[&current_pc]);
+                        // dbg!(current_pc, &program[&current_pc]);
                         // if let Some(parent) = states_node.borrow().parent().upgrade() {
                         //     dbg!(parent.borrow().deref().statement());
                         // } else {
@@ -286,7 +295,6 @@ pub(crate) fn sym_exec(
                         // }
                         let is_finished = finish_state_in_path(states_node.clone(), Vec::new());
                         if is_finished {
-
                             // We have explored all states.
                             debug!(root_logger, "all states explored");
                             return SymResult::Valid;
@@ -443,7 +451,6 @@ fn test_partial_dijkstra() {
     dbg!(result);
 }
 
-
 #[cfg(test)]
 mod tests {
     use crate::Options;
@@ -452,7 +459,6 @@ mod tests {
 
     #[test]
     fn min() {
-        
         let path = "./examples/psv/min.oox";
         let k = 150;
         let options = Options::default_with_k_and_heuristic(k, crate::Heuristic::MinDist2Uncovered);
