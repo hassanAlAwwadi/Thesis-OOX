@@ -49,7 +49,7 @@ pub fn labelled_statements(
             Declaration::Class(class) => {
                 for member in &class.members {
                     let (mut member_statements, mut member_flow) =
-                        memberCFG(class.name.clone(), &member, &mut i);
+                        member_cfg(class.name.clone(), &member, &mut i);
                     labelled_statements.append(&mut member_statements);
                     flow.append(&mut member_flow);
                 }
@@ -68,7 +68,7 @@ pub fn labelled_statements(
     return (labelled_statements, flow);
 }
 
-fn memberCFG(
+fn member_cfg(
     class_name: Identifier,
     member: &DeclarationMember,
     i: &mut u64,
@@ -88,7 +88,7 @@ fn memberCFG(
             ));
             let entry_label = *i;
             *i += 1;
-            v.append(&mut statementCFG(&method.body.borrow(), i));
+            v.append(&mut statement_cfg(&method.body.borrow(), i));
             // insert `return this;` at the end of the constructor flow.
             v.push((
                 *i,
@@ -170,7 +170,7 @@ fn label_method(
     ));
     let entry_label = *i;
     *i += 1;
-    v.append(&mut statementCFG(&method.body.borrow(), i));
+    v.append(&mut statement_cfg(&method.body.borrow(), i));
     v.push((
         *i,
         CFGStatement::FunctionExit {
@@ -203,7 +203,7 @@ fn label_method(
     (labelled_statements, flw)
 }
 
-fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> {
+fn statement_cfg(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> {
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
     match statement {
         Statement::Seq { stat1, stat2 } => {
@@ -211,10 +211,10 @@ fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> 
             let seq_l = *i;
             *i += 1;
             let s1_l = *i;
-            v.append(&mut statementCFG(stat1.as_ref(), i));
+            v.append(&mut statement_cfg(stat1.as_ref(), i));
             *i += 1;
             let s2_l = *i;
-            v.append(&mut statementCFG(stat2.as_ref(), i));
+            v.append(&mut statement_cfg(stat2.as_ref(), i));
 
             labelled_statements.push((seq_l, CFGStatement::Seq(s1_l, s2_l)));
             labelled_statements.append(&mut v);
@@ -229,9 +229,9 @@ fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> 
             let ite_l = *i;
             *i += 1;
             let i_true = *i;
-            v.append(&mut statementCFG(true_body.as_ref(), i));
+            v.append(&mut statement_cfg(true_body.as_ref(), i));
             let i_false = *i;
-            v.append(&mut statementCFG(false_body.as_ref(), i));
+            v.append(&mut statement_cfg(false_body.as_ref(), i));
             labelled_statements.push((ite_l, CFGStatement::Ite(guard.clone(), i_true, i_false)));
             labelled_statements.append(&mut v);
         }
@@ -241,10 +241,10 @@ fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> 
             let i_body = *i;
 
             labelled_statements.push((ite_l, CFGStatement::While(guard.clone(), i_body)));
-            labelled_statements.append(&mut statementCFG(body.as_ref(), i));
+            labelled_statements.append(&mut statement_cfg(body.as_ref(), i));
         }
         Statement::Block { body } => {
-            labelled_statements.append(&mut statementCFG(body.as_ref(), i));
+            labelled_statements.append(&mut statement_cfg(body.as_ref(), i));
         }
         Statement::Try {
             try_body,
@@ -256,7 +256,7 @@ fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> 
             let l1 = *i;
             *i += 1;
             let s1_l = *i;
-            let mut s_1 = statementCFG(&try_body, i);
+            let mut s_1 = statement_cfg(&try_body, i);
             *i += 1;
             let l2 = *i;
             *i += 1;
@@ -264,7 +264,7 @@ fn statementCFG(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> 
             let l3 = *i;
             *i += 1;
             let s2_l = *i;
-            let mut s_2 = statementCFG(&catch_body, i);
+            let mut s_2 = statement_cfg(&catch_body, i);
             *i += 1;
             let l4 = *i;
             *i += 1;

@@ -6,7 +6,7 @@ use pretty::{docs, Arena, BoxAllocator, DocAllocator, DocBuilder};
 
 // use super::{BinOp, Expression};
 
-use crate::{ syntax::Identifier, typeable::Typeable};
+use crate::{syntax::Identifier, typeable::Typeable};
 
 use super::syntax::*;
 
@@ -132,38 +132,36 @@ fn specifications<'a, D: DocAllocator<'a>>(
     allocator: &'a D,
 ) -> DocBuilder<'a, D, ()> {
     use pretty::Pretty;
-    if !(specification.requires.is_some() || specification.ensures.is_some() || specification.exceptional.is_some()) {
+    if !(specification.requires.is_some()
+        || specification.ensures.is_some()
+        || specification.exceptional.is_some())
+    {
         return allocator.nil();
     }
-    
-    docs![ // specifications
+
+    docs![
+        // specifications
         allocator,
-        specification.requires.clone().map(|requires| 
-            docs![
-                allocator,
-                allocator.hardline(),
-                "requires", 
-                requires.pretty(allocator).parens(),
-            ]
-        ),
-        specification.ensures.clone().map(|requires| 
-            docs![
-                allocator,
-                allocator.hardline(),
-                "ensures", 
-                requires.pretty(allocator).parens(),
-            ]
-        ),
-        
-        specification.exceptional.clone().map(|requires| 
-            docs![
-                allocator,
-                allocator.hardline(),
-                "exceptional", 
-                requires.pretty(allocator).parens(),
-            ]
-        )
-    ].nest(2)
+        specification.requires.clone().map(|requires| docs![
+            allocator,
+            allocator.hardline(),
+            "requires",
+            requires.pretty(allocator).parens(),
+        ]),
+        specification.ensures.clone().map(|requires| docs![
+            allocator,
+            allocator.hardline(),
+            "ensures",
+            requires.pretty(allocator).parens(),
+        ]),
+        specification.exceptional.clone().map(|requires| docs![
+            allocator,
+            allocator.hardline(),
+            "exceptional",
+            requires.pretty(allocator).parens(),
+        ])
+    ]
+    .nest(2)
     .append(allocator.hardline())
 }
 
@@ -455,22 +453,16 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Invocation {
                 lhs,
                 rhs,
                 arguments,
-                resolved,
-                info,
+                ..
             } => {
-                let mut result = allocator
+                let result = allocator
                     .text(lhs.to_string())
                     .append(allocator.text("."))
                     .append(allocator.text(rhs.to_string()));
                 result.append(pretty_arguments(arguments, allocator))
             }
-            Invocation::InvokeSuperMethod {
-                rhs,
-                arguments,
-                resolved,
-                info,
-            } => {
-                let mut result = allocator
+            Invocation::InvokeSuperMethod { rhs, arguments, .. } => {
+                let result = allocator
                     .text("super")
                     .append(allocator.text("."))
                     .append(allocator.text(rhs.to_string()));
@@ -480,18 +472,13 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Invocation {
             Invocation::InvokeConstructor {
                 class_name,
                 arguments,
-                resolved,
-                info,
+                ..
             } => {
-                let mut result = allocator.text(class_name.to_string());
+                let result = allocator.text(class_name.to_string());
                 result.append(pretty_arguments(arguments, allocator))
             }
-            Invocation::InvokeSuperConstructor {
-                arguments,
-                resolved,
-                info,
-            } => {
-                let mut result = allocator.text("super");
+            Invocation::InvokeSuperConstructor { arguments, .. } => {
+                let result = allocator.text("super");
                 result.append(pretty_arguments(arguments, allocator))
             }
         }
@@ -528,13 +515,12 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &RuntimeType {
 
 #[test]
 fn feature() {
-    use crate::{language::lexer::tokens, parser::expression };
+    use crate::{language::lexer::tokens, parser::expression};
     let tokens = tokens("x && y").unwrap();
     let exp = expression().parse(&tokens).unwrap();
     let allocator = BoxAllocator;
     println!("{}", pretty::Pretty::pretty(&exp, &allocator).1.pretty(10));
 }
-
 
 fn bin_op_to_str(bin_op: &BinOp) -> &'static str {
     match bin_op {

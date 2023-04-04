@@ -1,23 +1,22 @@
 // simplify the expression
 
-use std::{collections::HashMap, ops::Deref, rc::Rc};
+use std::{ops::Deref, rc::Rc};
 
 use itertools::{Either, Itertools};
 
 use crate::{
-    dsl::{and, ands, equal, ite, negate, negative, or, ors, to_int_expr},
+    dsl::{ands, negate, negative, ors, to_int_expr},
     exec::{
-        get_element, init_symbolic_reference, single_alias_elimination, DFSEngine, HeapValue, State, Engine,
+        get_element, init_symbolic_reference, single_alias_elimination, HeapValue, State, Engine,
     },
     positioned::SourcePos,
     stack::{remove_from_stack, write_to_stack, StackFrame},
-    symbol_table::SymbolTable,
     syntax::{BinOp, Expression, Identifier, Lit, RuntimeType, UnOp},
 };
 
 pub type EvaluationResult<T> = Either<Rc<Expression>, T>;
 
-pub fn evaluateAsInt(
+pub fn evaluate_as_int(
     state: &mut State,
     expression: Rc<Expression>,
     en: &mut impl Engine,

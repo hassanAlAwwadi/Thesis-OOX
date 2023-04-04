@@ -28,7 +28,7 @@ use crate::{
     cfg::{labelled_statements, CFGStatement},
     concretization::{concretizations, find_symbolic_refs},
     dsl::{equal, ite, negate, or, to_int_expr},
-    eval::{self, evaluate, evaluateAsInt},
+    eval::{self, evaluate, evaluate_as_int},
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
     parser::{ parse},
     positioned::{SourcePos, WithPosition},
@@ -398,7 +398,7 @@ fn action(
                 _ => (),
             }
 
-            let value = evaluateRhs(state, rhs, en);
+            let value = evaluate_rhs(state, rhs, en);
             let e = evaluate(state, value, en);
 
             execute_assign(state, lhs, e, en);
@@ -1300,7 +1300,7 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
 
             match ref_.as_ref() {
                 Expression::Ref { ref_, type_, .. } => {
-                    let index = evaluateAsInt(state, index.clone(), en);
+                    let index = evaluate_as_int(state, index.clone(), en);
 
                     match index {
                         Either::Left(index) => write_elem_symbolic_index(state, *ref_, index, e),
@@ -1314,7 +1314,7 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
 }
 
 // fn evaluateRhs(state: &mut State, rhs: &Rhs) -> Expression {
-fn evaluateRhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expression> {
+fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expression> {
     match rhs {
         Rhs::RhsExpression { value, type_, .. } => {
             match value {
@@ -1431,7 +1431,7 @@ fn exec_rhs_elem(
     let array = single_alias_elimination(array, &state.alias_map);
     match array.as_ref() {
         Expression::Ref { ref_, .. } => {
-            let index = evaluateAsInt(state, index, en);
+            let index = evaluate_as_int(state, index, en);
             match index {
                 Either::Left(index) => read_elem_symbolic_index(state, *ref_, index),
                 Either::Right(index) => read_elem_concrete_index(state, *ref_, index),
@@ -1591,7 +1591,7 @@ fn exec_array_construction(
     // int[][] a = new int[10][10];
 
     let size =
-        evaluateAsInt(state, Rc::new(sizes[0].clone()), en).expect_right("no symbolic array sizes");
+        evaluate_as_int(state, Rc::new(sizes[0].clone()), en).expect_right("no symbolic array sizes");
 
     let array = (0..size)
         .map(|_| Rc::new(array_type.default()))
