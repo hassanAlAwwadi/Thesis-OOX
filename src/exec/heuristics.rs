@@ -11,6 +11,7 @@ use super::{State, SymResult, IdCounter};
 pub mod depth_first_search;
 pub mod random_path;
 pub mod min_dist_to_uncovered;
+mod md2u_recursive;
 
 
 type Cost = u64;
@@ -159,7 +160,6 @@ fn execute_instruction_for_all_statements(
 /// Removing any branching node where there is only one unpruned/unfinished state left.
 fn finish_state_in_path(mut leaf: Rc<RefCell<N>>, path: Vec<ProgramCounter>,) -> bool {
     loop {
-        dbg!(&path);
         let parent = if let Some(parent) = leaf.borrow().parent().upgrade() {
             parent
         } else {

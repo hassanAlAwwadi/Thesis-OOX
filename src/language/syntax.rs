@@ -112,6 +112,10 @@ impl Method {
     pub fn exceptional(&self) -> Option<Rc<Expression>> {
         self.specification.exceptional.clone()
     }
+
+    pub fn param_types<'a>(&'a self) -> impl Iterator<Item=RuntimeType> + 'a {
+        self.params.iter().map(|p| p.type_of())
+    }
 }
 
 /// Abstract method, has no body implementation

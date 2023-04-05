@@ -780,6 +780,7 @@ fn exec_invocation(
 
 /// Given a class name and method name, lookup the entry node in the Control Flow Graph
 /// Also checks if the argument types are consistent.
+/// Panics if the method is not found
 fn find_entry_for_static_invocation(
     class_name: &str,
     method_name: &str,
