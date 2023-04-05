@@ -1,0 +1,20 @@
+class Main {
+
+   static void main(int n) {
+       int i := 0;
+
+       Main.f_recursive(i, n);
+
+       assert true;
+   }
+
+   static void f_recursive(int i, int n) {
+       if (i <= n) {
+           i := i + 1;
+           Main.f_recursive(i, n);
+           int whatboutme;
+       } else {
+           int otherwise;
+       }
+   }    
+}

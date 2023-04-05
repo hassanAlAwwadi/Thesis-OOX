@@ -1,0 +1,20 @@
+class Main {
+
+    static void main(int n) {     // 7
+       int i := 0;                 // 6
+       // i:= 0;                   // 5
+       while (i<=n) {              // 4
+           // assume i <= n        // 10
+           i := i + 1;             // 9
+           int j := 0;             // 8
+           // j := 0               // 7
+           while (j < n) {         // 6
+               // assume           // 8
+               j := j + 1;         // 7
+           }                       
+           // assume ~ j < n       // 5
+       }
+       // assume ! (i <= n)        // 3
+       assert true;                // 2
+   }                               // 1
+}
