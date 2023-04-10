@@ -410,32 +410,13 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Lhs {
 impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Rhs {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
         match self {
-            Rhs::RhsExpression { value, type_, info } => value.pretty(allocator),
-            Rhs::RhsField {
-                var,
-                field,
-                type_,
-                info,
-            } => var.pretty(allocator),
-            Rhs::RhsElem {
-                var,
-                index,
-                type_,
-                info,
-            } => var
+            Rhs::RhsExpression { value, .. } => value.pretty(allocator),
+            Rhs::RhsField { var, .. } => var.pretty(allocator),
+            Rhs::RhsElem { var, index, .. } => var
                 .pretty(allocator)
                 .append(index.pretty(allocator).brackets()),
-            Rhs::RhsCall {
-                invocation,
-                type_,
-                info,
-            } => invocation.pretty(allocator),
-            Rhs::RhsArray {
-                array_type,
-                sizes,
-                type_,
-                info,
-            } => {
+            Rhs::RhsCall { invocation, .. } => invocation.pretty(allocator),
+            Rhs::RhsArray { sizes, type_, .. } => {
                 let mut result = type_.pretty(allocator);
                 for size in sizes {
                     result = result.append(size.pretty(allocator).brackets());
@@ -510,6 +491,177 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for RuntimeType {
 impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &RuntimeType {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
         allocator.text(self.to_string())
+    }
+}
+
+pub mod cfg_pretty {
+    use std::collections::{HashMap};
+
+    use itertools::Itertools;
+    use pretty::{docs, BoxAllocator, DocAllocator, DocBuilder};
+    use crate::cfg::CFGStatement;
+
+    type ProgramCounter = u64;
+
+    /// A way to print a control flow graph method with additional statistics
+    /// such as the CFG node id, coverage, reachability
+    pub fn pretty_print_cfg_method<'a, F>(
+        function_entry: ProgramCounter,
+        decorator: &'a F,
+        program: &HashMap<ProgramCounter, CFGStatement>,
+        flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
+    ) -> String
+    where
+        F: Fn(u64) -> Option<String>,
+    {
+        let allocator = BoxAllocator;
+        let mut result = allocator.nil();
+
+        if let CFGStatement::FunctionEntry {
+            decl_name,
+            method_name,
+            argument_types,
+        } = &program[&function_entry]
+        {
+            result = docs![
+                &allocator,
+                decl_name.to_string(),
+                ".",
+                method_name.to_string(),
+                allocator
+                    .intersperse(
+                        argument_types
+                            .iter()
+                            .map(|t| pretty::Pretty::pretty(t, &allocator)),
+                        ", "
+                    )
+                    .parens(),
+                " {",
+            ];
+            let next = &flow[&function_entry];
+            assert!(next.len() == 1, "FunctionEntry flows to a single statement");
+            result = result.append(
+                docs![
+                    &allocator,
+                    allocator.hardline(),
+                    pretty_print_cfg_statement(next[0], decorator, program, flow, &allocator,)
+                ]
+                .nest(2),
+            );
+            result = result.append(allocator.hardline()).append("}");
+        } else {
+            panic!("Expected function_entry to be a FunctionEntry");
+        }
+
+        line_out_comments(result.1.pretty(10).to_string())
+    }
+
+    /// Will recursively create a DocBuilder for sequential statements in the control flow graph starting from the given program
+    fn pretty_print_cfg_statement<'a, F, D: pretty::DocAllocator<'a>>(
+        entry: ProgramCounter,
+        decorator: &'a F,
+        program: &HashMap<ProgramCounter, CFGStatement>,
+        flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
+        allocator: &'a D,
+    ) -> DocBuilder<'a, D, ()>
+    where
+        F: Fn(u64) -> Option<String>,
+    {
+        let current = entry;
+        let mut result = allocator.nil();
+
+        match &program[&entry] {
+            CFGStatement::Statement(statement) => {
+                result = result.append(pretty::Pretty::pretty(statement, allocator));
+                if let Some(decoration) = decorator(current) {
+                    result = result.append(format!(" // {}", decoration))
+                }
+            }
+            CFGStatement::Ite(e, t, f) => {
+                result = docs![
+                    allocator,
+                    "if (",
+                    e,
+                    ") {",
+                    decorator(current).map(|decoration| { format!(" // {}", decoration) }),
+                    docs![
+                        allocator,
+                        allocator.hardline(),
+                        pretty_print_cfg_statement(*t, decorator, program, flow, allocator,),
+                    ]
+                    .nest(2),
+                    allocator.hardline(),
+                    "} else {",
+                    docs![
+                        allocator,
+                        allocator.hardline(),
+                        pretty_print_cfg_statement(*f, decorator, program, flow, allocator),
+                    ]
+                    .nest(2),
+                    allocator.hardline(),
+                    "}"
+                ];
+            }
+            CFGStatement::While(e, b) => {
+                result = docs![
+                    allocator,
+                    "while (",
+                    e,
+                    ") {",
+                    decorator(current).map(|decoration| { format!(" // {}", decoration) }),
+                    docs![
+                        allocator,
+                        allocator.hardline(),
+                        pretty_print_cfg_statement(*b, decorator, program, flow, allocator,),
+                    ]
+                    .nest(2),
+                    allocator.hardline(),
+                    "}",
+                ];
+            }
+            CFGStatement::Seq(a, b) => {
+                result = pretty_print_cfg_statement(*a, decorator, program, flow, allocator);
+                result = result.append(allocator.hardline());
+                result = result.append(pretty_print_cfg_statement(
+                    *b, decorator, program, flow, allocator,
+                ));
+            }
+            s => todo!("{:?}", s),
+        };
+
+        return result;
+    }
+
+    /// Takes a program and ensures all comments line out for readability
+    fn line_out_comments(content: String) -> String {
+        let length = content
+            .lines()
+            .map(|l| {
+                l.split_once("//")
+                    .map(|(statement, _)| statement.len())
+                    .unwrap_or(l.len())
+            })
+            .max()
+            .unwrap();
+
+        let result = content
+            .lines()
+            .map(|line| {
+                if let Some((statement, comment)) = line.split_once("//") {
+                    let fill = length - statement.len();
+                    std::borrow::Cow::Owned(format!(
+                        "{}{}//{}",
+                        statement,
+                        (0..fill).map(|_| ' ').collect::<String>(),
+                        comment
+                    ))
+                } else {
+                    std::borrow::Cow::Borrowed(line)
+                }
+            })
+            .join("\n");
+
+        result
     }
 }
 
