@@ -1,25 +1,13 @@
-use std::{
-    collections::{HashMap, HashSet},
-    thread::current,
-};
-
-use derivative::Derivative;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
-    cfg::CFGStatement, exec::find_entry_for_static_invocation, symbol_table::SymbolTable,
+    cfg::{CFGStatement, MethodIdentifier},
+    exec::find_entry_for_static_invocation,
+    symbol_table::SymbolTable,
     Invocation, Rhs, RuntimeType, Statement,
 };
 
 use super::{Cost, ProgramCounter};
-
-#[derive(Debug, Hash, Eq, PartialEq, Clone, Derivative)]
-#[derivative(PartialOrd, Ord)]
-struct MethodIdentifier<'a> {
-    method_name: &'a str,
-    decl_name: &'a str,
-    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
-    arg_list: Vec<RuntimeType>,
-}
 
 /// A method always has the same cost, with a distinction made between a cost achieved by finding an uncovered statement,
 /// and otherwise a cost of calling the function in terms of the number of statements visited.
@@ -85,6 +73,41 @@ impl CumulativeCost {
 /// Computes the minimal distance to uncovered methods for all program counters in this method
 /// Recursively computes the minimal distance for any method calls referenced.
 fn min_distance_to_uncovered_method<'a>(
+    method: MethodIdentifier<'a>,
+    coverage: &HashMap<ProgramCounter, usize>,
+    program: &'a HashMap<ProgramCounter, CFGStatement>,
+    flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
+    st: &SymbolTable,
+    visited: &mut HashSet<ProgramCounter>,
+) -> (Distance, HashMap<ProgramCounter, Distance>, Cache<'a>) {
+    let (cost, pc_to_cost, cache) =
+        min_distance_to_uncovered_method_helper(method, coverage, program, flow, st, visited);
+
+    let distance = if let CumulativeCost::Cost(distance) = cost {
+        distance
+    } else {
+        panic!("expected solved distance");
+    };
+
+    // at this point all cost should be concrete distances.
+    let pc_to_distance = pc_to_cost
+        .into_iter()
+        .map(|(key, value)| {
+            let distance = if let CumulativeCost::Cost(distance) = value {
+                distance
+            } else {
+                panic!("expected solved distance");
+            };
+            (key, distance)
+        })
+        .collect();
+
+    (distance, pc_to_distance, cache)
+}
+
+/// Computes the minimal distance to uncovered methods for all program counters in this method
+/// Recursively computes the minimal distance for any method calls referenced.
+fn min_distance_to_uncovered_method_helper<'a>(
     method: MethodIdentifier<'a>,
     coverage: &HashMap<ProgramCounter, usize>,
     program: &'a HashMap<ProgramCounter, CFGStatement>,
@@ -196,9 +219,8 @@ fn min_distance_to_statement<'a>(
     };
 
     // Find the cost of the current statement
-    let cost_of_this_statement = statement_cost(
-        pc, method, coverage, program, flow, st, pc_to_cost, cache, visited,
-    );
+    let cost_of_this_statement =
+        statement_cost(pc, coverage, program, flow, st, pc_to_cost, cache, visited);
 
     match cost_of_this_statement.clone() {
         CumulativeCost::Cost(Distance {
@@ -207,7 +229,6 @@ fn min_distance_to_statement<'a>(
         }) => {
             let cost = if distance_type == DistanceType::ToEndOfMethod {
                 // We have to add the cost of the remainder of the current method.
-                let next_pcs = &flow[&pc];
                 let cost = remaining_cost.plus(value);
 
                 // if this is a while statement, check all cycles and fix them
@@ -309,7 +330,6 @@ fn fix_cycles(
 /// Can be either strictly in case of a found uncovered statement, or at least cost otherwise.
 fn statement_cost<'a>(
     pc: ProgramCounter,
-    current_method: &MethodIdentifier<'a>,
     coverage: &HashMap<ProgramCounter, usize>,
     program: &'a HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
@@ -355,7 +375,7 @@ fn statement_cost<'a>(
                         CumulativeCost::UnexploredMethodCall(method.method_name.to_string())
                     } else {
                         let (cost, method_pc_to_cost, method_cache) =
-                            min_distance_to_uncovered_method(
+                            min_distance_to_uncovered_method_helper(
                                 method, coverage, program, flow, st, visited,
                             );
 
@@ -427,7 +447,12 @@ fn methods_called(invocation: &Invocation) -> Vec<MethodIdentifier> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{cfg::labelled_statements, parse_program, typing::type_compilation_unit, utils};
+    use pretty::BoxAllocator;
+
+    use crate::{
+        cfg::labelled_statements, parse_program, prettyprint::cfg_pretty::pretty_print_cfg_method,
+        typing::type_compilation_unit, utils,
+    };
 
     use super::*;
 
@@ -454,8 +479,6 @@ mod tests {
 
         // Simulate that the method has been explored.
         coverage.extend(program.keys().map(|k| (*k, 1usize)));
-        // Except for 12 (i := i + 1)
-        // coverage.remove(&12);
 
         // dbg!(&program);
 
@@ -485,15 +508,15 @@ mod tests {
 
         #[rustfmt::skip]
         let expected_result = HashMap::from([
-            (2, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 6 })),
-            (10, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 6 })),
-            (12, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 })),
-            (0, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 })),
-            (8, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 4 })),
-            (18, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 })),
-            (5, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 })),
-            (17, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 })),
-            (15, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 3 })),
+            (0, Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 }),
+            (2, Distance { distance_type: DistanceType::ToEndOfMethod, value: 6 }),
+            (5, Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 }),
+            (8, Distance { distance_type: DistanceType::ToEndOfMethod, value: 4 }),
+            (10, Distance { distance_type: DistanceType::ToEndOfMethod, value: 6 }),
+            (12, Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 }),
+            (15, Distance { distance_type: DistanceType::ToEndOfMethod, value: 3 }),
+            (17, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
+            (18, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
         ]);
 
         assert_eq!(pc_to_cost, expected_result);
@@ -502,9 +525,12 @@ mod tests {
     }
 
     #[test]
-    fn md2u_recursive() {
-        let path = "./examples/reachability/recursive.oox";
-        let (coverage, program, flows, symbol_table, mut visited) = setup(path);
+    fn md2u_single_while_with_uncovered_statement() {
+        let path = "./examples/reachability/while.oox";
+        let (mut coverage, program, flows, symbol_table, mut visited) = setup(path);
+
+        // Except for 12 (i := i + 1)
+        coverage.remove(&12);
 
         let (cost, pc_to_cost, cache) = min_distance_to_uncovered_method(
             MethodIdentifier {
@@ -519,25 +545,155 @@ mod tests {
             &mut visited,
         );
 
+        // dbg!(&program, &flows);
+
         #[rustfmt::skip]
         let expected_result = HashMap::from([
-            (25, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 3 })),
-            (2,  CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 10 })),
-            (11, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 })),
-            (12, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 })),
-            (10, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 })),
-            (27, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 })),
-            (8,  CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 8 })),
-            (28, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 })),
-            (21, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 8 })),
-            (23, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 })),
-            (5,  CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 9 })),
-            (15, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 10 })),
-            (13, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 4 })),
-            (0,  CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 11 })),
-            (18, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 9 })),            
+            (0, Distance { distance_type: DistanceType::ToFirstUncovered, value: 6 }),
+            (2, Distance { distance_type: DistanceType::ToFirstUncovered, value: 5 }),
+            (5, Distance { distance_type: DistanceType::ToFirstUncovered, value: 4 }),
+            (8, Distance { distance_type: DistanceType::ToFirstUncovered, value: 3 }),
+            (10, Distance { distance_type: DistanceType::ToFirstUncovered, value: 2 }),
+            (12, Distance { distance_type: DistanceType::ToFirstUncovered, value: 1 }),
+            (15, Distance { distance_type: DistanceType::ToEndOfMethod, value: 3 }),
+            (17, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
+            (18, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
         ]);
+        
 
+        assert_eq!(pc_to_cost, expected_result);
+
+        dbg!(cost, pc_to_cost, cache);
+    }
+
+    #[test]
+    fn md2u_recursive_normal() {
+        let path = "./examples/reachability/recursive.oox";
+        let (coverage, program, flows, symbol_table, mut visited) = setup(path);
+        let method = MethodIdentifier {
+            method_name: "main",
+            decl_name: "Main",
+            arg_list: vec![RuntimeType::IntRuntimeType; 1],
+        };
+        let (cost, pc_to_cost, cache) = min_distance_to_uncovered_method(
+            method.clone(),
+            &coverage,
+            &program,
+            &flows,
+            &symbol_table,
+            &mut visited,
+        );
+
+        #[rustfmt::skip]
+        let expected_result = HashMap::from([
+            (0,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 11 }),
+            (2,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 10 }),
+            (5,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 9 }),
+            (8,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 8 }),
+            (10, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
+            (11, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
+            (12, Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 }),
+            (13, Distance { distance_type: DistanceType::ToEndOfMethod, value: 4 }),
+            (15, Distance { distance_type: DistanceType::ToEndOfMethod, value: 10 }),
+            (18, Distance { distance_type: DistanceType::ToEndOfMethod, value: 9 }),
+            (21, Distance { distance_type: DistanceType::ToEndOfMethod, value: 8 }),
+            (23, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
+            (25, Distance { distance_type: DistanceType::ToEndOfMethod, value: 3 }),
+            (27, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
+            (28, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
+        ]);
+        
+
+        let pc = find_entry_for_static_invocation(
+            method.decl_name,
+            "f_recursive",
+            vec![RuntimeType::IntRuntimeType; 2].into_iter(),
+            &program,
+            &symbol_table,
+        );
+
+        assert_eq!(pc_to_cost, expected_result);
+
+        // dbg!(cost, pc_to_cost, cache);
+    }
+
+    #[test]
+    fn md2u_recursive_with_uncovered_statements() {
+        let path = "./examples/reachability/recursive.oox";
+        let (mut coverage, program, flows, symbol_table, mut visited) = setup(path);
+
+        // int whatboutme;
+        // int otherwise;
+        // are both set to uncovered:
+        coverage.remove(&23);
+        coverage.remove(&27);
+
+        let entry_method = MethodIdentifier {
+            method_name: "main",
+            decl_name: "Main",
+            arg_list: vec![RuntimeType::IntRuntimeType; 1],
+        };
+
+        let f_recursive = MethodIdentifier {
+            method_name: "f_recursive",
+            decl_name: "Main",
+            arg_list: vec![RuntimeType::IntRuntimeType; 2],
+        };
+
+        let (cost, pc_to_cost, cache) = min_distance_to_uncovered_method(
+            entry_method.clone(),
+            &coverage,
+            &program,
+            &flows,
+            &symbol_table,
+            &mut visited,
+        );
+
+        let s = pretty_print_cfg_method(
+            entry_method,
+            &|pc| Some(format!("{}", pc)),
+            &program,
+            &flows,
+            &symbol_table,
+        );
+
+        println!("{}", s);
+
+        let s = pretty_print_cfg_method(
+            f_recursive,
+            &|pc| Some(format!("{}", pc)),
+            &program,
+            &flows,
+            &symbol_table,
+        );
+
+        println!("{}", s);
+
+        // dbg!(&program);
+
+        #[rustfmt::skip]
+        let expected_result = HashMap::from([
+            (0,  Distance { distance_type: DistanceType::ToFirstUncovered, value: 8 }),
+            (2,  Distance { distance_type: DistanceType::ToFirstUncovered, value: 7 }),
+            (5,  Distance { distance_type: DistanceType::ToFirstUncovered, value: 6 }),
+            (8,  Distance { distance_type: DistanceType::ToFirstUncovered, value: 5 }),
+            (10, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
+            (11, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
+            (12, Distance { distance_type: DistanceType::ToFirstUncovered, value: 4 }),
+            (13, Distance { distance_type: DistanceType::ToFirstUncovered, value: 3 }),
+            (15, Distance { distance_type: DistanceType::ToFirstUncovered, value: 8 }),
+            (18, Distance { distance_type: DistanceType::ToFirstUncovered, value: 7 }),
+            (21, Distance { distance_type: DistanceType::ToFirstUncovered, value: 6 }),
+            (23, Distance { distance_type: DistanceType::ToFirstUncovered, value: 1 }),
+            (25, Distance { distance_type: DistanceType::ToFirstUncovered, value: 2 }),
+            (27, Distance { distance_type: DistanceType::ToFirstUncovered, value: 1 }),
+            (28, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
+        ]);
+        
+
+        for k in pc_to_cost.keys() {
+            assert_eq!(pc_to_cost[k], expected_result[k], "at pc {}", *k);
+        }
         assert_eq!(pc_to_cost, expected_result);
 
         dbg!(cost, pc_to_cost, cache);
@@ -565,22 +721,23 @@ mod tests {
 
         #[rustfmt::skip]
         let expected_result = HashMap::from([
-            (22, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 6 })),
-            (8, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 4 })),
-            (2, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 6 })),
-            (16, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 8 })),
-            (5, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 })),
-            (13, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 9 })),
-            (10, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 10 })),
-            (24, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 8 })),
-            (0, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 })),
-            (19, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 })),
-            (26, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 })),
-            (33, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 })),
-            (31, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 3 })),
-            (28, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 })),
-            (34, CumulativeCost::Cost(Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 })),
+            (0,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 }),
+            (2,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 6 }),
+            (5,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 }),
+            (8,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 4 }),
+            (10, Distance { distance_type: DistanceType::ToEndOfMethod, value: 10 }),
+            (13, Distance { distance_type: DistanceType::ToEndOfMethod, value: 9 }),
+            (16, Distance { distance_type: DistanceType::ToEndOfMethod, value: 8 }),
+            (19, Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 }),
+            (22, Distance { distance_type: DistanceType::ToEndOfMethod, value: 6 }),
+            (24, Distance { distance_type: DistanceType::ToEndOfMethod, value: 8 }),
+            (26, Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 }),
+            (28, Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 }),
+            (31, Distance { distance_type: DistanceType::ToEndOfMethod, value: 3 }),
+            (33, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
+            (34, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
         ]);
+        
 
         assert_eq!(pc_to_cost, expected_result);
     }

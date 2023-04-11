@@ -495,17 +495,42 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &RuntimeType {
 }
 
 pub mod cfg_pretty {
-    use std::collections::{HashMap};
+    use std::collections::HashMap;
 
+    use crate::{
+        cfg::{CFGStatement, MethodIdentifier},
+        exec::find_entry_for_static_invocation,
+        symbol_table::SymbolTable,
+    };
     use itertools::Itertools;
     use pretty::{docs, BoxAllocator, DocAllocator, DocBuilder};
-    use crate::cfg::CFGStatement;
 
     type ProgramCounter = u64;
 
+    pub fn pretty_print_cfg_method<'a, F>(
+        function_entry: MethodIdentifier<'a>,
+        decorator: &'a F,
+        program: &HashMap<ProgramCounter, CFGStatement>,
+        flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
+        st: &SymbolTable,
+    ) -> String
+    where
+        F: Fn(u64) -> Option<String>,
+    {
+        let entry = find_entry_for_static_invocation(
+            function_entry.decl_name,
+            function_entry.method_name,
+            function_entry.arg_list.iter().cloned(),
+            &program,
+            st,
+        );
+
+        pretty_print_cfg_method_from_entry(entry, decorator, program, flow)
+    }
+
     /// A way to print a control flow graph method with additional statistics
     /// such as the CFG node id, coverage, reachability
-    pub fn pretty_print_cfg_method<'a, F>(
+    pub fn pretty_print_cfg_method_from_entry<'a, F>(
         function_entry: ProgramCounter,
         decorator: &'a F,
         program: &HashMap<ProgramCounter, CFGStatement>,
@@ -537,18 +562,35 @@ pub mod cfg_pretty {
                     )
                     .parens(),
                 " {",
+                decorator(function_entry).map(|decoration| { format!(" // {}", decoration) }),
             ];
-            let next = &flow[&function_entry];
-            assert!(next.len() == 1, "FunctionEntry flows to a single statement");
+            let next_statement = flow[&function_entry][0];
+            let next = program
+                .iter()
+                .find(|(k, v)| {
+                    if let CFGStatement::Seq(a, _) = v {
+                        next_statement == *a
+                    } else {
+                        false
+                    }
+                })
+                .map(|(k, _)| *k)
+                .unwrap_or(next_statement);
+
             result = result.append(
                 docs![
                     &allocator,
                     allocator.hardline(),
-                    pretty_print_cfg_statement(next[0], decorator, program, flow, &allocator,)
+                    pretty_print_cfg_statement(next, decorator, program, flow, &allocator,)
                 ]
                 .nest(2),
             );
-            result = result.append(allocator.hardline()).append("}");
+            // function exit
+            result = result.append(docs![
+                &allocator,
+                allocator.hardline(),
+                "}"
+            ]);
         } else {
             panic!("Expected function_entry to be a FunctionEntry");
         }

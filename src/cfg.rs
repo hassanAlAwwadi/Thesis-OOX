@@ -1,11 +1,19 @@
 // use std::intrinsics::unreachable;
 
-use crate::{
-    exec::this_str, positioned::SourcePos, syntax::*,
-    typeable::Typeable
-};
+use derivative::Derivative;
+
+use crate::{exec::this_str, positioned::SourcePos, syntax::*, typeable::Typeable};
 
 const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
+
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Derivative)]
+#[derivative(PartialOrd, Ord)]
+pub struct MethodIdentifier<'a> {
+    pub method_name: &'a str,
+    pub decl_name: &'a str,
+    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
+    pub arg_list: Vec<RuntimeType>,
+}
 
 /// A statement in the control flow graph, with special cases for branching statements.
 /// 
@@ -13,7 +21,7 @@ const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CFGStatement {
     /// Can be any Statement minus any of the branching statements in this enum
-    Statement(Statement), 
+    Statement(Statement),
     Ite(Expression, u64, u64),
     While(Expression, u64),
     TryCatch(u64, u64, u64, u64), // l1: entry try body, l2: exit try body, l3: entry catch body, l4: exit catch body
@@ -34,11 +42,10 @@ pub enum CFGStatement {
     },
 }
 
-
 /// Takes the syntax tree of a program, returns a tuple containing the control flow graph and flow of the program.
 /// The control flow graph is a mapping from program counter (aka label) --> Program statement.
 pub fn labelled_statements(
-    compilation_unit: CompilationUnit
+    compilation_unit: CompilationUnit,
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
     let mut i = 0;
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
