@@ -4,14 +4,15 @@ use crate::{
     cfg::{CFGStatement, MethodIdentifier},
     exec::find_entry_for_static_invocation,
     symbol_table::SymbolTable,
-    Invocation, Rhs, RuntimeType, Statement,
+    Invocation, Rhs, Statement,
 };
 
 use super::{Cost, ProgramCounter};
 
+/// A cache storing for a method the distance, will not contain distances for unexplored methods.
 /// A method always has the same cost, with a distinction made between a cost achieved by finding an uncovered statement,
 /// and otherwise a cost of calling the function in terms of the number of statements visited.
-type Cache<'a> = HashMap<MethodIdentifier<'a>, Distance>;
+type Cache<'a> = HashMap<MethodIdentifier<'a>, CumulativeCost>;
 
 /// Type of distance of a statement, can be either partially complete (to as far as it can see), which would be the exit of the method.
 /// Or it can be the distance to the first uncovered statement, if any found.
@@ -37,14 +38,16 @@ impl Distance {
 /// calling a method will explore a certain number of statements before returning
 /// If an uncovered statement is encountered, it will have an exact cost
 /// Otherwise it returns the minimal cost of the method call in terms of the number of statements explored.
-#[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 enum CumulativeCost {
     Cost(Distance),
-    // Cycles back to program point, with additional cost.
+    /// Cycles back to program point (while loop), with additional cost.
     Cycle(ProgramCounter, Cost),
-    Added(Box<CumulativeCost>, Box<CumulativeCost>),
-    // In case of recursion, we can not resolve it immediately and need to keep track of it.
+    Plus(Box<CumulativeCost>, Box<CumulativeCost>),
+    /// In case of recursion, we can not resolve it immediately and need to keep track of it.
     UnexploredMethodCall(String),
+    /// Used to store cost when it cannot yet be determined which one is closer
+    Minimal(Box<CumulativeCost>, Box<CumulativeCost>),
 }
 
 // Either<CostToUncoveredStatement, MinimalMethodCost>
@@ -58,20 +61,27 @@ impl CumulativeCost {
         match self {
             Self::Cost(d) => Self::Cost(d.plus(cost)),
             Self::Cycle(pc, c) => Self::Cycle(pc, c + cost),
-            Self::Added(c1, c2) => Self::Added(c1, Box::new(c2.plus(cost))),
-            Self::UnexploredMethodCall(_) => Self::Added(
+            Self::Plus(c1, c2) => Self::Plus(c1, Box::new(c2.plus(cost))),
+            Self::UnexploredMethodCall(_) => Self::Plus(
                 Box::new(self),
                 Box::new(Self::Cost(Distance {
                     value: cost,
                     distance_type: DistanceType::ToEndOfMethod,
                 })),
             ),
+            Self::Minimal(c1, c2) => {
+                Self::Minimal(Box::new(c1.plus(cost)), Box::new(c2.plus(cost)))
+            }
         }
     }
 }
 
 /// Computes the minimal distance to uncovered methods for all program counters in this method
-/// Recursively computes the minimal distance for any method calls referenced.
+/// Recursively computes the minimal distance for any method calls referenced, in a depth-first-search way.
+/// Returns:
+///  - the distance of this method to the closest uncovered statement, or the end of the method.
+///  - a mapping for every program counter explored to its distance
+///  - a cache for methods explored may be reused.
 fn min_distance_to_uncovered_method<'a>(
     method: MethodIdentifier<'a>,
     coverage: &HashMap<ProgramCounter, usize>,
@@ -141,15 +151,67 @@ fn min_distance_to_uncovered_method_helper<'a>(
         visited,
     );
 
-    let d = match method_body_cost {
-        CumulativeCost::Cost(d) => d,
-        _ => panic!(),
+    dbg!(&method.method_name, &method_body_cost);
+    let method_body_cost = match method_body_cost {
+        CumulativeCost::Cost(d) => {
+            cleanup_pc_to_cost(&method.method_name, &mut pc_to_cost, d);
+            method_body_cost
+        },
+        _ => {
+            // we may be able to solve it.
+            // if the only unexplored method call is the current function
+            // we can substitute that with infinity and solve
+
+            fn check_for_reducability(c: &CumulativeCost, current_method: &MethodIdentifier) -> bool {
+                match c {
+                    CumulativeCost::Cost(_) => true,
+                    CumulativeCost::Cycle(_, _) => true,
+                    CumulativeCost::Plus(c1, c2) => check_for_reducability(c1, current_method) && check_for_reducability(c2, current_method),
+                    CumulativeCost::UnexploredMethodCall(m) => current_method.method_name == m,
+                    CumulativeCost::Minimal(c1, c2) => check_for_reducability(c1, current_method) && check_for_reducability(c2, current_method),
+                }
+            }
+
+            if check_for_reducability(&method_body_cost, &method) {
+                fn reduce(c: &CumulativeCost) -> Option<Distance> {
+                    match c {
+                        CumulativeCost::Cost(d) => Some(*d),
+                        CumulativeCost::Plus(c1, c2) => {
+                            let d1 = reduce(&c1);
+                            let d2 = reduce(&c2);
+                            match (d1, d2) {
+                                (Some(d1), Some(d2)) => Some(Distance {
+                                    distance_type: std::cmp::min(d1.distance_type, d2.distance_type),
+                                    value: d1.value + d2.value,
+                                }),
+                                _ => None
+                            }
+                        }
+                        CumulativeCost::UnexploredMethodCall(_) => None,
+                        CumulativeCost::Minimal(c1, c2) => {
+                            let d1 = reduce(&c1);
+                            let d2 = reduce(&c2);
+                            match (d1, d2) {
+                                (Some(d1), Some(d2)) => Some(std::cmp::min(d1, d2)),
+                                (Some(d1), None) => Some(d1),
+                                (None, Some(d2)) => Some(d2),
+                                _ => None
+                            }
+                        },
+                        _ => unreachable!()
+                    }
+                }
+                let d = reduce(&method_body_cost).unwrap();
+
+                cleanup_pc_to_cost(&method.method_name, &mut pc_to_cost, d);
+                CumulativeCost::Cost(d)
+            } else {
+                method_body_cost
+            }
+        },
     };
-    dbg!(&pc_to_cost);
 
-    cleanup_pc_to_cost(&method.method_name, &mut pc_to_cost, d);
-
-    cache.insert(method, d);
+    cache.insert(method, method_body_cost.clone());
 
     (method_body_cost, pc_to_cost, cache)
 }
@@ -212,7 +274,7 @@ fn min_distance_to_statement<'a>(
                         *next_pc, &method, coverage, program, flow, st, pc_to_cost, cache, visited,
                     )
                 })
-                .min()
+                .reduce(minimize)
                 .expect("multiple pcs");
             next_cost
         }
@@ -243,17 +305,24 @@ fn min_distance_to_statement<'a>(
             pc_to_cost.insert(pc, cost.clone());
             return cost;
         }
-        CumulativeCost::Cycle(_pc, _pluscost) => unimplemented!(),
-        CumulativeCost::Added(_, _) => {
+        CumulativeCost::Plus(_, _) => {
             let cost =
-                CumulativeCost::Added(Box::new(cost_of_this_statement), Box::new(remaining_cost));
+                CumulativeCost::Plus(Box::new(cost_of_this_statement), Box::new(remaining_cost));
 
             pc_to_cost.insert(pc, cost.clone());
             return cost;
         }
         CumulativeCost::UnexploredMethodCall(_) => {
             let cost =
-                CumulativeCost::Added(Box::new(cost_of_this_statement), Box::new(remaining_cost));
+                CumulativeCost::Plus(Box::new(cost_of_this_statement), Box::new(remaining_cost));
+            pc_to_cost.insert(pc, cost.clone());
+            return cost;
+        }
+        CumulativeCost::Cycle(_pc, _pluscost) => unimplemented!(),
+
+        CumulativeCost::Minimal(_, _) => {
+            let cost =
+                CumulativeCost::Plus(Box::new(cost_of_this_statement), Box::new(remaining_cost));
             pc_to_cost.insert(pc, cost.clone());
             return cost;
         }
@@ -285,9 +354,9 @@ fn replace_method_call_in_costs<'a>(
     resulting_cost: Distance,
 ) -> CumulativeCost {
     match cost {
-        CumulativeCost::Added(c1, c2) => {
-            let c1 = replace_method_call_in_costs(method_name, *c1, resulting_cost);
-            let c2 = replace_method_call_in_costs(method_name, *c2, resulting_cost);
+        CumulativeCost::Plus(ref c1, ref c2) => {
+            let c1 = replace_method_call_in_costs(method_name, *c1.clone(), resulting_cost);
+            let c2 = replace_method_call_in_costs(method_name, *c2.clone(), resulting_cost);
             match (c1, c2) {
                 (CumulativeCost::Cost(d1), CumulativeCost::Cost(d2)) => {
                     CumulativeCost::Cost(Distance {
@@ -295,13 +364,23 @@ fn replace_method_call_in_costs<'a>(
                         value: d1.value + d2.value,
                     })
                 }
-                (c1, c2) => todo!("{:?} {:?}", c1, c2),
+                (c1, c2) => cost,
             }
         }
         CumulativeCost::UnexploredMethodCall(method) if method_name == &method => {
             CumulativeCost::Cost(resulting_cost)
         }
         CumulativeCost::Cycle(_, _) => todo!(),
+        CumulativeCost::Minimal(c1, c2) => {
+            let c1 = replace_method_call_in_costs(method_name, *c1, resulting_cost);
+            let c2 = replace_method_call_in_costs(method_name, *c2, resulting_cost);
+            match (c1, c2) {
+                (CumulativeCost::Cost(d1), CumulativeCost::Cost(d2)) => {
+                    CumulativeCost::Cost(std::cmp::min(d1, d2))
+                }
+                (c1, c2) => CumulativeCost::Plus(Box::new(c1), Box::new(c2)), // (c1, c2) => todo!("{:?} {:?}", c1, c2),
+            }
+        }
         cost => cost,
     }
 }
@@ -359,7 +438,7 @@ fn statement_cost<'a>(
                 // Check cache or compute cost for method
 
                 let cost = if let Some(cost) = cache.get(&method) {
-                    CumulativeCost::Cost(cost.clone())
+                    cost.clone()
                 } else {
                     // if method is already covered, but not in cache it means we are processing it currently.
                     let next_pc = find_entry_for_static_invocation(
@@ -386,7 +465,7 @@ fn statement_cost<'a>(
                 };
                 cost.increased_by_one()
             })
-            .min()
+            .reduce(minimize)
             .expect("at least one resolved method");
 
         min_method_cost
@@ -396,6 +475,15 @@ fn statement_cost<'a>(
             distance_type: DistanceType::ToEndOfMethod,
             value: 1,
         })
+    }
+}
+
+fn minimize(a: CumulativeCost, b: CumulativeCost) -> CumulativeCost {
+     match (&a, &b) {
+        (CumulativeCost::Cost(a), CumulativeCost::Cost(b)) => CumulativeCost::Cost(std::cmp::min(a, b).clone()),
+        (CumulativeCost::Cycle(_, _), _) => b.clone(),
+        (_, CumulativeCost::Cycle(_, _)) => a.clone(),
+        (_, _) => CumulativeCost::Minimal(Box::new(a), Box::new(b)),
     }
 }
 
@@ -447,11 +535,10 @@ fn methods_called(invocation: &Invocation) -> Vec<MethodIdentifier> {
 
 #[cfg(test)]
 mod tests {
-    use pretty::BoxAllocator;
 
     use crate::{
         cfg::labelled_statements, parse_program, prettyprint::cfg_pretty::pretty_print_cfg_method,
-        typing::type_compilation_unit, utils,
+        typing::type_compilation_unit, utils, RuntimeType,
     };
 
     use super::*;
@@ -559,7 +646,6 @@ mod tests {
             (17, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
             (18, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
         ]);
-        
 
         assert_eq!(pc_to_cost, expected_result);
 
@@ -602,7 +688,6 @@ mod tests {
             (27, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
             (28, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
         ]);
-        
 
         let pc = find_entry_for_static_invocation(
             method.decl_name,
@@ -689,7 +774,6 @@ mod tests {
             (27, Distance { distance_type: DistanceType::ToFirstUncovered, value: 1 }),
             (28, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
         ]);
-        
 
         for k in pc_to_cost.keys() {
             assert_eq!(pc_to_cost[k], expected_result[k], "at pc {}", *k);
@@ -697,6 +781,93 @@ mod tests {
         assert_eq!(pc_to_cost, expected_result);
 
         dbg!(cost, pc_to_cost, cache);
+    }
+
+    #[test]
+    fn md2u_recursive2() {
+        let path = "./examples/reachability/recursive3.oox";
+        let (mut coverage, program, flows, symbol_table, mut visited) = setup(path);
+
+        let entry_method = MethodIdentifier {
+            method_name: "main",
+            decl_name: "Main",
+            arg_list: vec![RuntimeType::IntRuntimeType; 1],
+        };
+
+        let f_recursive = MethodIdentifier {
+            method_name: "f_recursive",
+            decl_name: "Main",
+            arg_list: vec![RuntimeType::IntRuntimeType; 2],
+        };
+        let g_recursive = MethodIdentifier {
+            method_name: "g_recursive",
+            decl_name: "Main",
+            arg_list: vec![RuntimeType::IntRuntimeType; 2],
+        };
+
+        let (cost, pc_to_cost, cache) = min_distance_to_uncovered_method(
+            entry_method.clone(),
+            &coverage,
+            &program,
+            &flows,
+            &symbol_table,
+            &mut visited,
+        );
+
+        for method in [entry_method, f_recursive, g_recursive] {
+            let s = pretty_print_cfg_method(
+                method,
+                &|pc| Some(format!("pc: {}, cost: {}", pc, pc_to_cost[&pc].value)),
+                &program,
+                &flows,
+                &symbol_table,
+            );
+            println!("{}", s);
+        }
+
+        #[rustfmt::skip]
+        let expected_result = HashMap::from([
+            (0, Distance { distance_type: DistanceType::ToEndOfMethod, value: 19 }),
+            (2, Distance { distance_type: DistanceType::ToEndOfMethod, value: 18 }),
+            (5, Distance { distance_type: DistanceType::ToEndOfMethod, value: 17 }),
+            (8, Distance { distance_type: DistanceType::ToEndOfMethod, value: 16 }),
+            (10, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
+            (11, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
+            (12, Distance { distance_type: DistanceType::ToEndOfMethod, value: 13 }),
+            (13, Distance { distance_type: DistanceType::ToEndOfMethod, value: 12 }),
+            (15, Distance { distance_type: DistanceType::ToEndOfMethod, value: 13 }),
+            (18, Distance { distance_type: DistanceType::ToEndOfMethod, value: 12 }),
+            (21, Distance { distance_type: DistanceType::ToEndOfMethod, value: 11 }),
+            (23, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
+            (25, Distance { distance_type: DistanceType::ToEndOfMethod, value: 11 }),
+            (28, Distance { distance_type: DistanceType::ToEndOfMethod, value: 10 }),
+            (31, Distance { distance_type: DistanceType::ToEndOfMethod, value: 9 }),
+            (34, Distance { distance_type: DistanceType::ToEndOfMethod, value: 8 }),
+            (37, Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 }),
+            (40, Distance { distance_type: DistanceType::ToEndOfMethod, value: 6 }),
+            (43, Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 }),
+            (46, Distance { distance_type: DistanceType::ToEndOfMethod, value: 4 }),
+            (49, Distance { distance_type: DistanceType::ToEndOfMethod, value: 3 }),
+            (51, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
+            (52, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
+            (53, Distance { distance_type: DistanceType::ToEndOfMethod, value: 8 }),
+            (54, Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 }),
+            (56, Distance { distance_type: DistanceType::ToEndOfMethod, value: 16 }),
+            (58, Distance { distance_type: DistanceType::ToEndOfMethod, value: 15 }),
+            (60, Distance { distance_type: DistanceType::ToEndOfMethod, value: 6 }),
+            (63, Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 }),
+            (66, Distance { distance_type: DistanceType::ToEndOfMethod, value: 4 }),
+            (69, Distance { distance_type: DistanceType::ToEndOfMethod, value: 3 }),
+            (71, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
+            (72, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
+        ]);
+
+        for k in pc_to_cost.keys() {
+            assert_eq!(pc_to_cost[k], expected_result[k], "at pc {}", *k);
+        }
+        assert_eq!(pc_to_cost, expected_result);
+
+        // dbg!(cost, pc_to_cost, cache);
     }
 
     #[test]
@@ -737,7 +908,6 @@ mod tests {
             (33, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
             (34, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
         ]);
-        
 
         assert_eq!(pc_to_cost, expected_result);
     }
