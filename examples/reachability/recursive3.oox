@@ -1,3 +1,4 @@
+
 class Main {
 
    static void main(int n) {
@@ -28,6 +29,17 @@ class Main {
 
 
    static void g_recursive(int i, int n) {
+        if (false) {
+            Main.h_recursive(i, n);
+        } else {
+            int statement;
+            statement := 0;
+            statement := 0;
+            statement := 0;
+        }
+   }
+
+    static void h_recursive(int i, int n) {
         if (false) {
             Main.f_recursive(i, n);
         } else {

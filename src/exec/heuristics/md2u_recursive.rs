@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools;
+
 use crate::{
     cfg::{CFGStatement, MethodIdentifier},
     exec::find_entry_for_static_invocation,
@@ -88,11 +90,30 @@ fn min_distance_to_uncovered_method<'a>(
     program: &'a HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     st: &SymbolTable,
-    visited: &mut HashSet<ProgramCounter>,
-) -> (Distance, HashMap<ProgramCounter, Distance>, Cache<'a>) {
-    let (cost, pc_to_cost, cache) =
-        min_distance_to_uncovered_method_helper(method, coverage, program, flow, st, visited);
+    cache: &mut Cache<'a>
+) -> (Distance, HashMap<ProgramCounter, Distance>) {
+    // We reset visited when the search is started from scratch 
+    let mut visited = HashSet::new();
+    let (distance, pc_to_distance) =
+        min_distance_to_uncovered_method_helper1(method.clone(), coverage, program, flow, st, &mut visited, cache);
 
+    (distance, pc_to_distance)
+}
+
+
+fn min_distance_to_uncovered_method_helper1<'a>(
+    method: MethodIdentifier<'a>,
+    coverage: &HashMap<ProgramCounter, usize>,
+    program: &'a HashMap<ProgramCounter, CFGStatement>,
+    flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
+    st: &SymbolTable,
+    visited: &mut HashSet<ProgramCounter>,
+    cache: &mut Cache<'a>
+) -> (Distance, HashMap<ProgramCounter, Distance>) {
+    let (cost, pc_to_cost) =
+        min_distance_to_uncovered_method_helper(method.clone(), coverage, program, flow, st, visited, cache);
+
+    dbg!(&cost, &method);
     let distance = if let CumulativeCost::Cost(distance) = cost {
         distance
     } else {
@@ -112,7 +133,20 @@ fn min_distance_to_uncovered_method<'a>(
         })
         .collect();
 
-    (distance, pc_to_distance, cache)
+    // Clean up cache of incomplete methods
+    let to_remove = cache.iter().filter_map(|(k, v)| if let CumulativeCost::Cost(d) = v {
+        if d.distance_type == DistanceType::ToFirstUncovered {
+            Some(k.clone())
+        } else {
+            None
+        }
+    } else {
+        Some(k.clone())
+    }).collect_vec();
+
+    cache.retain(|k, _v| !to_remove.contains(&k));
+
+    (distance, pc_to_distance)
 }
 
 /// Computes the minimal distance to uncovered methods for all program counters in this method
@@ -124,10 +158,10 @@ fn min_distance_to_uncovered_method_helper<'a>(
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     st: &SymbolTable,
     visited: &mut HashSet<ProgramCounter>,
+    cache: &mut Cache<'a>
 ) -> (
     CumulativeCost,
-    HashMap<ProgramCounter, CumulativeCost>,
-    Cache<'a>,
+    HashMap<ProgramCounter, CumulativeCost>
 ) {
     let pc = find_entry_for_static_invocation(
         method.decl_name,
@@ -137,7 +171,6 @@ fn min_distance_to_uncovered_method_helper<'a>(
         st,
     );
     let mut pc_to_cost = HashMap::new();
-    let mut cache = Cache::new();
 
     let method_body_cost = min_distance_to_statement(
         pc,
@@ -147,7 +180,7 @@ fn min_distance_to_uncovered_method_helper<'a>(
         flow,
         st,
         &mut pc_to_cost,
-        &mut cache,
+        cache,
         visited,
     );
 
@@ -213,7 +246,7 @@ fn min_distance_to_uncovered_method_helper<'a>(
 
     cache.insert(method, method_body_cost.clone());
 
-    (method_body_cost, pc_to_cost, cache)
+    (method_body_cost, pc_to_cost)
 }
 
 /// Computes the minimal distance to uncovered methods for all program counters in this method
@@ -453,13 +486,12 @@ fn statement_cost<'a>(
                         dbg!("oh oh recursion", next_pc);
                         CumulativeCost::UnexploredMethodCall(method.method_name.to_string())
                     } else {
-                        let (cost, method_pc_to_cost, method_cache) =
+                        let (cost, method_pc_to_cost) =
                             min_distance_to_uncovered_method_helper(
-                                method, coverage, program, flow, st, visited,
+                                method, coverage, program, flow, st, visited, cache,
                             );
 
                         pc_to_cost.extend(method_pc_to_cost);
-                        cache.extend(method_cache);
                         cost
                     }
                 };
@@ -549,8 +581,7 @@ mod tests {
         HashMap<ProgramCounter, usize>,
         HashMap<ProgramCounter, CFGStatement>,
         HashMap<ProgramCounter, Vec<u64>>,
-        SymbolTable,
-        HashSet<u64>,
+        SymbolTable
     ) {
         let file_content = std::fs::read_to_string(path).unwrap();
 
@@ -571,16 +602,16 @@ mod tests {
 
         let flows: HashMap<u64, Vec<u64>> = utils::group_by(flw.into_iter());
 
-        let visited = HashSet::new();
-        (coverage, program, flows, symbol_table, visited)
+        (coverage, program, flows, symbol_table)
     }
 
     #[test]
     fn md2u_single_while() {
         let path = "./examples/reachability/while.oox";
-        let (coverage, program, flows, symbol_table, mut visited) = setup(path);
+        let (coverage, program, flows, symbol_table) = setup(path);
 
-        let (cost, pc_to_cost, cache) = min_distance_to_uncovered_method(
+        let mut cache = Cache::new();
+        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
             MethodIdentifier {
                 method_name: "main",
                 decl_name: "Main",
@@ -590,7 +621,7 @@ mod tests {
             &program,
             &flows,
             &symbol_table,
-            &mut visited,
+            &mut cache
         );
 
         #[rustfmt::skip]
@@ -614,12 +645,13 @@ mod tests {
     #[test]
     fn md2u_single_while_with_uncovered_statement() {
         let path = "./examples/reachability/while.oox";
-        let (mut coverage, program, flows, symbol_table, mut visited) = setup(path);
+        let (mut coverage, program, flows, symbol_table) = setup(path);
 
         // Except for 12 (i := i + 1)
         coverage.remove(&12);
 
-        let (cost, pc_to_cost, cache) = min_distance_to_uncovered_method(
+        let mut cache = Cache::new();
+        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
             MethodIdentifier {
                 method_name: "main",
                 decl_name: "Main",
@@ -629,7 +661,7 @@ mod tests {
             &program,
             &flows,
             &symbol_table,
-            &mut visited,
+            &mut cache,
         );
 
         // dbg!(&program, &flows);
@@ -655,19 +687,20 @@ mod tests {
     #[test]
     fn md2u_recursive_normal() {
         let path = "./examples/reachability/recursive.oox";
-        let (coverage, program, flows, symbol_table, mut visited) = setup(path);
+        let (coverage, program, flows, symbol_table) = setup(path);
         let method = MethodIdentifier {
             method_name: "main",
             decl_name: "Main",
             arg_list: vec![RuntimeType::IntRuntimeType; 1],
         };
-        let (cost, pc_to_cost, cache) = min_distance_to_uncovered_method(
+        let mut cache = Cache::new();
+        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
             method.clone(),
             &coverage,
             &program,
             &flows,
             &symbol_table,
-            &mut visited,
+            &mut cache,
         );
 
         #[rustfmt::skip]
@@ -705,7 +738,7 @@ mod tests {
     #[test]
     fn md2u_recursive_with_uncovered_statements() {
         let path = "./examples/reachability/recursive.oox";
-        let (mut coverage, program, flows, symbol_table, mut visited) = setup(path);
+        let (mut coverage, program, flows, symbol_table) = setup(path);
 
         // int whatboutme;
         // int otherwise;
@@ -713,6 +746,7 @@ mod tests {
         coverage.remove(&23);
         coverage.remove(&27);
 
+        let mut cache = Cache::new();
         let entry_method = MethodIdentifier {
             method_name: "main",
             decl_name: "Main",
@@ -725,13 +759,13 @@ mod tests {
             arg_list: vec![RuntimeType::IntRuntimeType; 2],
         };
 
-        let (cost, pc_to_cost, cache) = min_distance_to_uncovered_method(
+        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
             entry_method.clone(),
             &coverage,
             &program,
             &flows,
             &symbol_table,
-            &mut visited,
+            &mut cache,
         );
 
         let s = pretty_print_cfg_method(
@@ -784,37 +818,33 @@ mod tests {
     }
 
     #[test]
-    fn md2u_recursive2() {
-        let path = "./examples/reachability/recursive3.oox";
-        let (mut coverage, program, flows, symbol_table, mut visited) = setup(path);
+    fn md2u_recursive3() {
+        let path = "./examples/reachability/recursive2.oox";
+        let (coverage, program, flows, symbol_table) = setup(path);
 
+        let mut cache = Cache::new();
         let entry_method = MethodIdentifier {
             method_name: "main",
             decl_name: "Main",
             arg_list: vec![RuntimeType::IntRuntimeType; 1],
         };
-
-        let f_recursive = MethodIdentifier {
-            method_name: "f_recursive",
-            decl_name: "Main",
-            arg_list: vec![RuntimeType::IntRuntimeType; 2],
-        };
-        let g_recursive = MethodIdentifier {
-            method_name: "g_recursive",
+        
+        let recursive = |name: &'static str| MethodIdentifier {
+            method_name: name,
             decl_name: "Main",
             arg_list: vec![RuntimeType::IntRuntimeType; 2],
         };
 
-        let (cost, pc_to_cost, cache) = min_distance_to_uncovered_method(
+        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
             entry_method.clone(),
             &coverage,
             &program,
             &flows,
             &symbol_table,
-            &mut visited,
+            &mut cache,
         );
 
-        for method in [entry_method, f_recursive, g_recursive] {
+        for method in [entry_method, recursive("f_recursive"), recursive("g_recursive")] {
             let s = pretty_print_cfg_method(
                 method,
                 &|pc| Some(format!("pc: {}, cost: {}", pc, pc_to_cost[&pc].value)),
@@ -867,15 +897,16 @@ mod tests {
         }
         assert_eq!(pc_to_cost, expected_result);
 
-        // dbg!(cost, pc_to_cost, cache);
+        dbg!(cost, pc_to_cost, cache);
     }
 
     #[test]
     fn md2u_nested_while() {
         let path = "./examples/reachability/nested_while.oox";
-        let (coverage, program, flows, symbol_table, mut visited) = setup(path);
+        let (coverage, program, flows, symbol_table) = setup(path);
 
-        let (cost, pc_to_cost, cache) = min_distance_to_uncovered_method(
+        let mut cache = Cache::new();
+        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
             MethodIdentifier {
                 method_name: "main",
                 decl_name: "Main",
@@ -885,7 +916,7 @@ mod tests {
             &program,
             &flows,
             &symbol_table,
-            &mut visited,
+            &mut cache,
         );
 
         dbg!(cost, &pc_to_cost, cache);

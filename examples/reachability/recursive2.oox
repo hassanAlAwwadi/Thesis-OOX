@@ -15,6 +15,14 @@ class Main {
            int whatboutme;
        } else {
            int otherwise;
+           otherwise := 0;
+           otherwise := 0;
+           otherwise := 0;
+           otherwise := 0;
+           otherwise := 0;
+           otherwise := 0;
+           otherwise := 0;
+           otherwise := 0;
        }
    }
 
@@ -22,6 +30,11 @@ class Main {
    static void g_recursive(int i, int n) {
         if (false) {
             Main.f_recursive(i, n);
+        } else {
+            int statement;
+            statement := 0;
+            statement := 0;
+            statement := 0;
         }
    }
 }
