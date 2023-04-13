@@ -44,20 +44,20 @@ where
     }
 }
 
-fn bin_op<E1, E2>(e1: E1, e2: E2, bin_op: BinOp, type_: RuntimeType) -> Expression
+fn bin_op<E1, E2>(e1: E1, e2: E2, bin_op: BinOp, type_: RuntimeType) ->  Rc<Expression>
 where
     E1: Into<Rc<Expression>>,
     E2: Into<Rc<Expression>>,
 {
-    Expression::BinOp {
-        bin_op,
-        lhs: e1.into(),
-        rhs: e2.into(),
-        type_,
-        info: SourcePos::UnknownPosition,
-    }
+    Rc::new(Expression::BinOp {
+            bin_op,
+            lhs: e1.into(),
+            rhs: e2.into(),
+            type_,
+            info: SourcePos::UnknownPosition,
+        })
 }
-pub(crate) fn equal<E1, E2>(e1: E1, e2: E2) -> Expression
+pub(crate) fn equal<E1, E2>(e1: E1, e2: E2) -> Rc<Expression>
 where
     E1: Into<Rc<Expression>>,
     E2: Into<Rc<Expression>>,
@@ -65,7 +65,7 @@ where
     bin_op(e1, e2, BinOp::Equal, RuntimeType::BoolRuntimeType)
 }
 
-pub(crate) fn greater_than_equal<E1, E2>(e1: E1, e2: E2) -> Expression
+pub(crate) fn greater_than_equal<E1, E2>(e1: E1, e2: E2) -> Rc<Expression>
 where
     E1: Into<Rc<Expression>>,
     E2: Into<Rc<Expression>>,
@@ -78,7 +78,7 @@ where
     )
 }
 
-pub(crate) fn less_than<E1, E2>(e1: E1, e2: E2) -> Expression
+pub(crate) fn less_than<E1, E2>(e1: E1, e2: E2) -> Rc<Expression>
 where
     E1: Into<Rc<Expression>>,
     E2: Into<Rc<Expression>>,
@@ -86,7 +86,7 @@ where
     bin_op(e1, e2, BinOp::LessThan, RuntimeType::BoolRuntimeType)
 }
 
-pub(crate) fn or<E1, E2>(e1: E1, e2: E2) -> Expression
+pub(crate) fn or<E1, E2>(e1: E1, e2: E2) -> Rc<Expression>
 where
     E1: Into<Rc<Expression>>,
     E2: Into<Rc<Expression>>,
@@ -94,7 +94,7 @@ where
     bin_op(e1, e2, BinOp::Or, RuntimeType::BoolRuntimeType)
 }
 
-pub(crate) fn and<E1, E2>(e1: E1, e2: E2) -> Expression
+pub(crate) fn and<E1, E2>(e1: E1, e2: E2) -> Rc<Expression>
 where
     E1: Into<Rc<Expression>>,
     E2: Into<Rc<Expression>>,
@@ -111,6 +111,7 @@ pub(crate) fn size_of(var: Identifier) -> Expression {
 }
 
 /// Turns an iterator of Expressions into an OR expression, with a false added to the front.
+/// returns False if the iterator is empty
 /// For example:
 /// ```
 /// # use lib::{syntax::Expression, dsl};
@@ -118,15 +119,20 @@ pub(crate) fn size_of(var: Identifier) -> Expression {
 ///
 /// assert_eq!(
 ///     format!("{:?}", dsl::ors(expressions)),
-///     "false || true || false || true"
+///     true || false || true"
 /// )
 /// ```
-pub fn ors<I, E>(iter: I) -> Expression
+pub fn ors<I, E>(iter: I) -> Rc<Expression>
 where
     I: IntoIterator<Item = E>,
     E: Into<Rc<Expression>>,
 {
-    iter.into_iter().fold(Expression::FALSE, or)
+    let mut it = iter.into_iter();
+    if let Some(first) = it.next() {
+        it.fold(first.into(), or)
+    } else {
+        Rc::new(Expression::FALSE)
+    }
 }
 
 /// Turns an iterator of Expressions into an AND expression, with a true added to the front.
@@ -140,12 +146,12 @@ where
 ///     "true && true && false && true"
 /// )
 /// ```
-pub fn ands<I, E>(iter: I) -> Expression
+pub fn ands<I, E>(iter: I) -> Rc<Expression>
 where
     I: IntoIterator<Item = E>,
     E: Into<Rc<Expression>>,
 {
-    iter.into_iter().fold(Expression::TRUE, and)
+    iter.into_iter().fold(Expression::TRUE.into(), and)
 }
 
 pub(crate) fn to_int_expr(int_value: i64) -> Expression {

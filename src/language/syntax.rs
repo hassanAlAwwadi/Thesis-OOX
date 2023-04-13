@@ -77,6 +77,14 @@ impl Declaration {
         }
     }
 
+    pub fn try_into_interface(&self) -> Option<Rc<Interface>> {
+        if let Declaration::Interface(interface) = self {
+            Some(interface.clone())
+        } else {
+            None
+        }
+    }
+
     pub fn name(&self) -> &Identifier {
         match self {
             Declaration::Class(class) => &class.name,

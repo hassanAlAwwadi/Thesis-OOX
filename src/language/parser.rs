@@ -188,7 +188,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         + ((punct("{") * call(statement) - punct("}")) | call(statement))
         + (keyword("else") * ((punct("{") * call(statement) - punct("}")) | call(statement)))
             .opt())
-    .map(|((guard, true_body), false_body)| create_ite(guard, true_body, false_body));
+    .map(|((guard, true_body), false_body)| create_ite(guard.into(), true_body, false_body));
     let continue_ = (keyword("continue") - punct(";")).map(|t| Statement::Continue {
         info: t.get_position(),
     });
@@ -267,19 +267,19 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     })
 }
 
-fn create_ite(guard: Expression, true_body: Statement, false_body: Option<Statement>) -> Statement {
+fn create_ite(guard: Rc<Expression>, true_body: Statement, false_body: Option<Statement>) -> Statement {
     Statement::Ite {
-        guard: guard.clone(),
+        guard: guard.as_ref().clone(),
         true_body: Box::new(Statement::Seq {
             stat1: Box::new(Statement::Assume {
-                assumption: guard.clone(),
+                assumption: guard.as_ref().clone(),
                 info: guard.get_position(),
             }),
             stat2: Box::new(true_body),
         }),
         false_body: Box::new(Statement::Seq {
             stat1: Box::new(Statement::Assume {
-                assumption: negate(Rc::new(guard.clone())),
+                assumption: negate(guard.clone()),
                 info: guard.get_position(),
             }),
             stat2: Box::new(false_body.unwrap_or(Statement::Skip)),
@@ -842,13 +842,13 @@ fn keyword<'a>(kw: &'a str) -> Parser<'a, Token<'a>, Token> {
     })
 }
 
-fn exceptional_assignment(lhs: &Lhs, rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Expression> {
+fn exceptional_assignment(lhs: &Lhs, rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Rc<Expression>> {
     let mut lhs = exceptional_lhs(lhs);
     lhs.extend(exceptional_rhs(rhs, class_names).into_iter());
     lhs
 }
 
-fn exceptional_lhs(lhs: &Lhs) -> HashSet<Expression> {
+fn exceptional_lhs(lhs: &Lhs) -> HashSet<Rc<Expression>> {
     match lhs {
         Lhs::LhsVar { .. } => HashSet::new(),
         Lhs::LhsField { var, var_type, .. } => HashSet::from([equal(
@@ -884,7 +884,7 @@ fn exceptional_lhs(lhs: &Lhs) -> HashSet<Expression> {
     }
 }
 
-fn exceptional_rhs(rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Expression> {
+fn exceptional_rhs(rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Rc<Expression>> {
     match rhs {
         Rhs::RhsExpression { value, .. } => exceptional_expression(value),
         Rhs::RhsField { var, .. } => HashSet::from([equal(var.clone(), Expression::NULL)]),
@@ -923,7 +923,7 @@ fn exceptional_rhs(rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Expression>
     }
 }
 
-fn exceptional_expression(expression: &Expression) -> HashSet<Expression> {
+fn exceptional_expression(expression: &Expression) -> HashSet<Rc<Expression>> {
     match expression {
         Expression::BinOp {
             bin_op: BinOp::Divide | BinOp::Modulo,
@@ -977,7 +977,7 @@ fn exceptional_expression(expression: &Expression) -> HashSet<Expression> {
 fn exceptional_invocation(
     invocation: &Invocation,
     class_names: &[Identifier],
-) -> HashSet<Expression> {
+) -> HashSet<Rc<Expression>> {
     match invocation {
         Invocation::InvokeMethod { lhs, arguments, .. } => {
             exceptional_invoke_method(lhs, arguments, class_names)
@@ -994,7 +994,7 @@ fn exceptional_invoke_method(
     lhs: &Identifier,
     arguments: &Vec<Rc<Expression>>,
     class_names: &[Identifier],
-) -> HashSet<Expression> {
+) -> HashSet<Rc<Expression>> {
     let exceptional_args: HashSet<_> = arguments
         .into_iter()
         .flat_map(|arg| exceptional_expression(arg).into_iter())
@@ -1019,7 +1019,7 @@ fn exceptional_invoke_method(
 }
 
 fn create_exceptional_ites(
-    conditions: HashSet<Expression>,
+    conditions: HashSet<Rc<Expression>>,
     body: Statement,
     pos: SourcePos,
 ) -> Statement {
@@ -1340,7 +1340,7 @@ fn pite<'a>() -> Parser<'a, Token<'a>, Statement> {
     (keyword("if") * punct("(") * expression() - punct(")")
         + ((punct("{") * call(statement) - punct("}")) | call(statement))
         + (keyword("else") * ((punct("{") * call(statement) - punct("}")) | call(statement))).opt())
-    .map(|((guard, true_body), false_body)| create_ite(guard, true_body, false_body))
+    .map(|((guard, true_body), false_body)| create_ite(guard.into(), true_body, false_body))
 }
 
 #[test]

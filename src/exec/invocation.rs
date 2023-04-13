@@ -116,7 +116,7 @@ pub(super) fn multiple_method_invocation(
             return ActionResult::FunctionCall(next_entry);
         }
         Expression::SymbolicRef { var, .. } => {
-            remove_symbolic_null(&mut state.alias_map, invocation_lhs);
+            remove_symbolic_null(&mut state.alias_map, var);
             let alias_entry = &state.alias_map[var];
 
             // if symbolicref contains only objects of one type

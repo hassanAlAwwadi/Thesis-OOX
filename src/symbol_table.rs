@@ -185,6 +185,18 @@ impl SymbolTable {
         &self.class_to_fields[class_name]
     }
 
+    /// Returns all methods for each class in the program (not cached)
+    pub fn get_all_class_methods(&self) -> Vec<(&Identifier, Rc<crate::Method>)> {
+        self.declarations
+            .iter()
+            .flat_map(|(name, decl)| decl.try_into_class().unwrap().members.iter().map(|m| (name, m.clone())).collect::<Vec<_>>())
+            .filter_map(|(name, m)| match m {
+                DeclarationMember::Method(m) => Some((name, m)),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Returns class_name and all subclasses of class_name,
     /// in other words all possible instance types for this class.
     pub fn get_all_instance_types(&self, class_name: &Identifier) -> &Vec<Identifier> {

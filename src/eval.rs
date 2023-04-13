@@ -417,7 +417,7 @@ fn evaluate_quantifier<'a, F>(
     en: &mut impl Engine,
 ) -> Rc<Expression>
 where
-    F: Fn(Vec<Rc<Expression>>) -> Expression,
+    F: Fn(Vec<Rc<Expression>>) -> Rc<Expression>,
 {
     let array = state
         .stack
@@ -464,7 +464,7 @@ where
                 })
                 .collect_vec();
 
-            quantifier(formulas).into()
+            quantifier(formulas)
         }
         _ => unreachable!("Expected array to be a reference, found {:?}", array),
     }

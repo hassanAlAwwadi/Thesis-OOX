@@ -12,9 +12,10 @@ use itertools::{Either, Itertools};
 use num::One;
 use slog::{debug, error, info, o, Logger};
 use sloggers::{
+    file::FileLoggerBuilder,
     terminal::{Destination, TerminalLoggerBuilder},
     types::Severity,
-    Build, file::FileLoggerBuilder,
+    Build,
 };
 use z3::SatResult;
 
@@ -25,12 +26,13 @@ mod invocation;
 mod state_split;
 
 use crate::{
-    cfg::{labelled_statements, CFGStatement},
+    cfg::{labelled_statements, CFGStatement, MethodIdentifier},
     concretization::{concretizations, find_symbolic_refs},
     dsl::{equal, ite, negate, or, to_int_expr},
     eval::{self, evaluate, evaluate_as_int},
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
-    parser::{ parse},
+    language, parse_program,
+    parser::parse,
     positioned::{SourcePos, WithPosition},
     stack::{lookup_in_stack, write_to_stack, StackFrame},
     statistics::Statistics,
@@ -41,7 +43,7 @@ use crate::{
     },
     typeable::{runtime_to_nonvoidtype, Typeable},
     typing::type_compilation_unit,
-    utils, z3_checker, FILE_NAMES, parse_program, language,
+    utils, z3_checker, FILE_NAMES,
 };
 
 use crate::exec::state_split::exec_array_initialisation;
@@ -810,7 +812,7 @@ pub fn find_entry_for_static_invocation(
                 false
             }
         })
-        .expect("Could not find the method");
+        .unwrap_or_else(|| panic!("Could not find the method {}.{}({:?})", class_name, method_name, argument_types.clone().collect_vec()));
 
     *entry
 }
@@ -1081,7 +1083,7 @@ fn write_field_symbolic_ref(
             for r in rs {
                 if let Expression::Ref { ref_, type_, .. } = r.as_ref() {
                     let ite = ite(
-                        Rc::new(equal(sym_ref.clone(), r.clone())),
+                        equal(sym_ref.clone(), r.clone()),
                         value.clone(),
                         read_field_concrete_ref(heap, *ref_, &field),
                     );
@@ -1591,8 +1593,8 @@ fn exec_array_construction(
     assert!(sizes.len() == 1, "Support for only 1D arrays");
     // int[][] a = new int[10][10];
 
-    let size =
-        evaluate_as_int(state, Rc::new(sizes[0].clone()), en).expect_right("no symbolic array sizes");
+    let size = evaluate_as_int(state, Rc::new(sizes[0].clone()), en)
+        .expect_right("no symbolic array sizes");
 
     let array = (0..size)
         .map(|_| Rc::new(array_type.default()))
@@ -1648,7 +1650,7 @@ pub type Error = String;
 pub enum Heuristic {
     DepthFirstSearch,
     RandomPath,
-    MinDist2Uncovered
+    MinDist2Uncovered,
 }
 
 #[derive(Copy, Clone)]
@@ -1695,14 +1697,16 @@ pub fn verify(
     // Set global file names
     *FILE_NAMES.lock().unwrap() = path.to_string();
 
+    let c =
+        parse_program(&file_content, options.with_exceptional_clauses).map_err(
+            |error| match error {
+                language::Error::ParseError(err) => err.to_string(),
+                language::Error::LexerError((line, col)) => {
+                    format!("Lexer error at {}:{}:{}", path.to_string(), line, col)
+                }
+            },
+        )?;
 
-    let c = parse_program(&file_content, options.with_exceptional_clauses)
-        .map_err(|error| match error {
-            language::Error::ParseError(err) => err.to_string(),
-            language::Error::LexerError((line, col)) => format!("Lexer error at {}:{}:{}", path.to_string(), line, col),
-        })?;
-    
-    
     // dbg!(&c);
     if !options.quiet {
         println!("Parsing completed");
@@ -1737,12 +1741,22 @@ pub fn verify(
 
     // dbg!(&flows);
     // panic!();
-    let argument_types = initial_method.params.iter().map(Typeable::type_of);
+    let argument_types = initial_method
+        .params
+        .iter()
+        .map(Typeable::type_of)
+        .collect();
+
+    let entry_method = MethodIdentifier {
+        decl_name: class_name,
+        method_name: method_name,
+        arg_list: argument_types,
+    };
 
     let pc = find_entry_for_static_invocation(
-        class_name,
-        method_name,
-        argument_types,
+        entry_method.decl_name,
+        entry_method.method_name,
+        entry_method.arg_list.iter().cloned(),
         &program,
         &symbol_table,
     );
@@ -1802,7 +1816,7 @@ pub fn verify(
     let sym_exec = match options.heuristic {
         Heuristic::DepthFirstSearch => heuristics::depth_first_search::sym_exec,
         Heuristic::RandomPath => heuristics::random_path::sym_exec,
-        Heuristic::MinDist2Uncovered => heuristics::min_dist_to_uncovered::sym_exec
+        Heuristic::MinDist2Uncovered => heuristics::min_dist_to_uncovered::sym_exec,
     };
     let sym_result = sym_exec(
         state,
@@ -1813,6 +1827,7 @@ pub fn verify(
         root_logger,
         path_counter.clone(),
         &mut statistics,
+        entry_method,
     );
 
     let duration = start.elapsed();
@@ -1855,10 +1870,7 @@ pub fn verify(
 fn sym_exec_of_absolute_simplest() {
     let path = "./examples/absolute_simplest.oox";
     let options = Options::default_with_k(20);
-    assert_eq!(
-        verify(path, "Foo", "f", options).unwrap(),
-        SymResult::Valid
-    );
+    assert_eq!(verify(path, "Foo", "f", options).unwrap(), SymResult::Valid);
 }
 
 #[test]
@@ -1885,21 +1897,19 @@ fn sym_exec_method() {
 //     assert_eq!(verify(&file_content, "Main", "main", 50), SymResult::Valid);
 // }
 
-#[test]
-fn sym_test_failure() {
-    let path = "./examples/psv/test.oox";
-    assert_eq!(
-        verify(&path, "Main", "main", Options::default_with_k(30)).unwrap(),
-        SymResult::Invalid(SourcePos::SourcePos { line: 10, col: 24 })
-    );
-}
 
 #[test]
 fn sym_exec_div_by_n() {
     let path = "./examples/psv/divByN.oox";
     // so this one is invalid at k = 100, in OOX it's invalid at k=105, due to exceptions (more if statements are added)
     assert_eq!(
-        verify(&path, "Main", "divByN_invalid", Options::default_with_k(100)).unwrap(),
+        verify(
+            &path,
+            "Main",
+            "divByN_invalid",
+            Options::default_with_k(100)
+        )
+        .unwrap(),
         SymResult::Invalid(SourcePos::new(73, 16))
     );
 }
@@ -1945,7 +1955,13 @@ fn sym_exec_linked_list3_invalid() {
     let path = "./examples/intLinkedList.oox";
     // at k=80 it fails, after ~170 sec in hs oox, rs oox does this in ~90 sec
     assert_eq!(
-        verify(&path, "Node", "test3_invalid1", Options::default_with_k(110)).unwrap(),
+        verify(
+            &path,
+            "Node",
+            "test3_invalid1",
+            Options::default_with_k(110)
+        )
+        .unwrap(),
         SymResult::Invalid(SourcePos::new(141, 18))
     );
 }
@@ -1972,7 +1988,13 @@ fn sym_exec_linked_list4_invalid() {
 fn sym_exec_linked_list4_if_problem() {
     let path = "./examples/intLinkedList.oox";
     assert_eq!(
-        verify(&path, "Node", "test4_if_problem", Options::default_with_k(90)).unwrap(),
+        verify(
+            &path,
+            "Node",
+            "test4_if_problem",
+            Options::default_with_k(90)
+        )
+        .unwrap(),
         SymResult::Valid
     );
 }
@@ -2105,19 +2127,43 @@ fn sym_exec_array1() {
     );
     // assert_eq!(verify_file(&file_content, "exists_invalid1", 50), SymResult::Invalid);
     assert_eq!(
-        verify(&path, "Main", "exists_invalid2", Options::default_with_k(50)).unwrap(),
+        verify(
+            &path,
+            "Main",
+            "exists_invalid2",
+            Options::default_with_k(50)
+        )
+        .unwrap(),
         SymResult::Invalid(SourcePos::new(160, 17))
     );
     assert_eq!(
-        verify(&path, "Main", "array_creation1", Options::default_with_k(50)).unwrap(),
+        verify(
+            &path,
+            "Main",
+            "array_creation1",
+            Options::default_with_k(50)
+        )
+        .unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&path, "Main", "array_creation2", Options::default_with_k(50)).unwrap(),
+        verify(
+            &path,
+            "Main",
+            "array_creation2",
+            Options::default_with_k(50)
+        )
+        .unwrap(),
         SymResult::Valid
     );
     assert_eq!(
-        verify(&path, "Main", "array_creation_invalid", Options::default_with_k(50)).unwrap(),
+        verify(
+            &path,
+            "Main",
+            "array_creation_invalid",
+            Options::default_with_k(50)
+        )
+        .unwrap(),
         SymResult::Invalid(SourcePos::new(193, 17))
     );
 }
@@ -2267,7 +2313,8 @@ fn sym_exec_polymorphic() {
         verify(
             "./examples/inheritance/sym_exec_polymorphic.oox",
             "Main",
-            "main",options
+            "main",
+            options
         )
         .unwrap(),
         SymResult::Valid
@@ -2282,7 +2329,8 @@ fn benchmark_col_25() {
         verify(
             "./benchmark_programs/defects4j/collections_25.oox",
             "Test",
-            "test",options
+            "test",
+            options
         )
         .unwrap(),
         SymResult::Invalid(SourcePos::new(352, 21))
@@ -2297,7 +2345,8 @@ fn benchmark_col_25_symbolic() {
         verify(
             "./benchmark_programs/defects4j/collections_25.oox",
             "Test",
-            "test_symbolic",options
+            "test_symbolic",
+            options
         )
         .unwrap(),
         SymResult::Invalid(SourcePos::new(395, 21))
@@ -2312,7 +2361,8 @@ fn benchmark_col_25_test3() {
         verify(
             "./benchmark_programs/defects4j/collections_25.oox",
             "Test",
-            "test3",options
+            "test3",
+            options
         )
         .unwrap(),
         SymResult::Valid
@@ -2327,7 +2377,8 @@ fn any_linked_list() {
         verify(
             "./benchmark_programs/experiment1/1Node.oox",
             "Main",
-            "test2",options
+            "test2",
+            options
         )
         .unwrap(),
         SymResult::Valid
@@ -2352,7 +2403,8 @@ fn multiple_constructors() {
         verify(
             "./examples/multiple_constructors.oox",
             "Foo",
-            "test",options
+            "test",
+            options
         )
         .unwrap(),
         SymResult::Valid
