@@ -1,3 +1,10 @@
+//! This module contains an algorithm to compute the minimal distance to an uncovered statement, for every statement in a given method.
+//! It also contains caching utility for when a method is fully explored.
+//! 
+//! The approach we take is method-scoped, so a statement in a method has a distance either to the first uncovered statement in this method.
+//! Otherwise it has the shortest distance to the end of the method.
+
+
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
@@ -9,26 +16,26 @@ use crate::{
     Invocation, Rhs, Statement,
 };
 
-use super::{Cost, ProgramCounter};
+use super::super::{Cost, ProgramCounter};
 
 /// A cache storing for a method the distance, will not contain distances for unexplored methods.
 /// A method always has the same cost, with a distinction made between a cost achieved by finding an uncovered statement,
 /// and otherwise a cost of calling the function in terms of the number of statements visited.
-pub(super) type Cache<'a> = HashMap<MethodIdentifier<'a>, CumulativeCost>;
+pub(crate) type Cache<'a> = HashMap<MethodIdentifier<'a>, CumulativeCost>;
 
 /// Type of distance of a statement, can be either partially complete (to as far as it can see), which would be the exit of the method.
 /// Or it can be the distance to the first uncovered statement, if any found.
 #[derive(Debug, Hash, Eq, PartialEq, Clone, PartialOrd, Ord, Copy)]
-pub(super) enum DistanceType {
+pub enum DistanceType {
     ToFirstUncovered,
     ToEndOfMethod,
 }
 
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone, Copy)]
-pub(super) struct Distance {
-    pub(super) distance_type: DistanceType,
+pub struct Distance {
+    pub distance_type: DistanceType,
     /// Should be at least 1
-    pub(super) value: u64,
+    pub value: u64,
 }
 
 impl Distance {
@@ -38,11 +45,11 @@ impl Distance {
     }
 }
 
-/// calling a method will explore a certain number of statements before returning
+/// Calling a method will explore a certain number of statements before returning
 /// If an uncovered statement is encountered, it will have an exact cost
 /// Otherwise it returns the minimal cost of the method call in terms of the number of statements explored.
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(super) enum CumulativeCost {
+pub(crate) enum CumulativeCost {
     Cost(Distance),
     /// Cycles back to program point (while loop), with additional cost.
     Cycle(ProgramCounter, Cost),
@@ -93,7 +100,7 @@ impl CumulativeCost {
 ///  - the distance of this method to the closest uncovered statement, or the end of the method.
 ///  - a mapping for every program counter explored to its distance
 ///  - a cache for methods explored may be reused.
-pub(super) fn min_distance_to_uncovered_method<'a>(
+pub(crate) fn min_distance_to_uncovered_method<'a>(
     method: MethodIdentifier<'a>,
     coverage: &HashMap<ProgramCounter, usize>,
     program: &'a HashMap<ProgramCounter, CFGStatement>,

@@ -2,35 +2,32 @@ use std::{collections::HashMap, cell::RefCell, rc::{Rc, Weak}, ops::DerefMut};
 
 use slog::{Logger, debug};
 
-use crate::{cfg::CFGStatement, symbol_table::SymbolTable, statistics::Statistics, exec::{action, ActionResult}};
+use crate::{cfg::CFGStatement, symbol_table::SymbolTable, statistics::Statistics, exec::{action, ActionResult}, positioned::SourcePos};
 
-use n::N;
+use execution_tree::ExecutionTree;
 
 use super::{State, SymResult, IdCounter};
 
 pub mod depth_first_search;
 pub mod random_path;
 pub mod min_dist_to_uncovered;
-mod md2u_recursive;
 
 
 type Cost = u64;
 type ProgramCounter = u64;
 
 
-mod n;
+mod execution_tree;
+mod utils;
 
-enum R {
-    /// The new states at one increased path counter, this occurs when there is no branch statement.
-    /// Often this will be just one state, but it may happen that states are split due to e.g. array initialisation.
-    Step(Vec<State>),
-    /// A branch statement (if, while, foo.bar() dynamic dispatch to different functions)
-    StateSplit(HashMap<u64, Vec<State>>),
-    /// The path is finished, pruned or an invalid assert occured.
-    Exit(SymResult),
-}
 
-fn execute_instruction_for_all_statements(
+/// Given a set of states, which are all assumed to be at the same program point, 
+/// execute one instruction and return the resulting set of states, possibly branched into different program points.
+/// Often this will be just one state, but it may happen that states are split due to e.g. array initialisation or due to encountering a branch statement,
+/// (if, while, function call with dynamic dispatch)
+/// 
+/// If instead an invalid assertion occured, return that assertion location.
+fn execute_instruction_for_all_states(
     states: Vec<State>,
     program: &HashMap<u64, CFGStatement>,
     flows: &HashMap<u64, Vec<u64>>,
@@ -39,7 +36,7 @@ fn execute_instruction_for_all_statements(
     root_logger: Logger,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &mut Statistics,
-) -> R {
+) -> Result<HashMap<u64, Vec<State>>, SourcePos> {
     let mut remaining_states = states;
 
     let mut resulting_states: HashMap<u64, Vec<State>> = HashMap::new();
@@ -124,13 +121,12 @@ fn execute_instruction_for_all_statements(
                         // Valid program exit, continue
                         statistics.measure_finish();
                     } else {
-                        // Unexpected end of CFG
                         panic!("Unexpected end of CFG");
                     }
                 }
             }
             ActionResult::InvalidAssertion(info) => {
-                return R::Exit(SymResult::Invalid(info));
+                return Err(info);
             }
             ActionResult::InfeasiblePath => {
                 statistics.measure_prune();
@@ -146,7 +142,7 @@ fn execute_instruction_for_all_statements(
     // }
 
     // Finished
-    return R::StateSplit(resulting_states);
+    return Ok(resulting_states);
 }
 
 /// Marks a path as finished in the path tree. (only if there are no valid states left for that path)
@@ -158,7 +154,7 @@ fn execute_instruction_for_all_statements(
 /// 
 /// TODO:
 /// Removing any branching node where there is only one unpruned/unfinished state left.
-fn finish_state_in_path(mut leaf: Rc<RefCell<N>>, path: Vec<ProgramCounter>,) -> bool {
+fn finish_state_in_path(mut leaf: Rc<RefCell<ExecutionTree>>, path: Vec<ProgramCounter>,) -> bool {
     loop {
         let parent = if let Some(parent) = leaf.borrow().parent().upgrade() {
             parent
@@ -175,7 +171,7 @@ fn finish_state_in_path(mut leaf: Rc<RefCell<N>>, path: Vec<ProgramCounter>,) ->
         };
         
         match parent.borrow_mut().deref_mut() {
-            N::Node { children, .. } => {
+            ExecutionTree::Node { children, .. } => {
                 
                 children.retain(|child| !Rc::ptr_eq(child, &leaf));
                 
@@ -185,7 +181,7 @@ fn finish_state_in_path(mut leaf: Rc<RefCell<N>>, path: Vec<ProgramCounter>,) ->
                     return false;
                 }
             }
-            N::Leaf { .. } => panic!("Expected a Node as parent"),
+            ExecutionTree::Leaf { .. } => panic!("Expected a Node as parent"),
         };
     }
 }

@@ -18,29 +18,27 @@ use slog::{debug, Logger};
 use crate::{
     cfg::{CFGStatement, MethodIdentifier},
     exec::{
-        find_entry_for_static_invocation,
-        heuristics::{finish_state_in_path, Cost},
+        heuristics::{finish_state_in_path},
         IdCounter, State, SymResult,
     },
-    prettyprint::cfg_pretty::pretty_print_compilation_unit,
     statistics::Statistics,
     symbol_table::SymbolTable,
     syntax::{Declaration, Invocation, Method, Rhs, Statement},
     DeclarationMember,
 };
 
-use crate::exec::heuristics::execute_instruction_for_all_statements;
+use crate::exec::heuristics::execute_instruction_for_all_states;
 
-use super::{md2u_recursive, n::N, ProgramCounter, R};
+use super::{utils::md2u_recursive, execution_tree::ExecutionTree, ProgramCounter};
 
 /// Make a weighted stochastic choice, where the weight is calculated based on the distance to a newly uncovered branch.
 /// Choose between all leafs (states on different program points)
 /// If all weights are zero, that means that all statements have been covered and it falls back on random state choice.
 fn choice<'a>(
-    leafs: &Vec<Rc<RefCell<N>>>,
+    leafs: &Vec<Rc<RefCell<ExecutionTree>>>,
     md2u: &HashMap<ProgramCounter, md2u_recursive::Distance>,
     rng: &'a mut impl Rng,
-) -> Rc<RefCell<N>> {
+) -> Rc<RefCell<ExecutionTree>> {
     // Find for each leaf the md2u, construct a WeightedIndex and sample one leaf.
     if md2u.len() == 0 {
         let idx = rng.gen_range(0..leafs.len());
@@ -111,14 +109,14 @@ pub(crate) fn sym_exec(
     let root_pc = state.pc;
 
     // let mut paths = PathTree {root: state.pc, nodes: HashMap::from([(state.pc, TreeNode::Leaf(vec![state]))]) };
-    let tree = Rc::new(RefCell::new(N::Leaf {
+    let tree = Rc::new(RefCell::new(ExecutionTree::Leaf {
         parent: Weak::new(),
         statement: state.pc,
         states: vec![state],
     }));
 
     loop {
-        let leafs = N::leafs(tree.clone());
+        let leafs = ExecutionTree::leafs(tree.clone());
         // pointer to the leaf with states chosen by the heuristic
         // md2u = min_distance_to_uncovered(root_pc, &coverage, successors(program, flows, st));
         let new_md2u = md2u_recursive::min_distance_to_uncovered_method(
@@ -150,7 +148,7 @@ pub(crate) fn sym_exec(
 
         let states = chosen_state;
 
-        let r = execute_instruction_for_all_statements(
+        let r = execute_instruction_for_all_states(
             states,
             program,
             flows,
@@ -162,8 +160,7 @@ pub(crate) fn sym_exec(
         );
 
         match r {
-            R::Step(_) => todo!(),
-            R::StateSplit(new_states) => {
+            Ok(new_states) => {
                 // assert!(new_states.len() <= 2);
                 for (pc, states) in &new_states {
                     debug!(
@@ -220,7 +217,7 @@ pub(crate) fn sym_exec(
                         let states = new_states
                             .into_iter()
                             .map(|(pc, states)| {
-                                Rc::new(RefCell::new(N::Leaf {
+                                Rc::new(RefCell::new(ExecutionTree::Leaf {
                                     parent: Rc::downgrade(&states_node),
                                     statement: pc,
                                     states: states,
@@ -231,7 +228,7 @@ pub(crate) fn sym_exec(
                         // assert!(true_.len() > 0 && false_.len() > 0);
 
                         let parent = states_node.borrow().parent();
-                        *states_node.borrow_mut() = N::Node {
+                        *states_node.borrow_mut() = ExecutionTree::Node {
                             parent,
                             statement: current_pc,
                             children: states,
@@ -248,8 +245,7 @@ pub(crate) fn sym_exec(
                     x => panic!("got {:?}", x),
                 }
             }
-            // Think i need to check here if it is valid or not, if valid we should not return but just prune/finish that path in the tree of paths?
-            R::Exit(result) => return result,
+            Err(info) => return SymResult::Invalid(info),
         }
     }
 }

@@ -11,7 +11,7 @@ use slog::{debug, Logger};
 
 use crate::{cfg::CFGStatement, statistics::Statistics, symbol_table::SymbolTable};
 
-use super::{IdCounter, State, SymResult, execute_instruction_for_all_statements, R, finish_state_in_path, ProgramCounter, n::N};
+use super::{IdCounter, State, SymResult, execute_instruction_for_all_states, finish_state_in_path, ProgramCounter, execution_tree::ExecutionTree};
 
 // We also need to consider that there are a lot of branches that end quickly, like due to if (x == null) { throw exception; } guard insertions.
 enum BTree {
@@ -77,14 +77,14 @@ struct PathTree {
 }
 
 fn random_path<'a>(
-    mut tree: Rc<RefCell<N>>,
+    mut tree: Rc<RefCell<ExecutionTree>>,
     rng: &'a mut impl Rng,
-) -> (Vec<u64>, Rc<RefCell<N>>) {
+) -> (Vec<u64>, Rc<RefCell<ExecutionTree>>) {
     let mut path = Vec::new();
     loop {
         let node = tree.clone();
         match node.borrow().deref() {
-            N::Node {
+            ExecutionTree::Node {
                 statement,
                 children,
                 ..
@@ -96,7 +96,7 @@ fn random_path<'a>(
                 let idx = rng.gen_range(0..children.len());
                 tree = children[idx].clone();
             }
-            N::Leaf { statement, .. } => {
+            ExecutionTree::Leaf { statement, .. } => {
                 path.push(*statement);
                 return (path, tree);
             }
@@ -190,7 +190,7 @@ pub(crate) fn sym_exec(
     let mut rng = rand::thread_rng();
 
     // let mut paths = PathTree {root: state.pc, nodes: HashMap::from([(state.pc, TreeNode::Leaf(vec![state]))]) };
-    let tree = Rc::new(RefCell::new(N::Leaf {
+    let tree = Rc::new(RefCell::new(ExecutionTree::Leaf {
         parent: Weak::new(),
         statement: state.pc,
         states: vec![state],
@@ -205,7 +205,7 @@ pub(crate) fn sym_exec(
 
         let states = chosen_state;
 
-        let r = execute_instruction_for_all_statements(
+        let r = execute_instruction_for_all_states(
             states,
             program,
             flows,
@@ -217,8 +217,7 @@ pub(crate) fn sym_exec(
         );
 
         match r {
-            R::Step(_) => todo!(),
-            R::StateSplit(new_states) => {
+            Ok(new_states) => {
                 assert!(new_states.len() <= 2);
                 for (pc, states) in &new_states {
                     debug!(
@@ -286,16 +285,16 @@ pub(crate) fn sym_exec(
                         assert_all_aliasmaps_are_equivalent(&false_);
 
                         let parent = states_node.borrow().parent();
-                        *states_node.borrow_mut() = N::Node {
+                        *states_node.borrow_mut() = ExecutionTree::Node {
                             parent,
                             statement: current_pc,
                             children: vec![
-                                Rc::new(RefCell::new(N::Leaf {
+                                Rc::new(RefCell::new(ExecutionTree::Leaf {
                                     parent: Rc::downgrade(&states_node),
                                     statement: true_pc,
                                     states: true_,
                                 })),
-                                Rc::new(RefCell::new(N::Leaf {
+                                Rc::new(RefCell::new(ExecutionTree::Leaf {
                                     parent: Rc::downgrade(&states_node),
                                     statement: false_pc,
                                     states: false_,
@@ -314,8 +313,8 @@ pub(crate) fn sym_exec(
                     x => panic!("got {:?}", x),
                 }
             }
-            // Think i need to check here if it is valid or not, if valid we should not return but just prune/finish that path in the tree of paths?
-            R::Exit(result) => return result,
+            // Invalid assertion encountered
+            Err(loc) => return SymResult::Invalid(loc),
         }
     }
 }
