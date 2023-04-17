@@ -1,0 +1,33 @@
+class Node {    
+    Node next ;
+    int v;
+
+    static void main(Node n, int z) {
+        bool b := n.member(z);
+        assert b;
+        assert b;
+        assert b;
+        assert b;
+    }
+    
+    static bool member(int x)
+    {
+        int v;
+        if(x==v) return true ;
+        else {
+            Node n;
+            if (n == null) { 
+                return false; 
+            } else {
+                bool b := Node.member(x) ;
+                b := b;
+                b := b;
+                b := b;
+                b := b;
+                b := b;
+                b := b;
+                return b ;
+            }
+        }
+    }
+}

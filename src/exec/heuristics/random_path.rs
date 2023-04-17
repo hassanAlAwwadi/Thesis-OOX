@@ -185,6 +185,7 @@ pub(crate) fn sym_exec(
     root_logger: Logger,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &mut Statistics,
+    _entry_method: crate::cfg::MethodIdentifier,
 ) -> SymResult {
     let mut rng = rand::thread_rng();
 

@@ -507,6 +507,36 @@ pub mod cfg_pretty {
 
     type ProgramCounter = u64;
 
+    /// Pretty prints the compilation unit, with optionally a decorator to decorate each statement with a comment with additional information
+    /// This can be used to display the program counter for each statement for instance.
+    pub fn pretty_print_compilation_unit<'a, F>(
+        decorator: &'a F,
+        program: &HashMap<ProgramCounter, CFGStatement>,
+        flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
+        st: &SymbolTable,
+    ) -> String
+    where
+        F: Fn(u64) -> Option<String>,
+    {
+        let mut s = String::new();
+
+        let class_methods = st.get_all_class_methods();
+
+        let methods = class_methods
+            .iter()
+            .map(|(decl_name, method)| MethodIdentifier {
+                method_name: &method.name,
+                decl_name: decl_name,
+                arg_list: method.param_types().collect(),
+            });
+
+        for method in methods {
+            let method = pretty_print_cfg_method(method, decorator, &program, &flow, &st);
+            s = format!("{}\n{}", s, method);
+        }
+        s
+    }
+
     pub fn pretty_print_cfg_method<'a, F>(
         function_entry: MethodIdentifier<'a>,
         decorator: &'a F,
@@ -586,11 +616,7 @@ pub mod cfg_pretty {
                 .nest(2),
             );
             // function exit
-            result = result.append(docs![
-                &allocator,
-                allocator.hardline(),
-                "}"
-            ]);
+            result = result.append(docs![&allocator, allocator.hardline(), "}"]);
         } else {
             panic!("Expected function_entry to be a FunctionEntry");
         }

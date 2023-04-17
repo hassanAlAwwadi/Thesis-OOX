@@ -1,36 +1,44 @@
 use std::{
-    cell::{RefCell, Ref},
+    cell::{Ref, RefCell},
     collections::{HashMap, HashSet},
     ops::Deref,
-    rc::{Rc, Weak}
+    rc::{Rc, Weak},
+    time::Duration,
 };
 
 use criterion::measurement::Measurement;
 use itertools::Itertools;
-use rand::{distributions::WeightedIndex, prelude::Distribution, Rng};
+use rand::{
+    distributions::{WeightedError, WeightedIndex},
+    prelude::Distribution,
+    Rng,
+};
 use slog::{debug, Logger};
 
 use crate::{
-    cfg::CFGStatement,
+    cfg::{CFGStatement, MethodIdentifier},
     exec::{
         find_entry_for_static_invocation,
         heuristics::{finish_state_in_path, Cost},
         IdCounter, State, SymResult,
     },
+    prettyprint::cfg_pretty::pretty_print_compilation_unit,
     statistics::Statistics,
     symbol_table::SymbolTable,
     syntax::{Declaration, Invocation, Method, Rhs, Statement},
+    DeclarationMember,
 };
 
 use crate::exec::heuristics::execute_instruction_for_all_statements;
 
-use super::{n::N, ProgramCounter, R};
+use super::{md2u_recursive, n::N, ProgramCounter, R};
 
 /// Make a weighted stochastic choice, where the weight is calculated based on the distance to a newly uncovered branch.
 /// Choose between all leafs (states on different program points)
+/// If all weights are zero, that means that all statements have been covered and it falls back on random state choice.
 fn choice<'a>(
     leafs: &Vec<Rc<RefCell<N>>>,
-    md2u: &HashMap<ProgramCounter, Cost>,
+    md2u: &HashMap<ProgramCounter, md2u_recursive::Distance>,
     rng: &'a mut impl Rng,
 ) -> Rc<RefCell<N>> {
     // Find for each leaf the md2u, construct a WeightedIndex and sample one leaf.
@@ -38,13 +46,28 @@ fn choice<'a>(
         let idx = rng.gen_range(0..leafs.len());
         return leafs[idx].clone();
     }
-    let weights = leafs
-        .iter()
-        .map(|n| n.borrow().statement())
-        .map(|pc| md2u.get(&pc).map(|v| 1.0 / *v as f32).unwrap_or(0.0));
-    let wi = WeightedIndex::new(weights).unwrap();
-    let idx = wi.sample(rng);
-    return leafs[idx].clone();
+    let weights = leafs.iter().map(|n| n.borrow().statement()).map(|pc| {
+        let distance = md2u.get(&pc);
+        // if distance.is_none() {
+        //     dbg!(&md2u);
+        // }
+        let distance = distance.unwrap();
+        match distance.distance_type {
+            md2u_recursive::DistanceType::ToFirstUncovered => 1.0 / distance.value as f64,
+            md2u_recursive::DistanceType::ToEndOfMethod => 0.0,
+        }
+    });
+    match WeightedIndex::new(weights) {
+        Ok(wi) => {
+            let idx = wi.sample(rng);
+            return leafs[idx].clone();
+        }
+        Err(WeightedError::AllWeightsZero) => {
+            let idx = rng.gen_range(0..leafs.len());
+            return leafs[idx].clone();
+        }
+        Err(err) => panic!("{}", err),
+    }
 }
 
 /// The main function for the symbolic execution, any path splitting due to the control flow graph or array initialization happens here.
@@ -58,13 +81,33 @@ pub(crate) fn sym_exec(
     root_logger: Logger,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &mut Statistics,
+    entry_method: MethodIdentifier,
 ) -> SymResult {
     // dbg!(flows);
     // dbg!(program);
 
     let mut rng = rand::thread_rng();
     let mut coverage = HashMap::new();
-    let mut md2u;
+    let mut md2u_cache = md2u_recursive::Cache::new();
+
+    let (_distance, mut md2u) = md2u_recursive::min_distance_to_uncovered_method(
+        entry_method.clone(),
+        &coverage,
+        program,
+        flows,
+        st,
+        &mut md2u_cache,
+    );
+
+    let s = crate::prettyprint::cfg_pretty::pretty_print_cfg_method(
+        entry_method.clone(),
+        &|pc| Some(format!("pc: {}, cost: {}", pc, md2u[&pc].value)),
+        &program,
+        &flows,
+        &st,
+    );
+    println!("{}", s);
+
     let root_pc = state.pc;
 
     // let mut paths = PathTree {root: state.pc, nodes: HashMap::from([(state.pc, TreeNode::Leaf(vec![state]))]) };
@@ -78,13 +121,29 @@ pub(crate) fn sym_exec(
         let leafs = N::leafs(tree.clone());
         // pointer to the leaf with states chosen by the heuristic
         // md2u = min_distance_to_uncovered(root_pc, &coverage, successors(program, flows, st));
-        md2u = todo!();
-
+        let new_md2u = md2u_recursive::min_distance_to_uncovered_method(
+            entry_method.clone(),
+            &coverage,
+            program,
+            flows,
+            st,
+            &mut md2u_cache,
+        )
+        .1;
+        md2u.extend(new_md2u);
         // dbg!(&md2u);
 
         let states_node = choice(&leafs, &md2u, &mut rng);
 
         let current_pc = states_node.borrow().statement();
+
+        // let decorator = &|pc| Some(format!("pc: {}, cost: {:?} {}", pc, md2u.get(&pc).and_then(|d| if let md2u_recursive::DistanceType::ToFirstUncovered = d.distance_type { Some(d.value) } else { None}),
+        // if pc == current_pc { " <<<<" } else { "" }));
+
+        // let s = pretty_print_compilation_unit(decorator, program, &flows, st);
+        // std::fs::write("visualize", &s).unwrap();
+        // std::thread::sleep(std::time::Duration::from_millis(300));
+
         // Update the coverage
         *coverage.entry(current_pc).or_insert(0) += 1;
         let chosen_state = states_node.borrow_mut().into_states().unwrap();
@@ -105,7 +164,7 @@ pub(crate) fn sym_exec(
         match r {
             R::Step(_) => todo!(),
             R::StateSplit(new_states) => {
-                assert!(new_states.len() <= 2);
+                // assert!(new_states.len() <= 2);
                 for (pc, states) in &new_states {
                     debug!(
                         root_logger,
@@ -146,35 +205,36 @@ pub(crate) fn sym_exec(
 
                         // *states_node.borrow_mut() = N::Leaf { parent: Weak::new(), states };
                     }
-                    2 => {
+                    n => {
                         // Branching, split up states
+                        // We replace the leaf with a node at the branching statement, its children are the new paths each in a different direction.
                         debug!(
                             root_logger,
                             "new states: {:?}",
                             new_states.iter().map(|(pc, _)| pc).collect_vec()
                         );
 
-                        let ((true_pc, true_), (false_pc, false_)) =
-                            new_states.into_iter().collect_tuple().unwrap();
+                        // let ((true_pc, true_), (false_pc, false_)) =
+                        //     new_states.into_iter().collect_tuple().unwrap();
 
-                        assert!(true_.len() > 0 && false_.len() > 0);
+                        let states = new_states
+                            .into_iter()
+                            .map(|(pc, states)| {
+                                Rc::new(RefCell::new(N::Leaf {
+                                    parent: Rc::downgrade(&states_node),
+                                    statement: pc,
+                                    states: states,
+                                }))
+                            })
+                            .collect();
+
+                        // assert!(true_.len() > 0 && false_.len() > 0);
 
                         let parent = states_node.borrow().parent();
                         *states_node.borrow_mut() = N::Node {
                             parent,
                             statement: current_pc,
-                            children: vec![
-                                Rc::new(RefCell::new(N::Leaf {
-                                    parent: Rc::downgrade(&states_node),
-                                    statement: true_pc,
-                                    states: true_,
-                                })),
-                                Rc::new(RefCell::new(N::Leaf {
-                                    parent: Rc::downgrade(&states_node),
-                                    statement: false_pc,
-                                    states: false_,
-                                })),
-                            ],
+                            children: states,
                         }
 
                         // paths.nodes.insert(k, v)
