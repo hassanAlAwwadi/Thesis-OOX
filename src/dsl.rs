@@ -119,7 +119,7 @@ pub(crate) fn size_of(var: Identifier) -> Expression {
 ///
 /// assert_eq!(
 ///     format!("{:?}", dsl::ors(expressions)),
-///     true || false || true"
+///     "true || false || true"
 /// )
 /// ```
 pub fn ors<I, E>(iter: I) -> Rc<Expression>

@@ -1,9 +1,8 @@
 //! This module contains an algorithm to compute the minimal distance to an uncovered statement, for every statement in a given method.
 //! It also contains caching utility for when a method is fully explored.
-//! 
+//!
 //! The approach we take is method-scoped, so a statement in a method has a distance either to the first uncovered statement in this method.
 //! Otherwise it has the shortest distance to the end of the method.
-
 
 use std::collections::{HashMap, HashSet};
 
@@ -48,19 +47,20 @@ impl Distance {
 /// Calling a method will explore a certain number of statements before returning
 /// If an uncovered statement is encountered, it will have an exact cost
 /// Otherwise it returns the minimal cost of the method call in terms of the number of statements explored.
+/// 
+/// Since a method may contain method calls to itself and while loops, there are Cycle and UnexploredMethodCall variants.
+/// There are used during the computation but are resolved to Cost(Distance) at the end.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum CumulativeCost {
     Cost(Distance),
-    /// Cycles back to program point (while loop), with additional cost.
-    Cycle(ProgramCounter, Cost),
+    /// Cycles back to program point (while loop)
+    Cycle(ProgramCounter),
     Plus(Box<CumulativeCost>, Box<CumulativeCost>),
     /// In case of recursion, we can not resolve it immediately and need to keep track of it.
     UnexploredMethodCall(String),
     /// Used to store cost when it cannot yet be determined which one is closer
     Minimal(Box<CumulativeCost>, Box<CumulativeCost>),
 }
-
-// Either<CostToUncoveredStatement, MinimalMethodCost>
 
 impl CumulativeCost {
     fn try_into_cost(self) -> Option<Distance> {
@@ -78,9 +78,8 @@ impl CumulativeCost {
     fn plus(self, cost: Cost) -> CumulativeCost {
         match self {
             Self::Cost(d) => Self::Cost(d.plus(cost)),
-            Self::Cycle(pc, c) => Self::Cycle(pc, c + cost),
             Self::Plus(c1, c2) => Self::Plus(c1, Box::new(c2.plus(cost))),
-            Self::UnexploredMethodCall(_) => Self::Plus(
+            Self::UnexploredMethodCall(_) | Self::Cycle(_) => Self::Plus(
                 Box::new(self),
                 Box::new(Self::Cost(Distance {
                     value: cost,
@@ -90,6 +89,19 @@ impl CumulativeCost {
             Self::Minimal(c1, c2) => {
                 Self::Minimal(Box::new(c1.plus(cost)), Box::new(c2.plus(cost)))
             }
+        }
+    }
+    /// Returns the type of distance of the cost expression
+    /// If a Cycle or UnexploredMethodCall, we assume to the distance to be ToEndOfMethod
+    /// 
+    /// In other words, ToFirstUncovered is returned if any of the variants in the Cost Expression are ToFirstUncovered. 
+    fn distance_type(&self) -> DistanceType {
+        match self {
+            Self::Cost(d) => d.distance_type,
+            Self::Plus(a, b) | Self::Minimal(a, b) => {
+                std::cmp::min(a.distance_type(), b.distance_type())
+            }
+            Self::Cycle(_) | Self::UnexploredMethodCall(_) => DistanceType::ToEndOfMethod,
         }
     }
 }
@@ -263,7 +275,6 @@ fn min_distance_to_statement<'a>(
     visited: &mut HashSet<ProgramCounter>,
 ) -> CumulativeCost {
     let statement = &program[&pc];
-    visited.insert(pc);
 
     if pc_to_cost.contains_key(&pc) {
         return pc_to_cost[&pc].clone();
@@ -284,8 +295,14 @@ fn min_distance_to_statement<'a>(
             }
         };
         pc_to_cost.insert(pc, CumulativeCost::Cost(distance));
+        visited.insert(pc);
         return CumulativeCost::Cost(distance);
+    } else if let CFGStatement::While(_, _) = statement {
+        if visited.contains(&pc) {
+            return CumulativeCost::Cycle(pc);
+        }
     }
+    visited.insert(pc);
 
     // In case of a throw "exception", we consider all statements after that to be 1
     // This is not accurate since the exception may be caught, but solving it requires us to look at
@@ -295,23 +312,31 @@ fn min_distance_to_statement<'a>(
             [] => unreachable!(),
             multiple => {
                 // next cost is the minimum cost of following methods.
-                let next_cost = multiple
-                    .iter()
-                    .map(|next_pc| {
-                        if let CFGStatement::While(_, _) = &program[&next_pc] {
-                            if visited.contains(next_pc) {
-                                return CumulativeCost::Cycle(*next_pc, 0);
-                            }
-                        }
-                        // Cycle detected (while loop or recursive function)
+                let mut remaining_costs = multiple.iter().map(|next_pc| {
 
+                    // Cycle detected (while loop or recursive function)
+
+                    (
+                        next_pc,
                         min_distance_to_statement(
                             *next_pc, &method, coverage, program, flow, st, pc_to_cost, cache,
                             visited,
-                        )
-                    })
-                    .reduce(minimize)
-                    .expect("multiple pcs");
+                        ),
+                    )
+                });
+
+                let next_cost = if let CFGStatement::While(_, _) = &statement {
+                    // While loop is a special case due to cycles
+                    let ((_body_pc, body_cost), (_exit_pc, exit_cost)) = remaining_costs.next_tuple().unwrap();
+                    
+                    minimize_while(exit_cost, body_cost)
+
+                } else {
+                    remaining_costs
+                        .map(|(_pc, cost)| cost)
+                        .reduce(minimize)
+                        .expect("multiple pcs")
+                };
                 next_cost
             }
         }
@@ -360,7 +385,7 @@ fn min_distance_to_statement<'a>(
             pc_to_cost.insert(pc, cost.clone());
             return cost;
         }
-        CumulativeCost::Cycle(_pc, _pluscost) => unimplemented!(),
+        CumulativeCost::Cycle(_pc) => unreachable!(),
 
         CumulativeCost::Minimal(_, _) => {
             let cost =
@@ -466,7 +491,7 @@ fn cleanup_pc_to_cost<'a>(
 fn is_reducable(c: &CumulativeCost, current_method: &MethodIdentifier) -> bool {
     match c {
         CumulativeCost::Cost(_) => true,
-        CumulativeCost::Cycle(_, _) => true,
+        CumulativeCost::Cycle(_) => true,
         CumulativeCost::Plus(c1, c2) => {
             is_reducable(c1, current_method) && is_reducable(c2, current_method)
         }
@@ -504,7 +529,7 @@ fn reduce(c: &CumulativeCost) -> Option<Distance> {
                 _ => None,
             }
         }
-        _ => unreachable!(),
+        _ => unreachable!("{:?}", c),
     }
 }
 
@@ -530,7 +555,7 @@ fn replace_method_call_in_costs<'a>(
         CumulativeCost::UnexploredMethodCall(method) if method_name == &method => {
             CumulativeCost::Cost(resulting_cost)
         }
-        CumulativeCost::Cycle(_, _) => todo!(),
+        CumulativeCost::Cycle(_) => todo!(),
         CumulativeCost::Minimal(c1, c2) => {
             let c1 = replace_method_call_in_costs(method_name, *c1, resulting_cost);
             let c2 = replace_method_call_in_costs(method_name, *c2, resulting_cost);
@@ -550,18 +575,45 @@ fn fix_cycles(
     resulting_cost: CumulativeCost,
     pc_to_cost: &mut HashMap<ProgramCounter, CumulativeCost>,
 ) {
-    let mut to_repair = Vec::new();
-
-    for (k, v) in pc_to_cost.iter() {
-        if let CumulativeCost::Cycle(cycle_pc, cost) = v {
-            if pc == *cycle_pc {
-                to_repair.push((*k, *cost));
-            }
-        }
+    // dbg!(pc, &resulting_cost, &pc_to_cost);
+    for (_k, cost) in pc_to_cost.iter_mut() {
+        let mut temp = CumulativeCost::Cost(Distance {
+            distance_type: DistanceType::ToEndOfMethod,
+            value: 0,
+        });
+        std::mem::swap(cost, &mut temp);
+        *cost = replace_cycles(pc, temp, &resulting_cost);
     }
 
-    for (k, cost) in to_repair {
-        pc_to_cost.insert(k, resulting_cost.clone().plus(cost));
+    fn replace_cycles(
+        pc: ProgramCounter,
+        cost: CumulativeCost,
+        resulting_cost: &CumulativeCost,
+    ) -> CumulativeCost {
+        match cost {
+            CumulativeCost::Cycle(cycle_pc) if pc == cycle_pc => resulting_cost.clone(),
+            CumulativeCost::Plus(c1, c2) => CumulativeCost::Plus(
+                Box::new(replace_cycles(pc, *c1, resulting_cost)),
+                Box::new(replace_cycles(pc, *c2, resulting_cost)),
+            ),
+            CumulativeCost::Minimal(c1, c2) => CumulativeCost::Minimal(
+                Box::new(replace_cycles(pc, *c1, resulting_cost)),
+                Box::new(replace_cycles(pc, *c2, resulting_cost)),
+            ),
+            cost => cost,
+        }
+    }
+}
+
+/// Special case for minimizing while, if the body does not contain an uncovered statement, 
+/// the body cost will always be greater.
+fn minimize_while(exit_cost: CumulativeCost, body_cost: CumulativeCost) -> CumulativeCost {
+    // if body_cost is to uncovered
+    if body_cost.distance_type() == DistanceType::ToFirstUncovered {
+        CumulativeCost::Minimal(Box::new(body_cost), Box::new(exit_cost))
+    } else {
+        // The body cost will always be more due to the cycle.
+        exit_cost
     }
 }
 
@@ -570,8 +622,9 @@ fn minimize(a: CumulativeCost, b: CumulativeCost) -> CumulativeCost {
         (CumulativeCost::Cost(a), CumulativeCost::Cost(b)) => {
             CumulativeCost::Cost(std::cmp::min(a, b).clone())
         }
-        (CumulativeCost::Cycle(_, _), _) => b.clone(),
-        (_, CumulativeCost::Cycle(_, _)) => a.clone(),
+        (CumulativeCost::Cycle(_), CumulativeCost::Cycle(_)) => panic!(),
+        (CumulativeCost::Cycle(_), _) => b.clone(),
+        (_, CumulativeCost::Cycle(_)) => a.clone(),
         (_, _) => CumulativeCost::Minimal(Box::new(a), Box::new(b)),
     }
 }
@@ -626,11 +679,33 @@ fn methods_called(invocation: &Invocation) -> Vec<MethodIdentifier> {
 mod tests {
 
     use crate::{
-        cfg::labelled_statements, parse_program, prettyprint::cfg_pretty::pretty_print_cfg_method,
-        typing::type_compilation_unit, utils, RuntimeType,
+        cfg::labelled_statements,
+        parse_program,
+        prettyprint::cfg_pretty::{pretty_print_cfg_method, pretty_print_compilation_unit},
+        typing::type_compilation_unit,
+        utils, RuntimeType,
     };
 
     use super::*;
+
+    fn decorator(pc_to_cost: &HashMap<ProgramCounter, Distance>) -> impl Fn(u64) -> Option<String> + '_ {
+        |pc| {
+            Some(format!(
+                "pc: {}, cost: {}",
+                pc,
+                pc_to_cost
+                    .get(&pc)
+                    .map(
+                        |d| if let DistanceType::ToFirstUncovered = d.distance_type {
+                            format!("[{}]", d.value)
+                        } else {
+                            format!("{}", d.value)
+                        }
+                    )
+                    .unwrap()
+            ))
+        }
+    }
 
     fn setup(
         path: &str,
@@ -663,7 +738,7 @@ mod tests {
     }
 
     #[test]
-    fn md2u_single_while() {
+    fn md2u_single_while1() {
         let path = "./examples/reachability/while.oox";
         let (coverage, program, flows, symbol_table) = setup(path);
 
@@ -696,7 +771,7 @@ mod tests {
 
         assert_eq!(pc_to_cost, expected_result);
 
-        dbg!(cost, pc_to_cost, cache);
+        // dbg!(cost, pc_to_cost, cache);
     }
 
     #[test]
@@ -738,7 +813,7 @@ mod tests {
 
         assert_eq!(pc_to_cost, expected_result);
 
-        dbg!(cost, pc_to_cost, cache);
+        // dbg!(cost, pc_to_cost, cache);
     }
 
     #[test]
@@ -779,14 +854,6 @@ mod tests {
             (28, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
         ]);
 
-        let pc = find_entry_for_static_invocation(
-            method.decl_name,
-            "f_recursive",
-            vec![RuntimeType::IntRuntimeType; 2].into_iter(),
-            &program,
-            &symbol_table,
-        );
-
         assert_eq!(pc_to_cost, expected_result);
 
         // dbg!(cost, pc_to_cost, cache);
@@ -810,12 +877,6 @@ mod tests {
             arg_list: vec![RuntimeType::IntRuntimeType; 1],
         };
 
-        let f_recursive = MethodIdentifier {
-            method_name: "f_recursive",
-            decl_name: "Main",
-            arg_list: vec![RuntimeType::IntRuntimeType; 2],
-        };
-
         let (cost, pc_to_cost) = min_distance_to_uncovered_method(
             entry_method.clone(),
             &coverage,
@@ -824,27 +885,6 @@ mod tests {
             &symbol_table,
             &mut cache,
         );
-
-        let s = pretty_print_cfg_method(
-            entry_method,
-            &|pc| Some(format!("{}", pc)),
-            &program,
-            &flows,
-            &symbol_table,
-        );
-
-        println!("{}", s);
-
-        let s = pretty_print_cfg_method(
-            f_recursive,
-            &|pc| Some(format!("{}", pc)),
-            &program,
-            &flows,
-            &symbol_table,
-        );
-
-        println!("{}", s);
-
         // dbg!(&program);
 
         #[rustfmt::skip]
@@ -871,25 +911,23 @@ mod tests {
         }
         assert_eq!(pc_to_cost, expected_result);
 
-        dbg!(cost, pc_to_cost, cache);
+        // Pretty print to confirm
+        // let s = pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
+        // println!("{}", s);
+
+        // dbg!(cost, pc_to_cost, cache);
     }
 
     #[test]
     fn md2u_recursive3() {
         let path = "./examples/reachability/recursive2.oox";
-        let (coverage, program, flows, symbol_table) = setup(path);
+        let (mut coverage, program, flows, symbol_table) = setup(path);
 
         let mut cache = Cache::new();
         let entry_method = MethodIdentifier {
             method_name: "main",
             decl_name: "Main",
             arg_list: vec![RuntimeType::IntRuntimeType; 1],
-        };
-
-        let recursive = |name: &'static str| MethodIdentifier {
-            method_name: name,
-            decl_name: "Main",
-            arg_list: vec![RuntimeType::IntRuntimeType; 2],
         };
 
         let (cost, pc_to_cost) = min_distance_to_uncovered_method(
@@ -900,21 +938,6 @@ mod tests {
             &symbol_table,
             &mut cache,
         );
-
-        for method in [
-            entry_method,
-            recursive("f_recursive"),
-            recursive("g_recursive"),
-        ] {
-            let s = pretty_print_cfg_method(
-                method,
-                &|pc| Some(format!("pc: {}, cost: {}", pc, pc_to_cost[&pc].value)),
-                &program,
-                &flows,
-                &symbol_table,
-            );
-            println!("{}", s);
-        }
 
         #[rustfmt::skip]
         let expected_result = HashMap::from([
@@ -958,7 +981,56 @@ mod tests {
         }
         assert_eq!(pc_to_cost, expected_result);
 
-        dbg!(cost, pc_to_cost, cache);
+        // let s = pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
+        // println!("{}", s);
+
+        // dbg!(cost, pc_to_cost, cache);
+    }
+
+    #[test]
+    fn md2u_nested_while() {
+        let path = "./examples/reachability/nested_while.oox";
+        let (coverage, program, flows, symbol_table) = setup(path);
+
+        let mut cache = Cache::new();
+        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
+            MethodIdentifier {
+                method_name: "main",
+                decl_name: "Main",
+                arg_list: vec![RuntimeType::IntRuntimeType; 1],
+            },
+            &coverage,
+            &program,
+            &flows,
+            &symbol_table,
+            &mut cache,
+        );
+
+        // dbg!(cost, &pc_to_cost, cache);
+
+        #[rustfmt::skip]
+        let expected_result = HashMap::from([
+            (0,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 }),
+            (2,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 6 }),
+            (5,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 }),
+            (8,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 4 }),
+            (10, Distance { distance_type: DistanceType::ToEndOfMethod, value: 10 }),
+            (13, Distance { distance_type: DistanceType::ToEndOfMethod, value: 9 }),
+            (16, Distance { distance_type: DistanceType::ToEndOfMethod, value: 8 }),
+            (19, Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 }),
+            (22, Distance { distance_type: DistanceType::ToEndOfMethod, value: 6 }),
+            (24, Distance { distance_type: DistanceType::ToEndOfMethod, value: 8 }),
+            (26, Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 }),
+            (28, Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 }),
+            (31, Distance { distance_type: DistanceType::ToEndOfMethod, value: 3 }),
+            (33, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
+            (34, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
+        ]);
+
+        // let s = pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
+        // println!("{}", s);
+
+        assert_eq!(pc_to_cost, expected_result);
     }
 
     #[test]
@@ -996,48 +1068,28 @@ mod tests {
             &mut cache,
         );
 
-        for method in [entry_method.clone(), recursive("member")] {
-            let s = pretty_print_cfg_method(
-                method,
-                // &|pc| Some(format!("pc: {}, cost: {}", pc, pc_to_cost[&pc].value)),
-                &|pc| {
-                    Some(format!(
-                        "pc: {}, cost: {}",
-                        pc,
-                        pc_to_cost
-                            .get(&pc)
-                            .map(
-                                |d| if let DistanceType::ToFirstUncovered = d.distance_type {
-                                    format!("[{}]", d.value)
-                                } else {
-                                    format!("{}", d.value)
-                                }
-                            )
-                            .unwrap()
-                    ))
-                },
-                &program,
-                &flows,
-                &symbol_table,
-            );
-            println!("{}", s);
-        }
+        // let s = pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
+        // println!("{}", s);
 
         dbg!(&cache);
     }
 
     #[test]
-    fn md2u_nested_while() {
-        let path = "./examples/reachability/nested_while.oox";
-        let (coverage, program, flows, symbol_table) = setup(path);
+    fn md2u_recursive_while() {
+        let path = "./examples/reachability/recursive_while.oox";
+        let (mut coverage, program, flows, symbol_table) = setup(path);
+
+        coverage.remove(&23);
 
         let mut cache = Cache::new();
+        let entry_method = MethodIdentifier {
+            method_name: "main",
+            decl_name: "Main",
+            arg_list: vec![RuntimeType::IntRuntimeType],
+        };
+
         let (cost, pc_to_cost) = min_distance_to_uncovered_method(
-            MethodIdentifier {
-                method_name: "main",
-                decl_name: "Main",
-                arg_list: vec![RuntimeType::IntRuntimeType; 1],
-            },
+            entry_method.clone(),
             &coverage,
             &program,
             &flows,
@@ -1045,27 +1097,9 @@ mod tests {
             &mut cache,
         );
 
-        dbg!(cost, &pc_to_cost, cache);
+        let s = pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
+        println!("{}", s);
 
-        #[rustfmt::skip]
-        let expected_result = HashMap::from([
-            (0,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 }),
-            (2,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 6 }),
-            (5,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 }),
-            (8,  Distance { distance_type: DistanceType::ToEndOfMethod, value: 4 }),
-            (10, Distance { distance_type: DistanceType::ToEndOfMethod, value: 10 }),
-            (13, Distance { distance_type: DistanceType::ToEndOfMethod, value: 9 }),
-            (16, Distance { distance_type: DistanceType::ToEndOfMethod, value: 8 }),
-            (19, Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 }),
-            (22, Distance { distance_type: DistanceType::ToEndOfMethod, value: 6 }),
-            (24, Distance { distance_type: DistanceType::ToEndOfMethod, value: 8 }),
-            (26, Distance { distance_type: DistanceType::ToEndOfMethod, value: 7 }),
-            (28, Distance { distance_type: DistanceType::ToEndOfMethod, value: 5 }),
-            (31, Distance { distance_type: DistanceType::ToEndOfMethod, value: 3 }),
-            (33, Distance { distance_type: DistanceType::ToEndOfMethod, value: 2 }),
-            (34, Distance { distance_type: DistanceType::ToEndOfMethod, value: 1 }),
-        ]);
-
-        assert_eq!(pc_to_cost, expected_result);
+        dbg!(&cache);
     }
 }
