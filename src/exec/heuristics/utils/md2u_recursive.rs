@@ -244,9 +244,10 @@ fn min_distance_to_uncovered_method_helper<'a>(
                     &method.method_name,
                     method_body_cost,
                     min_body_cost,
-                )
-                .try_into_cost()
-                .unwrap();
+                );
+
+                // dbg!(&d);
+                let d = reduce(&d).unwrap();
 
                 cleanup_pc_to_cost(&method.method_name, &mut pc_to_cost, min_body_cost);
                 CumulativeCost::Cost(d)
@@ -441,7 +442,7 @@ fn statement_cost<'a>(
                     );
 
                     if visited.contains(&next_pc) {
-                        dbg!("oh oh recursion", next_pc);
+                        // dbg!("oh oh recursion", next_pc);
                         CumulativeCost::UnexploredMethodCall(method.method_name.to_string())
                     } else {
                         let (cost, method_pc_to_cost) = min_distance_to_uncovered_method_helper(
@@ -478,10 +479,19 @@ fn cleanup_pc_to_cost<'a>(
     *pc_to_cost = temp
         .into_iter()
         .map(|(key, value)| {
-            (
-                key,
-                replace_method_call_in_costs(method_name, value, resulting_cost),
-            )
+            let cost = replace_method_call_in_costs(method_name, value.clone(), resulting_cost);
+            // for some pc it might not be possible to reduce to a distance cost yet, due to unexplored method
+            if let Some(distance) = reduce(&cost) {
+                (
+                    key,
+                    CumulativeCost::Cost(distance)
+                )
+            } else {
+                (
+                    key,
+                    cost
+                )
+            }
         })
         .collect();
 }
@@ -529,6 +539,7 @@ fn reduce(c: &CumulativeCost) -> Option<Distance> {
                 _ => None,
             }
         }
+        CumulativeCost::Cycle(_) => None,
         _ => unreachable!("{:?}", c),
     }
 }
@@ -555,7 +566,6 @@ fn replace_method_call_in_costs<'a>(
         CumulativeCost::UnexploredMethodCall(method) if method_name == &method => {
             CumulativeCost::Cost(resulting_cost)
         }
-        CumulativeCost::Cycle(_) => todo!(),
         CumulativeCost::Minimal(c1, c2) => {
             let c1 = replace_method_call_in_costs(method_name, *c1, resulting_cost);
             let c2 = replace_method_call_in_costs(method_name, *c2, resulting_cost);
@@ -563,7 +573,7 @@ fn replace_method_call_in_costs<'a>(
                 (CumulativeCost::Cost(d1), CumulativeCost::Cost(d2)) => {
                     CumulativeCost::Cost(std::cmp::min(d1, d2))
                 }
-                (c1, c2) => CumulativeCost::Plus(Box::new(c1), Box::new(c2)), // (c1, c2) => todo!("{:?} {:?}", c1, c2),
+                (c1, c2) => CumulativeCost::Minimal(Box::new(c1), Box::new(c2)), // (c1, c2) => todo!("{:?} {:?}", c1, c2),
             }
         }
         cost => cost,
@@ -610,7 +620,7 @@ fn fix_cycles(
 fn minimize_while(exit_cost: CumulativeCost, body_cost: CumulativeCost) -> CumulativeCost {
     // if body_cost is to uncovered
     if body_cost.distance_type() == DistanceType::ToFirstUncovered {
-        CumulativeCost::Minimal(Box::new(body_cost), Box::new(exit_cost))
+        minimize(body_cost, exit_cost)
     } else {
         // The body cost will always be more due to the cycle.
         exit_cost
@@ -681,7 +691,7 @@ mod tests {
     use crate::{
         cfg::labelled_statements,
         parse_program,
-        prettyprint::cfg_pretty::{pretty_print_cfg_method, pretty_print_compilation_unit},
+        prettyprint::cfg_pretty::{pretty_print_compilation_unit},
         typing::type_compilation_unit,
         utils, RuntimeType,
     };
@@ -701,8 +711,7 @@ mod tests {
                         } else {
                             format!("{}", d.value)
                         }
-                    )
-                    .unwrap()
+                    ).unwrap_or(String::new())
             ))
         }
     }
@@ -1041,6 +1050,9 @@ mod tests {
         // set to uncovered:
         coverage.remove(&73);
 
+        let s = pretty_print_compilation_unit(&|pc: u64| Some(format!("pc: {}", pc)), &program, &flows, &symbol_table);
+        println!("{}", s);
+
         let mut cache = Cache::new();
         let entry_method = MethodIdentifier {
             method_name: "main",
@@ -1053,12 +1065,6 @@ mod tests {
             ],
         };
 
-        let recursive = |name: &'static str| MethodIdentifier {
-            method_name: name,
-            decl_name: "Node",
-            arg_list: vec![RuntimeType::IntRuntimeType; 1],
-        };
-
         let (cost, pc_to_cost) = min_distance_to_uncovered_method(
             entry_method.clone(),
             &coverage,
@@ -1068,8 +1074,8 @@ mod tests {
             &mut cache,
         );
 
-        // let s = pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
-        // println!("{}", s);
+        let s = pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
+        println!("{}", s);
 
         dbg!(&cache);
     }
@@ -1080,6 +1086,10 @@ mod tests {
         let (mut coverage, program, flows, symbol_table) = setup(path);
 
         coverage.remove(&23);
+
+        let s = pretty_print_compilation_unit(&|pc: u64| Some(format!("pc: {}", pc)), &program, &flows, &symbol_table);
+        println!("{}", s);
+
 
         let mut cache = Cache::new();
         let entry_method = MethodIdentifier {

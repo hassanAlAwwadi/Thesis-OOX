@@ -411,7 +411,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Rhs {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
         match self {
             Rhs::RhsExpression { value, .. } => value.pretty(allocator),
-            Rhs::RhsField { var, .. } => var.pretty(allocator),
+            Rhs::RhsField { var, field, .. } => docs![allocator, var, ".", field.to_string()],
             Rhs::RhsElem { var, index, .. } => var
                 .pretty(allocator)
                 .append(index.pretty(allocator).brackets()),

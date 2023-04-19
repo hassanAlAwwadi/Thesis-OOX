@@ -1,0 +1,53 @@
+class Main {
+
+   static void main(int n) {
+       int i := 0;
+
+       Main.f_recursive(i, n);
+
+       assert true;
+   }
+
+   static void f_recursive(int i, int n) {
+       if (i <= n) {
+           i := i + 1;
+           while (true) {
+                i := i + 1;
+                Main.f_recursive2(i, n);
+           }
+           int whatboutme;
+       } else {
+           int otherwise := 0;
+           otherwise := 0;
+           otherwise := 0;
+           otherwise := 0;
+       }
+   }    
+
+      static void f_recursive2(int i, int n) {
+       if (i <= n) {
+           i := i + 1;
+           while (true) {
+                i := i + 1;
+                Main.f_recursive3(i, n);
+           }
+           int whatboutme;
+       } else {
+           int otherwise := 0;
+           otherwise := 0;
+       }
+   }    
+      static void f_recursive3(int i, int n) {
+       if (i <= n) {
+           i := i + 1;
+           while (true) {
+                i := i + 1;
+                Main.f_recursive(i, n);
+           }
+           int whatboutme;
+       } else {
+           int otherwise := 0;
+           otherwise := 0;
+       }
+   }    
+}

@@ -17,10 +17,7 @@ use slog::{debug, Logger};
 
 use crate::{
     cfg::{CFGStatement, MethodIdentifier},
-    exec::{
-        heuristics::{finish_state_in_path},
-        IdCounter, State, SymResult,
-    },
+    exec::{heuristics::finish_state_in_path, IdCounter, State, SymResult},
     statistics::Statistics,
     symbol_table::SymbolTable,
     syntax::{Declaration, Invocation, Method, Rhs, Statement},
@@ -29,7 +26,7 @@ use crate::{
 
 use crate::exec::heuristics::execute_instruction_for_all_states;
 
-use super::{utils::md2u_recursive, execution_tree::ExecutionTree, ProgramCounter};
+use super::{execution_tree::ExecutionTree, utils::md2u_recursive, ProgramCounter};
 
 /// Make a weighted stochastic choice, where the weight is calculated based on the distance to a newly uncovered branch.
 /// Choose between all leafs (states on different program points)
@@ -135,10 +132,28 @@ pub(crate) fn sym_exec(
 
         let current_pc = states_node.borrow().statement();
 
-        // let decorator = &|pc| Some(format!("pc: {}, cost: {:?} {}", pc, md2u.get(&pc).and_then(|d| if let md2u_recursive::DistanceType::ToFirstUncovered = d.distance_type { Some(d.value) } else { None}),
-        // if pc == current_pc { " <<<<" } else { "" }));
+        // dbg!(&current_pc);
 
-        // let s = pretty_print_compilation_unit(decorator, program, &flows, st);
+        // let decorator = &|pc| {
+        //     Some(format!(
+        //         "pc: {}, cost: {} {}",
+        //         pc,
+        //         md2u.get(&pc)
+        //             .map(|d| {
+        //                 if let md2u_recursive::DistanceType::ToFirstUncovered = d.distance_type {
+        //                     format!("[{}]", d.value)
+        //                 } else {
+        //                     format!("{}", d.value)
+        //                 }
+        //             })
+        //             .unwrap_or(String::new()),
+        //         if pc == current_pc { " <<<<" } else { "" }
+        //     ))
+        // };
+
+        // let s = crate::prettyprint::cfg_pretty::pretty_print_compilation_unit(
+        //     decorator, program, &flows, st,
+        // );
         // std::fs::write("visualize", &s).unwrap();
         // std::thread::sleep(std::time::Duration::from_millis(300));
 
