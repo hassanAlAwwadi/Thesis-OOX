@@ -16,7 +16,7 @@ pub struct MethodIdentifier<'a> {
 }
 
 /// A statement in the control flow graph, with special cases for branching statements.
-/// 
+///
 /// CFGStatement is separated from Statement to avoid having to add labels to the Statement type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CFGStatement {
@@ -40,6 +40,24 @@ pub enum CFGStatement {
         method_name: Identifier,
         argument_types: Vec<RuntimeType>,
     },
+}
+
+impl CFGStatement {
+    fn is_while(&self) -> bool {
+        if let CFGStatement::While(_, _) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn is_return(&self) -> bool {
+        if let CFGStatement::Statement(Statement::Return { .. }) = self {
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Takes the syntax tree of a program, returns a tuple containing the control flow graph and flow of the program.
@@ -564,6 +582,47 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
         CFGStatement::CatchExit => Vec::new(),
         CFGStatement::FunctionEntry { .. } => todo!(),
         CFGStatement::FunctionExit { .. } => todo!(),
+    }
+}
+
+pub mod utils {
+    use std::collections::{HashMap, HashSet};
+
+    use itertools::Itertools;
+
+    use super::CFGStatement;
+
+    /// Returns the set of program counters in the body of given while loop pc, that can flow back to the while statement.
+    /// Panics if pc is not a CFGStatement::While in program.
+    /// Would be nicer to cache this, but won't make much of a difference for now.
+    pub fn while_body_pcs(pc: u64, flow: &HashMap<u64, Vec<u64>>, program: &HashMap<u64, CFGStatement>) -> HashSet<u64> {
+        if !program[&pc].is_while() {
+            panic!("expected pc to be a While")
+        }
+
+        let mut body_pcs = HashSet::new();
+
+        let (body_pc, _exit_pc) = flow[&pc].iter().next_tuple().unwrap();
+        let mut next = vec![*body_pc];
+        while let Some(next_pc) = next.pop() {
+            if next_pc == pc {
+                continue;
+            } else {
+                if program[&next_pc].is_return() {
+                    continue;
+                }
+                if program[&next_pc].is_while() {
+                    let (_body_pc, exit_pc) = flow[&next_pc].iter().next_tuple().unwrap();
+                    // we skip the body of the while as it cannot flow to pc anyway
+                    next.push(*exit_pc);
+                } else {
+                    // dbg!(&next_pc);
+                    next.extend(flow.get(&next_pc).iter().copied().flatten());
+                }
+                body_pcs.insert(next_pc);
+            }
+        }
+        body_pcs
     }
 }
 

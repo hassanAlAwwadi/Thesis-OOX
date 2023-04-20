@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 
 use crate::{
-    cfg::{CFGStatement, MethodIdentifier},
+    cfg::{CFGStatement, MethodIdentifier, self},
     exec::find_entry_for_static_invocation,
     symbol_table::SymbolTable,
     Invocation, Rhs, Statement,
@@ -47,7 +47,7 @@ impl Distance {
 /// Calling a method will explore a certain number of statements before returning
 /// If an uncovered statement is encountered, it will have an exact cost
 /// Otherwise it returns the minimal cost of the method call in terms of the number of statements explored.
-/// 
+///
 /// Since a method may contain method calls to itself and while loops, there are Cycle and UnexploredMethodCall variants.
 /// There are used during the computation but are resolved to Cost(Distance) at the end.
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -93,8 +93,8 @@ impl CumulativeCost {
     }
     /// Returns the type of distance of the cost expression
     /// If a Cycle or UnexploredMethodCall, we assume to the distance to be ToEndOfMethod
-    /// 
-    /// In other words, ToFirstUncovered is returned if any of the variants in the Cost Expression are ToFirstUncovered. 
+    ///
+    /// In other words, ToFirstUncovered is returned if any of the variants in the Cost Expression are ToFirstUncovered.
     fn distance_type(&self) -> DistanceType {
         match self {
             Self::Cost(d) => d.distance_type,
@@ -237,6 +237,7 @@ fn min_distance_to_uncovered_method_helper<'a>(
             // if the only unexplored method call is the current function
             // We can reduce it to the minimal cost to end of method.
             if is_reducable(&method_body_cost, &method) {
+                // dbg!(&method_body_cost);
                 let min_body_cost = reduce(&method_body_cost).unwrap();
 
                 // This can be unwrapped since the only methods calls at this point are the method itself, and we replace that cost with concrete distance.
@@ -275,124 +276,125 @@ fn min_distance_to_statement<'a>(
     cache: &mut Cache<'a>,
     visited: &mut HashSet<ProgramCounter>,
 ) -> CumulativeCost {
-    let statement = &program[&pc];
+    visited.insert(pc);
+    let mut stack = vec![pc];
 
-    if pc_to_cost.contains_key(&pc) {
-        return pc_to_cost[&pc].clone();
-    }
+    loop {
+        let last = stack.len() == 1;
 
-    if let CFGStatement::FunctionExit { .. } = statement {
-        // We have reached the end of the method
-        let distance = if !coverage.contains_key(&pc) {
-            // Uncovered statement, has strict 1 cost
-            Distance {
-                value: 1,
-                distance_type: DistanceType::ToFirstUncovered,
+        let all_there = {
+            let pc = *stack.last().unwrap();
+            if pc_to_cost.contains_key(&pc) {
+                continue;
+            }
+            visited.insert(pc);
+            let mut all_there = true;
+            if let Some(next_pcs) = flow.get(&pc) {
+                for next_pc in next_pcs {
+                    if !pc_to_cost.contains_key(&next_pc) {
+                        if let CFGStatement::While(_, _) = &program[&next_pc] {
+                            if visited.contains(next_pc) {
+                                continue;
+                            }
+                        }
+                        all_there = false;
+                        stack.push(*next_pc);
+                    }
+                }
+            }
+            all_there
+        };
+
+        if !all_there {
+            continue;
+        }
+
+        let pc = stack.pop().unwrap();
+
+        let remaining_cost = if let Some(next_pcs) = &flow.get(&pc) {
+            match &next_pcs[..] {
+                [] => unreachable!(),
+
+                multiple => {
+                    let mut remaining_costs = multiple.iter().map(|next_pc| {
+                        if let CFGStatement::While(_, _) = &program[&next_pc] {
+                            if visited.contains(next_pc) && cfg::utils::while_body_pcs(*next_pc, flow, program).contains(&pc) {
+                                // Cycle detected (while loop or recursive function)
+                                return (next_pc, CumulativeCost::Cycle(*next_pc));
+                            }
+                        }
+
+                        (next_pc, pc_to_cost[next_pc].clone())
+                    });
+
+                    let next_cost = if let CFGStatement::While(_, _) = &program[&pc] {
+                        // While loop is a special case due to cycles
+                        let ((_body_pc, body_cost), (_exit_pc, exit_cost)) =
+                            remaining_costs.next_tuple().unwrap();
+
+                        minimize_while(exit_cost, body_cost)
+                    } else {
+                        remaining_costs
+                            .map(|(_pc, cost)| cost)
+                            .reduce(minimize)
+                            .expect("multiple pcs")
+                    };
+                    next_cost
+                }
             }
         } else {
-            Distance {
-                value: 1,
+            CumulativeCost::Cost(Distance {
                 distance_type: DistanceType::ToEndOfMethod,
-            }
+                value: 0,
+            })
         };
-        pc_to_cost.insert(pc, CumulativeCost::Cost(distance));
-        visited.insert(pc);
-        return CumulativeCost::Cost(distance);
-    } else if let CFGStatement::While(_, _) = statement {
-        if visited.contains(&pc) {
-            return CumulativeCost::Cycle(pc);
-        }
-    }
-    visited.insert(pc);
 
-    // In case of a throw "exception", we consider all statements after that to be 1
-    // This is not accurate since the exception may be caught, but solving it requires us to look at
-    // the exception stack which has not been done yet.
-    let remaining_cost = if let Some(next_pcs) = &flow.get(&pc) {
-        match &next_pcs[..] {
-            [] => unreachable!(),
-            multiple => {
-                // next cost is the minimum cost of following methods.
-                let mut remaining_costs = multiple.iter().map(|next_pc| {
+        // Find the cost of the current statement
+        let cost_of_this_statement =
+            statement_cost(pc, coverage, program, flow, st, pc_to_cost, cache, visited);
 
-                    // Cycle detected (while loop or recursive function)
+        match cost_of_this_statement.clone() {
+            CumulativeCost::Cost(Distance {
+                value,
+                distance_type,
+            }) => {
+                let cost = if distance_type == DistanceType::ToEndOfMethod {
+                    // We have to add the cost of the remainder of the current method.
+                    let cost = remaining_cost.plus(value);
 
-                    (
-                        next_pc,
-                        min_distance_to_statement(
-                            *next_pc, &method, coverage, program, flow, st, pc_to_cost, cache,
-                            visited,
-                        ),
-                    )
-                });
-
-                let next_cost = if let CFGStatement::While(_, _) = &statement {
-                    // While loop is a special case due to cycles
-                    let ((_body_pc, body_cost), (_exit_pc, exit_cost)) = remaining_costs.next_tuple().unwrap();
-                    
-                    minimize_while(exit_cost, body_cost)
-
+                    // if this is a while statement, check all cycles and fix them
+                    if let CFGStatement::While(_, _) = &program[&pc] {
+                        fix_cycles(pc, cost.clone(), pc_to_cost);
+                    }
+                    cost
                 } else {
-                    remaining_costs
-                        .map(|(_pc, cost)| cost)
-                        .reduce(minimize)
-                        .expect("multiple pcs")
+                    // We can short-circuit back since an uncovered statement was encountered.
+                    cost_of_this_statement
                 };
-                next_cost
+                pc_to_cost.insert(pc, cost.clone());
+            }
+            CumulativeCost::Plus(_, _) => {
+                let cost =
+                    CumulativeCost::Plus(Box::new(cost_of_this_statement), Box::new(remaining_cost));
+
+                pc_to_cost.insert(pc, cost.clone());
+            }
+            CumulativeCost::UnexploredMethodCall(_) => {
+                let cost =
+                    CumulativeCost::Plus(Box::new(cost_of_this_statement), Box::new(remaining_cost));
+                pc_to_cost.insert(pc, cost.clone());
+            }
+            CumulativeCost::Cycle(_pc) => unreachable!(),
+
+            CumulativeCost::Minimal(_, _) => {
+                let cost =
+                    CumulativeCost::Plus(Box::new(cost_of_this_statement), Box::new(remaining_cost));
+                pc_to_cost.insert(pc, cost.clone());
             }
         }
-    } else {
-        CumulativeCost::Cost(Distance {
-            distance_type: DistanceType::ToEndOfMethod,
-            value: 1,
-        })
-    };
 
-    // Find the cost of the current statement
-    let cost_of_this_statement =
-        statement_cost(pc, coverage, program, flow, st, pc_to_cost, cache, visited);
-
-    match cost_of_this_statement.clone() {
-        CumulativeCost::Cost(Distance {
-            value,
-            distance_type,
-        }) => {
-            let cost = if distance_type == DistanceType::ToEndOfMethod {
-                // We have to add the cost of the remainder of the current method.
-                let cost = remaining_cost.plus(value);
-
-                // if this is a while statement, check all cycles and fix them
-                if let CFGStatement::While(_, _) = &statement {
-                    fix_cycles(pc, cost.clone(), pc_to_cost);
-                }
-                cost
-            } else {
-                // We can short-circuit back since an uncovered statement was encountered.
-                cost_of_this_statement
-            };
-            pc_to_cost.insert(pc, cost.clone());
-            return cost;
-        }
-        CumulativeCost::Plus(_, _) => {
-            let cost =
-                CumulativeCost::Plus(Box::new(cost_of_this_statement), Box::new(remaining_cost));
-
-            pc_to_cost.insert(pc, cost.clone());
-            return cost;
-        }
-        CumulativeCost::UnexploredMethodCall(_) => {
-            let cost =
-                CumulativeCost::Plus(Box::new(cost_of_this_statement), Box::new(remaining_cost));
-            pc_to_cost.insert(pc, cost.clone());
-            return cost;
-        }
-        CumulativeCost::Cycle(_pc) => unreachable!(),
-
-        CumulativeCost::Minimal(_, _) => {
-            let cost =
-                CumulativeCost::Plus(Box::new(cost_of_this_statement), Box::new(remaining_cost));
-            pc_to_cost.insert(pc, cost.clone());
-            return cost;
+        if last {
+            return pc_to_cost[&pc].clone();
         }
     }
 }
@@ -482,15 +484,9 @@ fn cleanup_pc_to_cost<'a>(
             let cost = replace_method_call_in_costs(method_name, value.clone(), resulting_cost);
             // for some pc it might not be possible to reduce to a distance cost yet, due to unexplored method
             if let Some(distance) = reduce(&cost) {
-                (
-                    key,
-                    CumulativeCost::Cost(distance)
-                )
+                (key, CumulativeCost::Cost(distance))
             } else {
-                (
-                    key,
-                    cost
-                )
+                (key, cost)
             }
         })
         .collect();
@@ -594,6 +590,7 @@ fn fix_cycles(
         std::mem::swap(cost, &mut temp);
         *cost = replace_cycles(pc, temp, &resulting_cost);
     }
+    // dbg!(&pc_to_cost);
 
     fn replace_cycles(
         pc: ProgramCounter,
@@ -615,7 +612,7 @@ fn fix_cycles(
     }
 }
 
-/// Special case for minimizing while, if the body does not contain an uncovered statement, 
+/// Special case for minimizing while, if the body does not contain an uncovered statement,
 /// the body cost will always be greater.
 fn minimize_while(exit_cost: CumulativeCost, body_cost: CumulativeCost) -> CumulativeCost {
     // if body_cost is to uncovered
@@ -689,16 +686,16 @@ fn methods_called(invocation: &Invocation) -> Vec<MethodIdentifier> {
 mod tests {
 
     use crate::{
-        cfg::labelled_statements,
-        parse_program,
-        prettyprint::cfg_pretty::{pretty_print_compilation_unit},
-        typing::type_compilation_unit,
+        cfg::labelled_statements, parse_program,
+        prettyprint::cfg_pretty::pretty_print_compilation_unit, typing::type_compilation_unit,
         utils, RuntimeType,
     };
 
     use super::*;
 
-    fn decorator(pc_to_cost: &HashMap<ProgramCounter, Distance>) -> impl Fn(u64) -> Option<String> + '_ {
+    fn decorator(
+        pc_to_cost: &HashMap<ProgramCounter, Distance>,
+    ) -> impl Fn(u64) -> Option<String> + '_ {
         |pc| {
             Some(format!(
                 "pc: {}, cost: {}",
@@ -711,7 +708,8 @@ mod tests {
                         } else {
                             format!("{}", d.value)
                         }
-                    ).unwrap_or(String::new())
+                    )
+                    .unwrap_or(String::new())
             ))
         }
     }
@@ -751,6 +749,11 @@ mod tests {
         let path = "./examples/reachability/while.oox";
         let (coverage, program, flows, symbol_table) = setup(path);
 
+        let s =
+            pretty_print_compilation_unit(&|pc| format!("{}", pc).into(), &program, &flows, &symbol_table);
+        println!("{}", s);
+
+
         let mut cache = Cache::new();
         let (cost, pc_to_cost) = min_distance_to_uncovered_method(
             MethodIdentifier {
@@ -780,6 +783,9 @@ mod tests {
 
         assert_eq!(pc_to_cost, expected_result);
 
+
+        let s = pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
+        println!("{}", s);
         // dbg!(cost, pc_to_cost, cache);
     }
 
@@ -1050,7 +1056,12 @@ mod tests {
         // set to uncovered:
         coverage.remove(&73);
 
-        let s = pretty_print_compilation_unit(&|pc: u64| Some(format!("pc: {}", pc)), &program, &flows, &symbol_table);
+        let s = pretty_print_compilation_unit(
+            &|pc: u64| Some(format!("pc: {}", pc)),
+            &program,
+            &flows,
+            &symbol_table,
+        );
         println!("{}", s);
 
         let mut cache = Cache::new();
@@ -1074,7 +1085,8 @@ mod tests {
             &mut cache,
         );
 
-        let s = pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
+        let s =
+            pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
         println!("{}", s);
 
         dbg!(&cache);
@@ -1087,9 +1099,13 @@ mod tests {
 
         coverage.remove(&23);
 
-        let s = pretty_print_compilation_unit(&|pc: u64| Some(format!("pc: {}", pc)), &program, &flows, &symbol_table);
-        println!("{}", s);
-
+        // let s = pretty_print_compilation_unit(
+        //     &|pc: u64| Some(format!("pc: {}", pc)),
+        //     &program,
+        //     &flows,
+        //     &symbol_table,
+        // );
+        // println!("{}", s);
 
         let mut cache = Cache::new();
         let entry_method = MethodIdentifier {
@@ -1107,8 +1123,9 @@ mod tests {
             &mut cache,
         );
 
-        let s = pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
-        println!("{}", s);
+        // let s =
+        //     pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
+        // println!("{}", s);
 
         dbg!(&cache);
     }
