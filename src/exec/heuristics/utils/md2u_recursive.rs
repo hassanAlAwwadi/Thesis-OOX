@@ -282,7 +282,8 @@ fn min_distance_to_statement<'a>(
     loop {
         let last = stack.len() == 1;
 
-        let all_there = {
+        // First ensure all other statements following this statement have been done.
+        let successors_done = {
             let pc = *stack.last().unwrap();
             if pc_to_cost.contains_key(&pc) {
                 continue;
@@ -305,7 +306,8 @@ fn min_distance_to_statement<'a>(
             all_there
         };
 
-        if !all_there {
+        if !successors_done {
+            // First we'll do the successors.
             continue;
         }
 
@@ -1099,13 +1101,13 @@ mod tests {
 
         coverage.remove(&23);
 
-        // let s = pretty_print_compilation_unit(
-        //     &|pc: u64| Some(format!("pc: {}", pc)),
-        //     &program,
-        //     &flows,
-        //     &symbol_table,
-        // );
-        // println!("{}", s);
+        let s = pretty_print_compilation_unit(
+            &|pc: u64| Some(format!("pc: {}", pc)),
+            &program,
+            &flows,
+            &symbol_table,
+        );
+        println!("{}", s);
 
         let mut cache = Cache::new();
         let entry_method = MethodIdentifier {
@@ -1123,9 +1125,9 @@ mod tests {
             &mut cache,
         );
 
-        // let s =
-        //     pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
-        // println!("{}", s);
+        let s =
+            pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
+        println!("{}", s);
 
         dbg!(&cache);
     }
