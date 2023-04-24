@@ -42,11 +42,11 @@ fn execute_instruction_for_all_states(
     let mut resulting_states: HashMap<u64, Vec<State>> = HashMap::new();
 
     let mut current_pc = None;
-    debug!(
-        root_logger,
-        "number of states: {:?}",
-        &remaining_states.len()
-    );
+    // debug!(
+    //     root_logger,
+    //     "number of states: {:?}",
+    //     &remaining_states.len()
+    // );
     assert!(remaining_states.len() > 0);
 
     while let Some(mut state) = remaining_states.pop() {

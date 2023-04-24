@@ -7,10 +7,9 @@ use itertools::{Either, Itertools};
 use crate::{
     dsl::{ands, negate, negative, ors, to_int_expr},
     exec::{
-        get_element, init_symbolic_reference, single_alias_elimination, HeapValue, State, Engine,
+        get_element, init_symbolic_reference, single_alias_elimination, Engine, HeapValue, State,
     },
     positioned::SourcePos,
-    stack::{remove_from_stack, write_to_stack, StackFrame},
     syntax::{BinOp, Expression, Identifier, Lit, RuntimeType, UnOp},
 };
 
@@ -33,15 +32,22 @@ pub fn evaluate_as_int(
     }
 }
 
-pub fn evaluate(state: &mut State, expression: Rc<Expression>, en: &mut impl Engine) -> Rc<Expression> {
+pub fn evaluate(
+    state: &mut State,
+    expression: Rc<Expression>,
+    en: &mut impl Engine,
+) -> Rc<Expression> {
     // dbg!(expression)
     let expression = eval_locally(state, expression, en);
     // dbg!(&expression);
     return expression;
 }
 
-
-fn eval_locally(state: &mut State, expression: Rc<Expression>, en: &mut impl Engine) -> Rc<Expression> {
+fn eval_locally(
+    state: &mut State,
+    expression: Rc<Expression>,
+    en: &mut impl Engine,
+) -> Rc<Expression> {
     match expression.as_ref() {
         Expression::BinOp {
             bin_op,
@@ -64,11 +70,9 @@ fn eval_locally(state: &mut State, expression: Rc<Expression>, en: &mut impl Eng
             evaluate_unop(un_op.clone(), value)
         }
         Expression::Var { var, type_, info } => {
-            let StackFrame { pc, t, params, .. } = state.stack.last().unwrap();
-            let o = params
-                .get(var)
+            let o = state.stack.lookup(var)
                 .unwrap_or_else(|| panic!("infeasible, object does not exist: {:?}", var));
-            //dbg!("var", var);
+
             let exp = eval_locally(state, o.clone(), en);
 
             exp.clone()
@@ -99,8 +103,7 @@ fn eval_locally(state: &mut State, expression: Rc<Expression>, en: &mut impl Eng
         Expression::SymbolicVar { .. } => expression,
         Expression::Lit { .. } => expression,
         Expression::SizeOf { var, type_, info } => {
-            let StackFrame { pc, t, params, .. } = state.stack.last().unwrap();
-            let expr = single_alias_elimination(params[var].clone(), &state.alias_map);
+            let expr = single_alias_elimination(state.stack.lookup(var).unwrap(), &state.alias_map);
 
             match expr.as_ref() {
                 Expression::Lit {
@@ -118,7 +121,7 @@ fn eval_locally(state: &mut State, expression: Rc<Expression>, en: &mut impl Eng
                 }
                 _ => todo!(),
             }
-            dbg!(&state.heap, var, params[var].as_ref());
+            dbg!(&state.heap, var, state.stack.lookup(var).as_ref());
             panic!("invalid state, expected initialised array with arrayvalue in heap");
         }
         Expression::Ref { .. } => expression,
@@ -419,14 +422,7 @@ fn evaluate_quantifier<'a, F>(
 where
     F: Fn(Vec<Rc<Expression>>) -> Rc<Expression>,
 {
-    let array = state
-        .stack
-        .last()
-        .unwrap()
-        .params
-        .get(domain)
-        .unwrap()
-        .clone();
+    let array = state.stack.lookup(domain).unwrap();
     let array = evaluate(state, array, en);
 
     let array = single_alias_elimination(array, &state.alias_map);
@@ -449,11 +445,11 @@ where
                     let element = get_element(i, *ref_, &state.heap);
                     let index = to_int_expr(i as i64);
 
-                    write_to_stack(elem.clone(), element.clone(), &mut state.stack);
-                    write_to_stack(range.clone(), index, &mut state.stack);
+                    state.stack.insert_variable(elem.clone(), element.clone());
+                    state.stack.insert_variable(range.clone(), index);
                     let value = evaluate(state, formula.clone().into(), en);
-                    remove_from_stack(elem, &mut state.stack);
-                    remove_from_stack(range, &mut state.stack);
+                    state.stack.remove_variable(elem);
+                    state.stack.remove_variable(range);
 
                     value.clone()
                 })

@@ -7,7 +7,6 @@ use crate::{
     cfg::CFGStatement,
     eval::evaluate,
     exec::State,
-    stack::lookup_in_stack,
     syntax::{Declaration, Expression, Identifier, Invocation, Lhs, Method, RuntimeType},
     typeable::Typeable,
     utils,
@@ -89,7 +88,7 @@ pub(super) fn multiple_method_invocation(
     program: &HashMap<u64, CFGStatement>,
     en: &mut impl Engine,
 ) -> ActionResult {
-    let object = lookup_in_stack(invocation_lhs, &state.stack).unwrap();
+    let object = &state.stack.lookup(invocation_lhs).unwrap();
     // object can be either a concrete reference to a heap object, or a symbolic object
     // the latter means that we have to split states here, one path for each distinct method that is resolved to,
     // if all aliases resolve to the same method, then we can also continue with that path

@@ -2,6 +2,55 @@ use std::{collections::HashMap, rc::Rc};
 
 use crate::syntax::{Expression, Identifier, Lhs, Method};
 
+#[derive(Clone)]
+pub struct Stack(Vec<StackFrame>);
+
+impl Stack {
+    pub fn new(frames: Vec<StackFrame>) -> Stack {
+        Stack(frames)
+    }
+
+    pub fn push(&mut self, stack_frame: StackFrame) {
+        self.0.push(stack_frame);
+    }
+
+    pub fn current_stackframe(&self) -> Option<&StackFrame> {
+        self.0.last()
+    }
+
+    pub fn current_variables(&self) -> Option<&HashMap<Identifier, Rc<Expression>>> {
+        self.current_stackframe().map(|s| &s.params)
+    }
+
+    // Inserts a variable in the current (latest) stackframe.
+    pub fn insert_variable(&mut self, var: Identifier, value: impl Into<Rc<Expression>>) {
+        let stack_frame = self.0.last_mut().unwrap();
+
+        stack_frame.params.insert(var, value.into());
+    }
+    /// Removes identifier with value expression from the top of the stack
+    pub fn remove_variable<'a>(&mut self, identifier: &Identifier) {
+        let stack_frame = self.0.last_mut().unwrap();
+        stack_frame.params.remove(identifier);
+    }
+
+    pub fn lookup<'a>(
+        &self,
+        identifier: &Identifier,
+    ) -> Option<Rc<Expression>> {
+        self.current_variables().unwrap().get(identifier).cloned()
+    }
+    
+
+    pub fn pop(&mut self) -> Option<StackFrame> {
+        self.0.pop()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct StackFrame {
     pub pc: u64,
@@ -10,26 +59,3 @@ pub struct StackFrame {
     pub current_member: Rc<Method>,
 }
 
-pub fn lookup_in_stack<'a>(
-    identifier: &Identifier,
-    stack: &'a Vec<StackFrame>,
-) -> Option<Rc<Expression>> {
-    stack.last().unwrap().params.get(identifier).cloned()
-}
-
-/// Writes identifier with value expression to the top of the stack
-pub fn write_to_stack<'a, E>(identifier: Identifier, value: E, stack: &'a mut Vec<StackFrame>)
-where
-    E: Into<Rc<Expression>>,
-{
-    stack
-        .last_mut()
-        .unwrap()
-        .params
-        .insert(identifier, value.into());
-}
-
-/// Removes identifier with value expression from the top of the stack
-pub fn remove_from_stack<'a>(identifier: &Identifier, stack: &'a mut Vec<StackFrame>) {
-    stack.last_mut().unwrap().params.remove(identifier);
-}

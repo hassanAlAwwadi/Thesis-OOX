@@ -178,12 +178,12 @@ pub(crate) fn sym_exec(
             Ok(new_states) => {
                 // assert!(new_states.len() <= 2);
                 for (pc, states) in &new_states {
-                    debug!(
-                        root_logger,
-                        "all pcs should be equal {}, {:?}",
-                        pc,
-                        states.iter().map(|s| s.pc).collect_vec()
-                    );
+                    // debug!(
+                    //     root_logger,
+                    //     "all pcs should be equal {}, {:?}",
+                    //     pc,
+                    //     states.iter().map(|s| s.pc).collect_vec()
+                    // );
                     if !states.iter().all(|s| s.pc == *pc) {
                         loop {}
                     }
@@ -208,7 +208,7 @@ pub(crate) fn sym_exec(
                     }
                     1 => {
                         let (pc, states) = new_states.into_iter().next().unwrap();
-                        debug!(root_logger, "new state {:?}", pc);
+                        // debug!(root_logger, "new state {:?}", pc);
 
                         // let mut tree = Rc::new(RefCell::new(N::Leaf(Weak::new(), states)));
                         // tree.borrow_mut().set_parent(Rc::<_>::downgrade(&tree));

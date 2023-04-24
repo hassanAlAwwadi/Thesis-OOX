@@ -34,7 +34,7 @@ use crate::{
     language, parse_program,
     parser::parse,
     positioned::{SourcePos, WithPosition},
-    stack::{lookup_in_stack, write_to_stack, StackFrame},
+    stack::{StackFrame, Stack},
     statistics::Statistics,
     symbol_table::SymbolTable,
     syntax::{
@@ -185,11 +185,10 @@ where
     }
 }
 
-// perhaps separate program from this structure, such that we can have multiple references to it.
 #[derive(Clone)]
 pub struct State {
     pc: u64,
-    pub stack: Vec<StackFrame>,
+    pub stack: Stack,
     pub heap: Heap,
     precondition: Expression,
 
@@ -364,7 +363,7 @@ fn action(
     //use language::prettyprint::cfg_pretty;
 
     debug!(state.logger, "Action {}", action;
-     "stack" => ?state.stack.last().map(|s| &s.params),
+     "stack" => ?state.stack.current_stackframe(),
      "heap" => ?state.heap,
      "alias_map" => ?state.alias_map
     );
@@ -381,8 +380,7 @@ fn action(
 
     match action {
         CFGStatement::Statement(Statement::Declare { type_, var, info }) => {
-            let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
-            params.insert(var.clone(), Rc::new(type_.default()));
+            state.stack.insert_variable(var.clone(), Rc::new(type_.default()));
 
             ActionResult::Continue
         }
@@ -427,15 +425,14 @@ fn action(
         CFGStatement::Statement(Statement::Return { expression, .. }) => {
             if let Some(expression) = expression {
                 let expression = evaluate(state, Rc::new(expression.clone()), en);
-                let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
-                params.insert(retval(), expression);
+                state.stack.insert_variable(retval(), expression);
             }
             ActionResult::Continue
         }
         CFGStatement::FunctionEntry { .. } => {
             // only check preconditions when it's the first method called??
             // we assume that the previous stackframe is of this method
-            let StackFrame { current_member, .. } = state.stack.last().unwrap();
+            let StackFrame { current_member, .. } = state.stack.current_stackframe().unwrap();
             if let Some(requires) = current_member.requires() {
                 // if this is the program entry, assume that require is true, otherwise assert it.
                 if (state.path_length == 0) {
@@ -471,7 +468,7 @@ fn action(
                 current_member,
                 params,
                 ..
-            } = state.stack.last().unwrap();
+            } = state.stack.current_stackframe().unwrap();
             if let Some(post_condition) = current_member.post_condition() {
                 let expression = prepare_assert_expression(state, post_condition.clone(), en);
                 let is_valid = eval_assertion(state, expression, en);
@@ -554,7 +551,7 @@ fn exec_throw(state: &mut State, en: &mut impl Engine, message: &str) -> ActionR
 
         ActionResult::Return(catch_pc)
     } else {
-        while let Some(stack_frame) = state.stack.last() {
+        while let Some(stack_frame) = state.stack.current_stackframe() {
             if let Some(exceptional) = stack_frame.current_member.exceptional() {
                 let assertion = prepare_assert_expression(state, exceptional.clone(), en);
                 //dbg!(&assertion);
@@ -918,7 +915,7 @@ fn exec_super_constructor(
     let parameters = std::iter::once(&this_param).chain(parameters.iter());
 
     // instead of allocating a new object, add the new fields to the existing 'this' object.
-    let object_ref = lookup_in_stack(&this_str(), &state.stack)
+    let object_ref = state.stack.lookup(&this_str())
         .expect("super() is called in a constructor with a 'this' object on the stack");
     let arguments = std::iter::once(object_ref).chain(arguments.iter().cloned());
 
@@ -1225,8 +1222,7 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
     // let st = en.symbol_table();
     match lhs {
         Lhs::LhsVar { var, .. } => {
-            let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
-            params.insert(var.clone(), e);
+            state.stack.insert_variable(var.clone(), e);
         }
         Lhs::LhsField {
             var,
@@ -1235,11 +1231,7 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
             type_,
             info,
         } => {
-            let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
-            let o = params
-                .get(var)
-                .unwrap_or_else(|| panic!("infeasible, object does not exit"))
-                .clone();
+            let o = state.stack.lookup(var).unwrap_or_else(|| panic!("infeasible, object does not exit"));
 
             match o.as_ref() {
                 Expression::Ref { ref_, type_, .. } => {
@@ -1286,11 +1278,7 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
             type_,
             info,
         } => {
-            let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
-            let ref_ = params
-                .get(var)
-                .unwrap_or_else(|| panic!("infeasible, array does not exit"))
-                .clone();
+            let ref_ = state.stack.lookup(var).unwrap_or_else(|| panic!("infeasible, array does not exit"));
 
             let ref_ = single_alias_elimination(ref_, &state.alias_map);
 
@@ -1312,14 +1300,14 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
 // fn evaluateRhs(state: &mut State, rhs: &Rhs) -> Expression {
 fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expression> {
     match rhs {
-        Rhs::RhsExpression { value, type_, .. } => {
+        Rhs::RhsExpression { value, .. } => {
             match value {
-                Expression::Var { var, type_, .. } => lookup_in_stack(var, &state.stack)
+                Expression::Var { var, .. } => state.stack.lookup(var)
                     .unwrap_or_else(|| {
                         panic!(
                             "Could not find {:?} on the stack {:?}",
                             var,
-                            &state.stack.last().unwrap().params
+                            &state.stack.current_variables()
                         )
                     }),
                 _ => Rc::new(value.clone()), // might have to expand on this when dealing with complex quantifying expressions and array
@@ -1329,8 +1317,7 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
             var, field, type_, ..
         } => {
             if let Expression::Var { var, .. } = var {
-                let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
-                let object = params.get(var).unwrap().clone();
+                let object = state.stack.lookup(var).unwrap();
                 exec_rhs_field(state, &object, field, type_, en)
             } else {
                 panic!(
@@ -1341,11 +1328,10 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
         // We expect that this symbolic reference has been initialised into multiple states,
         // where in each state the aliasmap is left with one concrete array.
         Rhs::RhsElem {
-            var, index, type_, ..
+            var, index, ..
         } => {
             if let Expression::Var { var, .. } = var {
-                let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
-                let array = params.get(var).unwrap().clone();
+                let array = state.stack.lookup(var).unwrap();
                 exec_rhs_elem(state, array, index.to_owned().into(), en)
             } else {
                 panic!("Unexpected uninitialized array");
@@ -1622,7 +1608,7 @@ fn exec_assume(state: &mut State, assumption: Rc<Expression>, en: &mut impl Engi
     true
 }
 
-/// Checks whether there is only one alias, if so return the alias otherwise return the expression.
+/// Checks whether there is only one alias for the given symbolic reference, if so return the alias otherwise return the expression.
 /// A single alias occurs for example when an array is initialised, split into multiple paths each with a different array size
 pub(crate) fn single_alias_elimination(
     expr: Rc<Expression>,
@@ -1785,12 +1771,12 @@ pub fn verify(
 
     let state = State {
         pc,
-        stack: vec![StackFrame {
+        stack: Stack::new(vec![StackFrame {
             pc,
             t: None,
             params,
             current_member: initial_method,
-        }],
+        }]),
         heap: HashMap::new(),
         precondition: true_lit(),
         constraints: HashSet::new(),

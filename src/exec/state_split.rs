@@ -8,7 +8,7 @@ use slog::{debug, info};
 
 use crate::{syntax::{Expression, Identifier, RuntimeType}, exec::{AliasEntry, array_initialisation}};
 
-use super::{State, Engine, exec_assume, write_to_stack};
+use super::{State, Engine, exec_assume};
 
 
 
@@ -28,7 +28,7 @@ pub fn conditional_state_split(state: &mut State, en: &mut impl Engine, guard: R
         en,
     );
     if feasible_path {
-        write_to_stack(lhs_name.clone(), true_lhs, &mut true_state.stack);
+        true_state.stack.insert_variable(lhs_name.clone(), true_lhs);
         en.add_remaining_state(true_state);
     }
     // continue with false state
@@ -39,7 +39,7 @@ pub fn conditional_state_split(state: &mut State, en: &mut impl Engine, guard: R
         en,
     );
     if feasible_path {
-        write_to_stack(lhs_name, false_lhs, &mut false_state.stack);
+        false_state.stack.insert_variable(lhs_name.clone(), false_lhs);
     }
 }
 
