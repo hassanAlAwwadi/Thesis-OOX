@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     exec_method, exec_static_method, find_entry_for_static_invocation, remove_symbolic_null,
-    state_split::split_states_with_aliases,
+    state_split::{split_states_with_aliases, self},
     ActionResult, Engine,
 };
 
@@ -166,7 +166,7 @@ pub(super) fn multiple_method_invocation(
                         method_name
                     );
 
-                    // All methods are be the same for each candidate class, so take the first.
+                    // All methods are the same for each candidate class, so take the first.
                     let (_decl, method) = potential_methods.values().next().unwrap();
 
                     let next_entry = non_static_resolved_method_invocation(
@@ -189,6 +189,23 @@ pub(super) fn multiple_method_invocation(
                 // Try again with updated states.
                 return multiple_method_invocation(state, invocation_lhs, invocation, potential_methods, return_point, lhs, program, en);
             }
+        },
+        Expression::Conditional {
+            guard,
+            true_,
+            false_,
+            ..
+        } => {
+            state_split::conditional_state_split(
+                state,
+                en,
+                guard.clone(),
+                true_.clone(),
+                false_.clone(),
+                invocation_lhs.clone(),
+            );
+            // Try again with split states.
+            return multiple_method_invocation(state, invocation_lhs, invocation, potential_methods, return_point, lhs, program, en);
         }
         _ => unreachable!("Expected Ref or SymbolicRef, found {:?}", object),
     };

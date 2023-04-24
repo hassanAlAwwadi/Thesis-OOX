@@ -436,11 +436,6 @@ where
             lit: Lit::NullLit, ..
         } => Expression::FALSE.into(), // return false?
         Expression::Ref { ref_, type_, info } => {
-            // This might be optimized by not passing in &mut State, but instead pass in &Heap, &mut AliasMap, &mut reference_counter
-            // for i in 0..elements.len()
-            //    clone value, clone index
-            //    run evaluation on other stuff
-
             let len = if let HeapValue::ArrayValue { elements, .. } = state.heap.get(&ref_).unwrap()
             {
                 elements.len()

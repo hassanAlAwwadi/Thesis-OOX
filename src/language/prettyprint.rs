@@ -731,6 +731,36 @@ pub mod cfg_pretty {
 
         result
     }
+
+    impl std::fmt::Display for CFGStatement {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let allocator = BoxAllocator;
+            let w = 20;
+            match self {
+                CFGStatement::Statement(s) => {
+                    pretty::Pretty::pretty(s, &allocator).1.render_fmt(w, f)
+                },
+                CFGStatement::Ite(e, _, _) => {
+                    write!(f, "if (")?;
+                    pretty::Pretty::pretty(e, &allocator).1.render_fmt(w, f)?;
+                    write!(f, ") {{ .. }} else {{ .. }}")
+                },
+                CFGStatement::While(e, _) => {
+                    write!(f, "while (")?;
+                    pretty::Pretty::pretty(e, &allocator).1.render_fmt(w, f)?;
+                    write!(f, ") {{ .. }} else {{ .. }}")
+                },
+                CFGStatement::TryCatch(_, _, _, _) => write!(f, "try {{ .. }} catch {{ .. }}"),
+                CFGStatement::TryEntry(_) => write!(f, "entry of try {{ .. }}"),
+                CFGStatement::TryExit => write!(f, "exit of try {{ .. }}"),
+                CFGStatement::CatchEntry(_) => write!(f, "entry of catch {{ .. }}"),
+                CFGStatement::CatchExit => write!(f, "exit of catch {{ .. }}"),
+                CFGStatement::Seq(_, _) => write!(f, "Seq(..)"),
+                CFGStatement::FunctionEntry { decl_name, method_name, argument_types } => write!(f, "entry of {}.{}.{:?}", decl_name, method_name, argument_types),
+                CFGStatement::FunctionExit { decl_name, method_name, argument_types } => write!(f, "exit of {}.{}.{:?}", decl_name, method_name, argument_types),
+            }
+        }
+    }
 }
 
 #[test]

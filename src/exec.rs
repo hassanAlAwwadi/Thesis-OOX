@@ -361,12 +361,13 @@ fn action(
     let pc = state.pc;
     let action = &program[&pc];
 
-    debug!(state.logger, "Action";
-     "action" => #?action,
+    //use language::prettyprint::cfg_pretty;
+
+    debug!(state.logger, "Action {}", action;
+     "stack" => ?state.stack.last().map(|s| &s.params),
+     "heap" => ?state.heap,
+     "alias_map" => ?state.alias_map
     );
-    //  "stack" => ?state.stack.last().map(|s| &s.params),
-    //  "heap" => ?state.heap,
-    //  "alias_map" => ?state.alias_map);
 
     // dbg!(
     //     &state.path_id,
@@ -1193,8 +1194,13 @@ fn init_symbolic_object(
                 }
             } else {
                 Some(Either::Right(
-                    x.aliases.iter().filter(|x| x.type_of() == *type_ref),
-                ))
+                    x.aliases.iter().filter(|x| if let Some(ref_type) = x.type_of().as_reference_type() {
+                        instance_types.contains(ref_type)
+                    } else {
+                        // null
+                        false
+                    },
+                )))
             }
         })
         .flat_map(|x| x.into_iter())
@@ -1215,23 +1221,10 @@ fn init_symbolic_object(
     );
 }
 
-// can't you have a symbolic array, as in the a in a[i] is symbolic?
-fn write_index(heap: &mut Heap, ref_: i64, index: &Expression, value: &Expression) {
-    // match index {
-    //     Expression::Ref { ref_, type_ } => {
-    //         let Expression::Lit { lit , type_ } = (&mut heap[ref_]);
-    //     },
-    //     Expression::SymbolicRef { var, type_ } => {},
-
-    // }
-}
-
-// type ConditionalStateSplit = (Rc<Expression>, Rc<Expression>, Rc<Expression>, Identifier);
-
 fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl Engine) {
-    let st = en.symbol_table();
+    // let st = en.symbol_table();
     match lhs {
-        Lhs::LhsVar { var, type_, info } => {
+        Lhs::LhsVar { var, .. } => {
             let StackFrame { pc, t, params, .. } = state.stack.last_mut().unwrap();
             params.insert(var.clone(), e);
         }
