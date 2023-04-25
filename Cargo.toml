@@ -31,6 +31,7 @@ clap = { version = "4.1.7", features = ["derive"] }
 criterion = "0.4.0"
 rand = "0.8.5"
 pretty = "0.11.3"
+im-rc = "15.1.0"
 
 [[bench]]
 name = "OOX_benchmark"

@@ -1,17 +1,19 @@
 use std::{collections::HashMap, rc::Rc};
 
+use im_rc::Vector;
+
 use crate::syntax::{Expression, Identifier, Lhs, Method};
 
 #[derive(Clone)]
-pub struct Stack(Vec<StackFrame>);
+pub struct Stack(Vector<StackFrame>);
 
 impl Stack {
-    pub fn new(frames: Vec<StackFrame>) -> Stack {
+    pub fn new(frames: Vector<StackFrame>) -> Stack {
         Stack(frames)
     }
 
     pub fn push(&mut self, stack_frame: StackFrame) {
-        self.0.push(stack_frame);
+        self.0.push_back(stack_frame);
     }
 
     pub fn current_stackframe(&self) -> Option<&StackFrame> {
@@ -24,13 +26,13 @@ impl Stack {
 
     // Inserts a variable in the current (latest) stackframe.
     pub fn insert_variable(&mut self, var: Identifier, value: impl Into<Rc<Expression>>) {
-        let stack_frame = self.0.last_mut().unwrap();
+        let stack_frame = self.0.back_mut().unwrap();
 
         stack_frame.params.insert(var, value.into());
     }
     /// Removes identifier with value expression from the top of the stack
     pub fn remove_variable<'a>(&mut self, identifier: &Identifier) {
-        let stack_frame = self.0.last_mut().unwrap();
+        let stack_frame = self.0.back_mut().unwrap();
         stack_frame.params.remove(identifier);
     }
 
@@ -43,7 +45,7 @@ impl Stack {
     
 
     pub fn pop(&mut self) -> Option<StackFrame> {
-        self.0.pop()
+        self.0.pop_back()
     }
 
     pub fn len(&self) -> usize {

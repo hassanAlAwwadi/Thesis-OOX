@@ -623,6 +623,13 @@ impl Expression {
             info: SourcePos::UnknownPosition,
         })
     }
+
+    pub fn expect_reference(&self) -> Option<Reference> {
+        if let Expression::Ref { ref_, .. } = self {
+            return Some(*ref_);
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -8,6 +8,7 @@ use std::{
 };
 
 use clap::ValueEnum;
+use im_rc::{vector, HashMap as ImHashMap, HashSet as ImHashSet, Vector};
 use itertools::{Either, Itertools};
 use num::One;
 use slog::{debug, error, info, o, Logger};
@@ -62,7 +63,7 @@ pub fn this_str() -> Identifier {
     Identifier::with_unknown_pos("this".to_owned())
 }
 
-pub type Heap = HashMap<Reference, HeapValue>;
+pub type Heap = ImHashMap<Reference, HeapValue>;
 
 pub fn get_element(index: usize, ref_: Reference, heap: &Heap) -> Rc<Expression> {
     if let HeapValue::ArrayValue { elements, .. } = &heap[&ref_] {
@@ -92,15 +93,15 @@ impl HeapValue {
     }
 }
 
-type PathConstraints = HashSet<Expression>;
+type PathConstraints = ImHashSet<Expression>;
 
-// refactor to Vec<Reference>? neins, since it can also be ITE and stuff, can it though?
-// nope it can't, refactor this!
-pub type AliasMap = HashMap<Identifier, AliasEntry>;
+
+pub type AliasMap = ImHashMap<Identifier, AliasEntry>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AliasEntry {
-    pub aliases: Vec<Rc<Expression>>,
+    /// Expressions can only be Expression::Ref or null literal
+    pub aliases: Vec<Rc<Expression>>, 
     uniform_type: bool, // whether all aliases have the same type, or subclasses appear.
 }
 
@@ -1771,16 +1772,16 @@ pub fn verify(
 
     let state = State {
         pc,
-        stack: Stack::new(vec![StackFrame {
+        stack: Stack::new(vector![StackFrame {
             pc,
             t: None,
             params,
             current_member: initial_method,
         }]),
-        heap: HashMap::new(),
+        heap: ImHashMap::new(),
         precondition: true_lit(),
-        constraints: HashSet::new(),
-        alias_map: HashMap::new(),
+        constraints: ImHashSet::new(),
+        alias_map: ImHashMap::new(),
         ref_counter: IdCounter::new(0),
         exception_handler: Default::default(),
         path_length: 0,
