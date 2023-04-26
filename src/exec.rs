@@ -527,6 +527,7 @@ fn action(
 }
 
 fn exec_throw(state: &mut State, en: &mut impl Engine, message: &str) -> ActionResult {
+    info!(state.logger, "executing throw");
     if let Some(ExceptionHandlerEntry {
         catch_pc,
         mut current_depth,
@@ -542,6 +543,7 @@ fn exec_throw(state: &mut State, en: &mut impl Engine, message: &str) -> ActionR
                 let assertion = prepare_assert_expression(state, exceptional.clone(), en);
                 //dbg!(&assertion);
                 let is_valid = eval_assertion(state, assertion.clone(), en);
+                info!(state.logger, "is valid: {}", is_valid);
                 if !is_valid {
                     error!(state.logger, "Exceptional error: {:?}", message);
                     return ActionResult::InvalidAssertion(exceptional.get_position());
@@ -552,6 +554,7 @@ fn exec_throw(state: &mut State, en: &mut impl Engine, message: &str) -> ActionR
 
         ActionResult::Return(catch_pc)
     } else {
+
         while let Some(stack_frame) = state.stack.current_stackframe() {
             if let Some(exceptional) = stack_frame.current_member.exceptional() {
                 let assertion = prepare_assert_expression(state, exceptional.clone(), en);
@@ -570,7 +573,7 @@ fn exec_throw(state: &mut State, en: &mut impl Engine, message: &str) -> ActionR
 }
 
 fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl Engine) -> bool {
-    // dbg!("invoke Z3 with:", &expression);
+    info!(state.logger, "invoke Z3");
     // dbg!(&alias_map);
     en.statistics().measure_veficiation();
 
@@ -588,7 +591,12 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl E
             }
         } else {
             // dbg!(&symbolic_refs);
-            let expressions = concretizations(expression.clone(), &symbolic_refs, &state.alias_map);
+            debug!(state.logger, "Unique symbolic refs: {}", symbolic_refs.len());
+            // Cloning alias map is not optimal but needed due to borrow of state.
+            // This can be avoided if we can make evaluate() not borrow state mutably.
+            let expressions = concretizations(expression.clone(), &symbolic_refs, state.alias_map.clone());
+
+            debug!(state.logger, "Number of concretization expressions: {}", expressions.len());
             // This introduces branching in computation for each concretization proposed:
             en.statistics().measure_branches(expressions.len() as u32);
             // dbg!(&expressions);
@@ -1761,10 +1769,10 @@ pub fn verify(
     //     Mutex::new(slog_bunyan::default(std::io::stderr()).filter_level(Level::Debug)).fuse(),
     //     o!(),
     // );
-    let mut builder = FileLoggerBuilder::new("logs");
+    let mut builder = FileLoggerBuilder::new("logs.txt");
     // let mut builder = TerminalLoggerBuilder::new();
     // builder.destination(Destination::Stdout);
-    builder.level(Severity::Debug);
+    builder.level(Severity::Trace);
     builder.format(sloggers::types::Format::Full);
     builder.source_location(sloggers::types::SourceLocation::FileAndLine);
 

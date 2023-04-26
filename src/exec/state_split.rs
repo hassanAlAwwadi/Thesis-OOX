@@ -19,6 +19,7 @@ use super::{State, Engine, exec_assume};
 pub fn conditional_state_split(state: &mut State, en: &mut impl Engine, guard: Rc<Expression>, true_lhs: Rc<Expression>, false_lhs: Rc<Expression>, lhs_name: Identifier) {
     // split up the states into two, one where we assume guard == true and one where we assume guard == false.
     // Program counter is untouched, path length not increased.
+    debug!(state.logger, "Splitting up current path into 2 paths due to conditional state split");
     en.statistics().measure_branches(2);
     let mut true_state = state.clone();
     true_state.path_id = en.next_path_id();

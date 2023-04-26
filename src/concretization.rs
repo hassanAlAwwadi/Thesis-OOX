@@ -9,55 +9,66 @@ use crate::{
     syntax::{Expression, Identifier, RuntimeType},
 };
 
+pub struct ConcretizationIterator<I>
+where
+    I: Iterator<Item = Rc<Expression>>,
+{
+    concretizations: HashMap<Identifier, I>,
+    expression: Rc<Expression>,
+    length: usize,
+}
+
+impl<I: Iterator<Item = Rc<Expression>>> Iterator for ConcretizationIterator<I> {
+    type Item = Rc<Expression>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let concretization = self
+            .concretizations
+            .iter_mut()
+            .map(|(id, refs)| refs.next().map(|ref_| (id, ref_)))
+            .collect::<Option<HashMap<_, _>>>();
+
+        if let Some(concretization) = concretization {
+            Some(helper(self.expression.clone(), &concretization))
+        } else {
+            None
+        }
+    }
+}
+
+impl<I: Iterator<Item = Rc<Expression>>> ExactSizeIterator for ConcretizationIterator<I> {
+    fn len(&self) -> usize {
+        self.length
+    }
+}
+
 pub fn concretizations<'a>(
     expression: Rc<Expression>,
     symbolic_refs: &HashSet<&Identifier>,
-    alias_map: &'a AliasMap,
-) -> Vec<Rc<Expression>> {
-    let mut replaced_expressions = Vec::new();
+    alias_map: AliasMap,
+) -> impl ExactSizeIterator<Item = Rc<Expression>> + 'a {
     let n_combinations = alias_map
         .iter()
         .fold(1, |a, (_, refs)| a * refs.aliases().len());
 
-    let mut concretizations = alias_map
-        .iter()
-        .filter(|(id, _)| symbolic_refs.contains(*id))
-        .map(|(id, refs)| (id, refs.aliases().iter().cycle().take(n_combinations)))
+    let concretizations = alias_map
+        .into_iter()
+        .filter(|(id, _)| symbolic_refs.contains(id))
+        .map(|(id, refs)| (id, refs.aliases.into_iter().cycle().take(n_combinations)))
         .collect::<HashMap<_, _>>();
 
-    // let (combinations, id_to_idx) = alias_map
-    // .iter()
-    // .map(|(key, refs)|  (key, refs.iter().cycle().take(n_combinations)))
-    // .fold((Vec::new(), HashMap::new()), |(mut refs, mut id_to_idx), (id, refs_iter)| {
-    //     let idx = refs.len();
-    //     refs.push(refs_iter);
-    //     id_to_idx.insert(id, idx);
-    //     (refs, id_to_idx)
-    // });
 
-    if concretizations.len() == 0 {
-        return replaced_expressions;
-    }
-
-    loop {
-        let concretization = concretizations
-            .iter_mut()
-            .map(|(id, refs)| refs.next().map(|ref_| (*id, ref_)))
-            .collect::<Option<HashMap<_, _>>>();
-
-        if let Some(concretization) = concretization {
-            // dbg!(&concretization);
-            replaced_expressions.push(helper(expression.clone(), &concretization));
-        } else {
-            return replaced_expressions;
-        }
+    ConcretizationIterator {
+        concretizations,
+        expression,
+        length: n_combinations,
     }
 }
 
 /// Replaces variables with their concretization in the expression.
 fn helper(
     expression: Rc<Expression>,
-    concretization: &HashMap<&Identifier, &Rc<Expression>>,
+    concretization: &HashMap<&Identifier, Rc<Expression>>,
 ) -> Rc<Expression> {
     match expression.as_ref() {
         Expression::SymbolicRef { var, .. } => concretization[&var].clone(),

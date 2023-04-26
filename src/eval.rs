@@ -76,29 +76,6 @@ fn eval_locally(
             let exp = eval_locally(state, o.clone(), en);
 
             exp.clone()
-
-            // Not sure about this part below, shouldn't it be included?
-            // In case the aliases are not initialilzed?
-
-            // match &exp {
-            //     value @ Expression::SymbolicRef { var, type_ } => {
-            //         let value = match alias_map.get(var) {
-            //             None => value.clone(),
-            //             Some(aliases) => {
-            //                 if aliases.len() == 1 {
-            //                     aliases[0].clone()
-            //                 } else {
-            //                     value.clone()
-            //                 }
-            //             }
-            //         };
-
-            //         init_symbolic_reference(heap, alias_map, var, type_, ref_counter, st);
-
-            //         value.clone()
-            //     }
-            //     value => substitute(heap, stack, alias_map, value, ref_counter, st),
-            // }
         }
         Expression::SymbolicVar { .. } => expression,
         Expression::Lit { .. } => expression,

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, rc::Rc};
 
 use itertools::Itertools;
-use slog::debug;
+use slog::{debug, info};
 
 use crate::{
     cfg::CFGStatement,
@@ -30,6 +30,7 @@ pub(super) fn single_method_invocation(
     program: &HashMap<u64, CFGStatement>,
     en: &mut impl Engine,
 ) -> u64 {
+    info!(state.logger, "Single method invocation");
     let (declaration, resolved_method) = resolved;
     let class_name = &declaration.name();
 
@@ -88,6 +89,7 @@ pub(super) fn multiple_method_invocation(
     program: &HashMap<u64, CFGStatement>,
     en: &mut impl Engine,
 ) -> ActionResult {
+    info!(state.logger, "Multiple method invocation");
     let object = &state.stack.lookup(invocation_lhs).unwrap();
     // object can be either a concrete reference to a heap object, or a symbolic object
     // the latter means that we have to split states here, one path for each distinct method that is resolved to,
@@ -239,7 +241,7 @@ fn non_static_resolved_method_invocation(
     program: &HashMap<u64, CFGStatement>,
     en: &mut impl Engine,
 ) -> u64 {
-    debug!(state.logger, "non-static method invocation");
+    info!(state.logger, "non-static method invocation");
 
     // evaluate arguments
     let arguments = invocation
