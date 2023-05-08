@@ -181,6 +181,13 @@ impl DeclarationMember {
             false
         }
     }
+
+    pub fn try_into_method(&self) -> Option<Rc<Method>> {
+        match self {
+            DeclarationMember::Method(m) => Some(m.clone()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Derivative)]

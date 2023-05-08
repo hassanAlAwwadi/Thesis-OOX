@@ -520,7 +520,7 @@ pub mod cfg_pretty {
     {
         let mut s = String::new();
 
-        let class_methods = st.get_all_class_methods();
+        let class_methods = st.get_all_methods();
 
         let methods = class_methods
             .iter()
@@ -694,7 +694,44 @@ pub mod cfg_pretty {
                     *b, decorator, program, flow, allocator,
                 ));
             }
-            s => todo!("{:?}", s),
+            CFGStatement::TryCatch(a, _b, c, _d) => {
+                result = docs![
+                    allocator,
+                    "try {",
+                    decorator(current).map(|decoration| { format!(" // {}", decoration) }),
+                    pretty_print_cfg_statement(*a, decorator, program, flow, allocator),
+                    allocator.hardline(),
+                    "} catch {",
+                    docs![
+                        allocator,
+                        allocator.hardline(),
+                        pretty_print_cfg_statement(*c, decorator, program, flow, allocator),
+                    ]
+                    .nest(2),
+                    allocator.hardline(),
+                    "}"
+                ];
+            }
+            CFGStatement::TryEntry(a) => {
+                result = docs![
+                    allocator,
+                    allocator.hardline(),
+                    pretty_print_cfg_statement(*a, decorator, program, flow, allocator,),
+                ]
+                .nest(2)
+            }
+            CFGStatement::TryExit => (),
+            CFGStatement::CatchEntry(a) => {
+                result = docs![
+                    allocator,
+                    allocator.hardline(),
+                    pretty_print_cfg_statement(*a, decorator, program, flow, allocator,),
+                ]
+                .nest(2)
+            }
+            CFGStatement::CatchExit => (),
+            CFGStatement::FunctionEntry { .. } => todo!(),
+            CFGStatement::FunctionExit { .. } => todo!(),
         };
 
         return result;
@@ -739,25 +776,41 @@ pub mod cfg_pretty {
             match self {
                 CFGStatement::Statement(s) => {
                     pretty::Pretty::pretty(s, &allocator).1.render_fmt(w, f)
-                },
+                }
                 CFGStatement::Ite(e, _, _) => {
                     write!(f, "if (")?;
                     pretty::Pretty::pretty(e, &allocator).1.render_fmt(w, f)?;
                     write!(f, ") {{ .. }} else {{ .. }}")
-                },
+                }
                 CFGStatement::While(e, _) => {
                     write!(f, "while (")?;
                     pretty::Pretty::pretty(e, &allocator).1.render_fmt(w, f)?;
                     write!(f, ") {{ .. }} else {{ .. }}")
-                },
+                }
                 CFGStatement::TryCatch(_, _, _, _) => write!(f, "try {{ .. }} catch {{ .. }}"),
                 CFGStatement::TryEntry(_) => write!(f, "entry of try {{ .. }}"),
                 CFGStatement::TryExit => write!(f, "exit of try {{ .. }}"),
                 CFGStatement::CatchEntry(_) => write!(f, "entry of catch {{ .. }}"),
                 CFGStatement::CatchExit => write!(f, "exit of catch {{ .. }}"),
                 CFGStatement::Seq(_, _) => write!(f, "Seq(..)"),
-                CFGStatement::FunctionEntry { decl_name, method_name, argument_types } => write!(f, "entry of {}.{}.{:?}", decl_name, method_name, argument_types),
-                CFGStatement::FunctionExit { decl_name, method_name, argument_types } => write!(f, "exit of {}.{}.{:?}", decl_name, method_name, argument_types),
+                CFGStatement::FunctionEntry {
+                    decl_name,
+                    method_name,
+                    argument_types,
+                } => write!(
+                    f,
+                    "entry of {}.{}.{:?}",
+                    decl_name, method_name, argument_types
+                ),
+                CFGStatement::FunctionExit {
+                    decl_name,
+                    method_name,
+                    argument_types,
+                } => write!(
+                    f,
+                    "exit of {}.{}.{:?}",
+                    decl_name, method_name, argument_types
+                ),
             }
         }
     }

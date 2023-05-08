@@ -5,7 +5,7 @@ use slog::{Logger};
 use crate::{
     cfg::CFGStatement,
     statistics::Statistics,
-    symbol_table::SymbolTable,
+    symbol_table::SymbolTable, exec::heuristics::execute_instruction_for_all_states,
 };
 
 use super::{
@@ -25,107 +25,29 @@ pub(crate) fn sym_exec(
     statistics: &mut Statistics,
     _entry_method: crate::cfg::MethodIdentifier,
 ) -> SymResult {
-    let mut remaining_states: Vec<State> = vec![];
-    let mut state = state;
+    let mut remaining_states = vec![state];
 
-    loop {
-        // dbg!(&remaining_states.len());
-        if state.path_length >= k {
-            // finishing current branch
-            statistics.measure_finish();
-            if let Some(next_state) = remaining_states.pop() {
-                state = next_state;
-            } else {
-                // Finished
-                return SymResult::Valid;
-            }
-        }
+    while let Some(state) = remaining_states.pop() {
+        let pc = state.pc;
+        let step = execute_instruction_for_all_states(vec![state], program, flows, k, st, root_logger.clone(), path_counter.clone(), statistics);
 
-        let next = action(
-            &mut state,
-            program,
-            k,
-            &mut crate::exec::DFSEngine {
-                remaining_states: &mut remaining_states,
-                path_counter: path_counter.clone(),
-                statistics,
-                st,
-            },
-        );
-        match next {
-            ActionResult::FunctionCall(next) => {
-                // function call or return
-                state.pc = next;
-            }
-            ActionResult::Return(return_pc) => {
-                if let Some(neighbours) = flows.get(&return_pc) {
-                    debug_assert!(neighbours.len() == 1);
-                    let mut neighbours = neighbours.iter();
-                    let first_neighbour = neighbours.next().unwrap();
-                    state.pc = *first_neighbour;
-                } else {
-                    panic!("function pc does not exist");
-                }
-            }
-            ActionResult::Continue => {
-                if let Some(neighbours) = flows.get(&state.pc) {
-                    //dbg!(&neighbours);
-                    statistics.measure_branches((neighbours.len() - 1) as u32);
-
-                    let mut neighbours = neighbours.iter();
-                    let first_neighbour = neighbours.next().unwrap();
-                    state.pc = *first_neighbour;
-                    state.path_length += 1;
-
-                    let new_path_ids = (1..).map(|_| path_counter.borrow_mut().next_id());
-
-                    for (neighbour_pc, path_id) in neighbours.zip(new_path_ids) {
-                        let mut new_state = state.clone();
-                        new_state.path_id = path_id;
-                        new_state.pc = *neighbour_pc;
-
-                        remaining_states.push(new_state);
-                    }
-                } else {
-                    // Function exit of the main function under verification
-                    if let CFGStatement::FunctionExit { decl_name, .. } = &program[&state.pc] {
-                        // Valid program exit, continue
-                        statistics.measure_finish();
-                        if let Some(next_state) = remaining_states.pop() {
-                            state = next_state;
-                        } else {
-                            // Finished
-                            return SymResult::Valid;
+        match step {
+            Err(source_pos) => return SymResult::Invalid(source_pos),
+            Ok(mut new_states) => {
+                if let Some(children) = flows.get(&pc) {
+                    // Add the children in DFS order
+                    for child in children {
+                        if let Some(values) = new_states.remove(&child) {
+                            remaining_states.extend(values);
                         }
-                    } else {
-                        // Unexpected end of CFG
-                        panic!("Unexpected end of CFG");
                     }
-                }
-            }
-            ActionResult::InvalidAssertion(info) => {
-                return SymResult::Invalid(info);
-            }
-            ActionResult::InfeasiblePath => {
-                // Finish this branch
-                statistics.measure_prune();
-                if let Some(next_state) = remaining_states.pop() {
-                    state = next_state;
-                } else {
-                    // Finished
-                    return SymResult::Valid;
-                }
-            }
-            ActionResult::Finish => {
-                statistics.measure_finish();
-                if let Some(next_state) = remaining_states.pop() {
-                    state = next_state;
-                } else {
-                    // Finished
-                    return SymResult::Valid;
+                } 
+                // Could be a method call, add children in random order
+                for (_pc, values) in new_states {
+                    remaining_states.extend(values);
                 }
             }
         }
     }
+    SymResult::Valid
 }
-

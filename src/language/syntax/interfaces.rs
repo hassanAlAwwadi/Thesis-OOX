@@ -23,6 +23,15 @@ pub enum InterfaceMember {
     AbstractMethod(Rc<AbstractMethod>),
 }
 
+impl InterfaceMember {
+    pub fn try_into_default_method(&self) -> Option<Rc<Method>> {
+        if let InterfaceMember::DefaultMethod(method) = self {
+            return Some(method.clone());
+        }
+        None
+    }
+}
+
 /// Searches for interface methods, with the name method_name.
 /// Suboptimal return of InterfaceMethods -- wrap in Rc
 /// Does it search for default or abstract?

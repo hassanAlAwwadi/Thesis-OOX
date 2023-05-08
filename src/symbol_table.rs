@@ -8,7 +8,7 @@ use crate::{
     syntax::{
         self, Class, CompilationUnit, Declaration, DeclarationMember, Identifier, Interface,
         NonVoidType,
-    },
+    }
 };
 
 pub type Fields = Vec<(Identifier, NonVoidType)>;
@@ -185,14 +185,21 @@ impl SymbolTable {
         &self.class_to_fields[class_name]
     }
 
-    /// Returns all methods for each class in the program (not cached)
-    pub fn get_all_class_methods(&self) -> Vec<(&Identifier, Rc<crate::Method>)> {
+    /// Returns all non-default methods for each class and interface in the program (not cached)
+    pub fn get_all_methods(&self) -> Vec<(&Identifier, Rc<crate::Method>)> {
         self.declarations
             .iter()
-            .flat_map(|(name, decl)| decl.try_into_class().unwrap().members.iter().map(|m| (name, m.clone())).collect::<Vec<_>>())
-            .filter_map(|(name, m)| match m {
-                DeclarationMember::Method(m) => Some((name, m)),
-                _ => None,
+            .flat_map(|(name, decl)| match decl {
+                Declaration::Class(class) => class
+                    .members
+                    .iter()
+                    .filter_map(|m| m.try_into_method().map(|m| (name, m.clone())))
+                    .collect::<Vec<_>>(),
+                Declaration::Interface(interface) => interface
+                    .members
+                    .iter()
+                    .filter_map(|m| m.try_into_default_method().map(|m| (name, m)))
+                    .collect::<Vec<_>>(),
             })
             .collect()
     }
