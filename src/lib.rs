@@ -35,8 +35,6 @@ extern crate pest_derive;
 
 use std::sync::Mutex;
 
-pub use z3_checker::playground;
-
 pub use exec::{verify, Options, Heuristic};
 
 static FILE_NAMES: Mutex<String> = Mutex::new(String::new());

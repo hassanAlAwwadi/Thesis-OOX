@@ -9,6 +9,8 @@ use crate::{
     syntax::{Expression, Identifier, RuntimeType},
 };
 
+/// Iterator over all concretizations of the expression
+/// I is assumed to be equally as long for all symbolic objects in field concretizations.
 pub struct ConcretizationIterator<I>
 where
     I: Iterator<Item = Rc<Expression>>,
@@ -56,7 +58,6 @@ pub fn concretizations<'a>(
         .filter(|(id, _)| symbolic_refs.contains(id))
         .map(|(id, refs)| (id, refs.aliases.into_iter().cycle().take(n_combinations)))
         .collect::<HashMap<_, _>>();
-
 
     ConcretizationIterator {
         concretizations,

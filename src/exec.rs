@@ -576,6 +576,7 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl E
     info!(state.logger, "invoke Z3");
     // dbg!(&alias_map);
     en.statistics().measure_veficiation();
+    // println!("expression: {:?}", &expression);
 
     if *expression == true_lit() {
         false
@@ -584,7 +585,7 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl E
     } else {
         let symbolic_refs = find_symbolic_refs(&expression);
         if symbolic_refs.len() == 0 {
-            let result = z3_checker::verify(&expression);
+            let result = z3_checker::concretization::verify(&expression);
             if let SatResult::Unsat = result {
             } else {
                 return false;
@@ -592,31 +593,50 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl E
         } else {
             // dbg!(&symbolic_refs);
             debug!(state.logger, "Unique symbolic refs: {}", symbolic_refs.len());
-            // Cloning alias map is not optimal but needed due to borrow of state.
-            // This can be avoided if we can make evaluate() not borrow state mutably.
-            let expressions = concretizations(expression.clone(), &symbolic_refs, state.alias_map.clone());
+            
+            // The number of combinations of each symbolic ref, which could be concretized.
+            // If this number is too large we leave all the work to Z3 which seems to be faster in practice.
+            let n_combinations = &state.alias_map
+                .iter()
+                .fold(1, |a, (_, refs)| a * refs.aliases().len());
 
-            debug!(state.logger, "Number of concretization expressions: {}", expressions.len());
-            // This introduces branching in computation for each concretization proposed:
-            en.statistics().measure_branches(expressions.len() as u32);
-            // dbg!(&expressions);
-
-            for expression in expressions {
-                let expression = evaluate(state, expression, en);
-                if *expression == true_lit() {
-                    // Invalid
-                    en.statistics().measure_local_solve();
-                    return false;
-                } else if *expression == false_lit() {
+            if *n_combinations > 1000 {
+                // Solve through only Z3
+                let result = z3_checker::all_z3::verify(&expression, &state.alias_map);
+                if let SatResult::Unsat = result {
                     // valid, continue
-                    en.statistics().measure_local_solve();
                 } else {
-                    en.statistics().measure_invoke_z3();
-                    let result = z3_checker::verify(&expression);
-                    if let SatResult::Unsat = result {
-                        // valid, continue
-                    } else {
+                    return false;
+                }
+            } else {
+                // Solve using concretizations + Z3
+
+                // Cloning alias map is not optimal but needed due to borrow of state.
+                // Optimization: This can be avoided if we can make evaluate() (or a version of evaluate) not borrow state mutably.
+                let expressions = concretizations(expression.clone(), &symbolic_refs, state.alias_map.clone());
+
+                debug!(state.logger, "Number of concretization expressions: {}", expressions.len());
+                // This introduces branching in computation for each concretization proposed:
+                en.statistics().measure_branches(expressions.len() as u32);
+                // dbg!(&expressions);
+
+                for expression in expressions {
+                    let expression = evaluate(state, expression, en);
+                    if *expression == true_lit() {
+                        // Invalid
+                        en.statistics().measure_local_solve();
                         return false;
+                    } else if *expression == false_lit() {
+                        // valid, continue
+                        en.statistics().measure_local_solve();
+                    } else {
+                        en.statistics().measure_invoke_z3();
+                        let result = z3_checker::concretization::verify(&expression);
+                        if let SatResult::Unsat = result {
+                            // valid, continue
+                        } else {
+                            return false;
+                        }
                     }
                 }
             }
