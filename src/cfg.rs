@@ -58,7 +58,20 @@ impl CFGStatement {
             false
         }
     }
+
+    pub fn is_method_invocation(&self) -> Option<&Invocation> {
+        match self {
+            CFGStatement::Statement(Statement::Call { invocation, .. })
+            | CFGStatement::Statement(Statement::Assign {
+                rhs: Rhs::RhsCall { invocation, .. },
+                ..
+            }) => Some(invocation),
+            _ => None,
+        }
+    }
 }
+
+
 
 /// Takes the syntax tree of a program, returns a tuple containing the control flow graph and flow of the program.
 /// The control flow graph is a mapping from program counter (aka label) --> Program statement.

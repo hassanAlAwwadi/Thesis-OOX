@@ -44,7 +44,7 @@ use crate::{
     },
     typeable::{runtime_to_nonvoidtype, Typeable},
     typing::type_compilation_unit,
-    utils, z3_checker, FILE_NAMES,
+    utils, z3_checker, FILE_NAMES, reachability::reachability,
 };
 
 use crate::exec::state_split::exec_array_initialisation;
@@ -1835,10 +1835,13 @@ pub fn verify(
         root_logger,
         path_counter.clone(),
         &mut statistics,
-        entry_method,
+        entry_method.clone(),
     );
 
     let duration = start.elapsed();
+
+    let reachability = reachability(entry_method, &program, &flows, &symbol_table);
+    statistics.reachable_statements = reachability.len() as u32;
 
     let result_text = match sym_result {
         SymResult::Valid => "VALID".to_string(),
@@ -1869,6 +1872,13 @@ pub fn verify(
             "  #paths explored:  {}",
             path_counter.borrow().current_value()
         );
+        println!(
+            "  #coverage:        {}/{} ({:.1}%)",
+            statistics.covered_statements,
+            statistics.reachable_statements,
+            (statistics.covered_statements as f32 /
+            statistics.reachable_statements as f32) * 100.0
+        )
     }
 
     return Ok(sym_result);

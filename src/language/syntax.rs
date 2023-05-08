@@ -19,7 +19,7 @@ use std::{
     str::FromStr,
 };
 
-use crate::{positioned::SourcePos, typeable::Typeable};
+use crate::{positioned::SourcePos, typeable::Typeable, cfg::MethodIdentifier};
 
 pub use self::{
     classes::Class, interfaces::find_interface_method, interfaces::Interface,
@@ -34,6 +34,7 @@ pub struct CompilationUnit {
 }
 
 impl CompilationUnit {
+    /// Find the first class member with given method name
     pub fn find_class_declaration_member(
         &self,
         identifier: &str,
@@ -379,6 +380,42 @@ impl Invocation {
             Invocation::InvokeConstructor { class_name, .. } => class_name,
             Invocation::InvokeSuperMethod { rhs, .. } => rhs,
             _ => panic!("Invocation of super(); - does not have an identifier"),
+        }
+    }
+
+
+    /// Returns a list of methods that could be called at runtime depending on the runtimetype, by this invocation.
+pub fn methods_called<'a>(&'a self) -> Vec<MethodIdentifier<'a>> {
+        match self {
+            Invocation::InvokeMethod { resolved, .. } => {
+                // A regular method can resolve to multiple different methods due to dynamic dispatch, depending on the runtime type of the object.
+                // We make here the assumption that any object can be represented and thus consider each resolved method.
+
+                // We also need to lookup the program counter for each method. (CANT WE DO THIS BEFOREHAND?)
+
+                let methods = resolved.as_ref().unwrap();
+
+                methods
+                    .values()
+                    .map(|(decl, method)| MethodIdentifier {
+                        method_name: &method.name,
+                        decl_name: decl.name(),
+                        arg_list: method.param_types().collect(),
+                    })
+                    .collect()
+            }
+            Invocation::InvokeSuperMethod { resolved, .. }
+            | Invocation::InvokeConstructor { resolved, .. }
+            | Invocation::InvokeSuperConstructor { resolved, .. } => {
+                // The case where we have a single method that we resolve to.
+                let (decl, method) = resolved.as_ref().unwrap().as_ref();
+
+                vec![MethodIdentifier {
+                    method_name: &method.name,
+                    decl_name: decl.name(),
+                    arg_list: method.param_types().collect(),
+                }]
+            }
         }
     }
 }

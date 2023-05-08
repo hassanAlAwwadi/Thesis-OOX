@@ -1,31 +1,40 @@
-use std::{collections::HashMap, cell::RefCell, rc::{Rc, Weak}, ops::DerefMut};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    ops::DerefMut,
+    rc::{Rc, Weak},
+};
 
-use slog::{Logger, debug};
+use itertools::Itertools;
+use slog::{Logger};
 
-use crate::{cfg::CFGStatement, symbol_table::SymbolTable, statistics::Statistics, exec::{action, ActionResult}, positioned::SourcePos};
+use crate::{
+    cfg::CFGStatement,
+    exec::{action, ActionResult},
+    positioned::SourcePos,
+    statistics::Statistics,
+    symbol_table::SymbolTable,
+};
 
 use execution_tree::ExecutionTree;
 
-use super::{State, SymResult, IdCounter};
+use super::{IdCounter, State, SymResult};
 
 pub mod depth_first_search;
-pub mod random_path;
 pub mod min_dist_to_uncovered;
-
+pub mod random_path;
 
 type Cost = u64;
 type ProgramCounter = u64;
 
-
 mod execution_tree;
 mod utils;
 
-
-/// Given a set of states, which are all assumed to be at the same program point, 
+/// Given a set of states, which are all assumed to be at the same program point,
 /// execute one instruction and return the resulting set of states, possibly branched into different program points.
 /// Often this will be just one state, but it may happen that states are split due to e.g. array initialisation or due to encountering a branch statement,
 /// (if, while, function call with dynamic dispatch)
-/// 
+///
 /// If instead an invalid assertion occured, return that assertion location.
 fn execute_instruction_for_all_states(
     states: Vec<State>,
@@ -37,24 +46,22 @@ fn execute_instruction_for_all_states(
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &mut Statistics,
 ) -> Result<HashMap<u64, Vec<State>>, SourcePos> {
+    assert!(states.len() > 0);
+
+    statistics.measure_statement_explored(states[0].pc);
     let mut remaining_states = states;
 
     let mut resulting_states: HashMap<u64, Vec<State>> = HashMap::new();
 
-    let mut current_pc = None;
     // debug!(
     //     root_logger,
     //     "number of states: {:?}",
     //     &remaining_states.len()
     // );
-    assert!(remaining_states.len() > 0);
 
     while let Some(mut state) = remaining_states.pop() {
-        if let Some(current_pc) = current_pc {
-            assert_eq!(state.pc, current_pc);
-        } else {
-            current_pc = Some(state.pc);
-        }
+        debug_assert!(remaining_states.iter().map(|s| s.pc).all_equal());
+
         // dbg!(&remaining_states.len());
         if state.path_length >= k {
             // finishing current branch
@@ -149,12 +156,12 @@ fn execute_instruction_for_all_states(
 /// It will move up tree through its parent, removing the finished state from the list of child states.
 /// If there are no states left in the parent after this, this means that all paths under that branch have been explored,
 /// meaning that we can remove that branch as well, repeating the process.
-/// 
+///
 /// Returns whether the root node was reached, in that case the entire search space is explored (up to given limit k).
-/// 
+///
 /// TODO:
 /// Removing any branching node where there is only one unpruned/unfinished state left.
-fn finish_state_in_path(mut leaf: Rc<RefCell<ExecutionTree>>, path: Vec<ProgramCounter>,) -> bool {
+fn finish_state_in_path(mut leaf: Rc<RefCell<ExecutionTree>>, path: Vec<ProgramCounter>) -> bool {
     loop {
         let parent = if let Some(parent) = leaf.borrow().parent().upgrade() {
             parent
@@ -169,12 +176,11 @@ fn finish_state_in_path(mut leaf: Rc<RefCell<ExecutionTree>>, path: Vec<ProgramC
             // };
             return true;
         };
-        
+
         match parent.borrow_mut().deref_mut() {
             ExecutionTree::Node { children, .. } => {
-                
                 children.retain(|child| !Rc::ptr_eq(child, &leaf));
-                
+
                 if children.len() == 0 {
                     leaf = parent.clone();
                 } else {

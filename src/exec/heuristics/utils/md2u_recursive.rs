@@ -421,11 +421,11 @@ fn statement_cost<'a>(
             distance_type: DistanceType::ToFirstUncovered,
             value: 1,
         })
-    } else if let Some(invocation) = is_method_invocation(statement) {
+    } else if let Some(invocation) = statement.is_method_invocation() {
         // Case for a statement with an invocation.
         // An invocation has more cost than a regular statement, the resulting cost is returned.
         // If an unseen before method invocation is encountered, it will explore that first, and will add the results to the cache.
-        let methods_called = methods_called(invocation);
+        let methods_called = invocation.methods_called();
 
         // Of all possible resolved methods, find the minimal cost to uncovered, or minimal cost to traverse.
         let min_method_cost = methods_called
@@ -635,52 +635,6 @@ fn minimize(a: CumulativeCost, b: CumulativeCost) -> CumulativeCost {
         (CumulativeCost::Cycle(_), _) => b.clone(),
         (_, CumulativeCost::Cycle(_)) => a.clone(),
         (_, _) => CumulativeCost::Minimal(Box::new(a), Box::new(b)),
-    }
-}
-
-fn is_method_invocation(statement: &CFGStatement) -> Option<&Invocation> {
-    match statement {
-        CFGStatement::Statement(Statement::Call { invocation, .. })
-        | CFGStatement::Statement(Statement::Assign {
-            rhs: Rhs::RhsCall { invocation, .. },
-            ..
-        }) => Some(invocation),
-        _ => None,
-    }
-}
-
-/// Returns a list of methods that could be called at runtime depending on the runtimetype, by this invocation.
-fn methods_called(invocation: &Invocation) -> Vec<MethodIdentifier> {
-    match invocation {
-        Invocation::InvokeMethod { resolved, .. } => {
-            // A regular method can resolve to multiple different methods due to dynamic dispatch, depending on the runtime type of the object.
-            // We make here the assumption that any object can be represented and thus consider each resolved method.
-
-            // We also need to lookup the program counter for each method. (CANT WE DO THIS BEFOREHAND?)
-
-            let methods = resolved.as_ref().unwrap();
-
-            methods
-                .values()
-                .map(|(decl, method)| MethodIdentifier {
-                    method_name: &method.name,
-                    decl_name: decl.name(),
-                    arg_list: method.param_types().collect(),
-                })
-                .collect()
-        }
-        Invocation::InvokeSuperMethod { resolved, .. }
-        | Invocation::InvokeConstructor { resolved, .. }
-        | Invocation::InvokeSuperConstructor { resolved, .. } => {
-            // The case where we have a single method that we resolve to.
-            let (decl, method) = resolved.as_ref().unwrap().as_ref();
-
-            vec![MethodIdentifier {
-                method_name: &method.name,
-                decl_name: decl.name(),
-                arg_list: method.param_types().collect(),
-            }]
-        }
     }
 }
 
