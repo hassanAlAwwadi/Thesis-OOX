@@ -20,7 +20,7 @@ use super::super::{Cost, ProgramCounter};
 /// A cache storing for a method the distance, will not contain distances for unexplored methods.
 /// A method always has the same cost, with a distinction made between a cost achieved by finding an uncovered statement,
 /// and otherwise a cost of calling the function in terms of the number of statements visited.
-pub(crate) type Cache<'a> = HashMap<MethodIdentifier<'a>, CumulativeCost>;
+pub(crate) type Cache = HashMap<MethodIdentifier, CumulativeCost>;
 
 /// Type of distance of a statement, can be either partially complete (to as far as it can see), which would be the exit of the method.
 /// Or it can be the distance to the first uncovered statement, if any found.
@@ -113,17 +113,17 @@ impl CumulativeCost {
 ///  - a mapping for every program counter explored to its distance
 ///  - a cache for methods explored may be reused.
 pub(crate) fn min_distance_to_uncovered_method<'a>(
-    method: MethodIdentifier<'a>,
+    method: &MethodIdentifier,
     coverage: &HashMap<ProgramCounter, usize>,
     program: &'a HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     st: &SymbolTable,
-    cache: &mut Cache<'a>,
+    cache: &mut Cache,
 ) -> (Distance, HashMap<ProgramCounter, Distance>) {
     // We reset visited when the search is started from scratch
     let mut visited = HashSet::new();
     let (distance, pc_to_distance) = min_distance_to_uncovered_method_with_visited(
-        method.clone(),
+        method,
         coverage,
         program,
         flow,
@@ -136,16 +136,16 @@ pub(crate) fn min_distance_to_uncovered_method<'a>(
 }
 
 fn min_distance_to_uncovered_method_with_visited<'a>(
-    method: MethodIdentifier<'a>,
+    method: &MethodIdentifier,
     coverage: &HashMap<ProgramCounter, usize>,
     program: &'a HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     st: &SymbolTable,
     visited: &mut HashSet<ProgramCounter>,
-    cache: &mut Cache<'a>,
+    cache: &mut Cache,
 ) -> (Distance, HashMap<ProgramCounter, Distance>) {
     let (cost, pc_to_cost) = min_distance_to_uncovered_method_helper(
-        method.clone(),
+        method,
         coverage,
         program,
         flow,
@@ -198,17 +198,17 @@ fn min_distance_to_uncovered_method_with_visited<'a>(
 /// Computes the minimal distance to uncovered methods for all program counters in this method
 /// Recursively computes the minimal distance for any method calls referenced.
 fn min_distance_to_uncovered_method_helper<'a>(
-    method: MethodIdentifier<'a>,
+    method: &MethodIdentifier,
     coverage: &HashMap<ProgramCounter, usize>,
     program: &'a HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     st: &SymbolTable,
     visited: &mut HashSet<ProgramCounter>,
-    cache: &mut Cache<'a>,
+    cache: &mut Cache,
 ) -> (CumulativeCost, HashMap<ProgramCounter, CumulativeCost>) {
     let pc = find_entry_for_static_invocation(
-        method.decl_name,
-        method.method_name,
+        &method.decl_name,
+        &method.method_name,
         method.arg_list.iter().cloned(),
         program,
         st,
@@ -258,7 +258,7 @@ fn min_distance_to_uncovered_method_helper<'a>(
         }
     };
 
-    cache.insert(method, method_body_cost.clone());
+    cache.insert(method.clone(), method_body_cost.clone());
 
     (method_body_cost, pc_to_cost)
 }
@@ -267,13 +267,13 @@ fn min_distance_to_uncovered_method_helper<'a>(
 /// Recursively computes the minimal distance for any method calls referenced.
 fn min_distance_to_statement<'a>(
     pc: ProgramCounter,
-    method: &MethodIdentifier<'a>,
+    method: &MethodIdentifier,
     coverage: &HashMap<ProgramCounter, usize>,
     program: &'a HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     st: &SymbolTable,
     pc_to_cost: &mut HashMap<ProgramCounter, CumulativeCost>,
-    cache: &mut Cache<'a>,
+    cache: &mut Cache,
     visited: &mut HashSet<ProgramCounter>,
 ) -> CumulativeCost {
     visited.insert(pc);
@@ -410,7 +410,7 @@ fn statement_cost<'a>(
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     st: &SymbolTable,
     pc_to_cost: &mut HashMap<ProgramCounter, CumulativeCost>,
-    cache: &mut Cache<'a>,
+    cache: &mut Cache,
     visited: &mut HashSet<ProgramCounter>,
 ) -> CumulativeCost {
     let statement = &program[&pc];
@@ -438,8 +438,8 @@ fn statement_cost<'a>(
                 } else {
                     // if method is already covered, but not in cache it means we are processing it currently.
                     let next_pc = find_entry_for_static_invocation(
-                        method.decl_name,
-                        method.method_name,
+                        &method.decl_name,
+                        &method.method_name,
                         method.arg_list.iter().cloned(),
                         program,
                         st,
@@ -450,7 +450,7 @@ fn statement_cost<'a>(
                         CumulativeCost::UnexploredMethodCall(method.method_name.to_string())
                     } else {
                         let (cost, method_pc_to_cost) = min_distance_to_uncovered_method_helper(
-                            method, coverage, program, flow, st, visited, cache,
+                            &method, coverage, program, flow, st, visited, cache,
                         );
 
                         pc_to_cost.extend(method_pc_to_cost);
@@ -503,7 +503,7 @@ fn is_reducable(c: &CumulativeCost, current_method: &MethodIdentifier) -> bool {
         CumulativeCost::Plus(c1, c2) => {
             is_reducable(c1, current_method) && is_reducable(c2, current_method)
         }
-        CumulativeCost::UnexploredMethodCall(m) => current_method.method_name == m,
+        CumulativeCost::UnexploredMethodCall(m) => current_method.method_name == *m,
         CumulativeCost::Minimal(c1, c2) => {
             is_reducable(c1, current_method) && is_reducable(c2, current_method)
         }
@@ -712,9 +712,9 @@ mod tests {
 
         let mut cache = Cache::new();
         let (cost, pc_to_cost) = min_distance_to_uncovered_method(
-            MethodIdentifier {
-                method_name: "main",
-                decl_name: "Main",
+            &MethodIdentifier {
+                method_name: "main".to_string(),
+                decl_name: "Main".to_string(),
                 arg_list: vec![RuntimeType::IntRuntimeType; 1],
             },
             &coverage,
@@ -755,9 +755,9 @@ mod tests {
 
         let mut cache = Cache::new();
         let (cost, pc_to_cost) = min_distance_to_uncovered_method(
-            MethodIdentifier {
-                method_name: "main",
-                decl_name: "Main",
+            &MethodIdentifier {
+                method_name: "main".to_string(),
+                decl_name: "Main".to_string(),
                 arg_list: vec![RuntimeType::IntRuntimeType; 1],
             },
             &coverage,
@@ -792,13 +792,13 @@ mod tests {
         let path = "./examples/reachability/recursive.oox";
         let (coverage, program, flows, symbol_table) = setup(path);
         let method = MethodIdentifier {
-            method_name: "main",
-            decl_name: "Main",
+            method_name: "main".to_string(),
+            decl_name: "Main".to_string(),
             arg_list: vec![RuntimeType::IntRuntimeType; 1],
         };
         let mut cache = Cache::new();
         let (cost, pc_to_cost) = min_distance_to_uncovered_method(
-            method.clone(),
+            &method,
             &coverage,
             &program,
             &flows,
@@ -843,13 +843,13 @@ mod tests {
 
         let mut cache = Cache::new();
         let entry_method = MethodIdentifier {
-            method_name: "main",
-            decl_name: "Main",
+            method_name: "main".to_string(),
+            decl_name: "Main".to_string(),
             arg_list: vec![RuntimeType::IntRuntimeType; 1],
         };
 
         let (cost, pc_to_cost) = min_distance_to_uncovered_method(
-            entry_method.clone(),
+            &entry_method,
             &coverage,
             &program,
             &flows,
@@ -896,13 +896,13 @@ mod tests {
 
         let mut cache = Cache::new();
         let entry_method = MethodIdentifier {
-            method_name: "main",
-            decl_name: "Main",
+            method_name: "main".to_string(),
+            decl_name: "Main".to_string(),
             arg_list: vec![RuntimeType::IntRuntimeType; 1],
         };
 
         let (cost, pc_to_cost) = min_distance_to_uncovered_method(
-            entry_method.clone(),
+            &entry_method,
             &coverage,
             &program,
             &flows,
@@ -965,9 +965,9 @@ mod tests {
 
         let mut cache = Cache::new();
         let (cost, pc_to_cost) = min_distance_to_uncovered_method(
-            MethodIdentifier {
-                method_name: "main",
-                decl_name: "Main",
+            &MethodIdentifier {
+                method_name: "main".to_string(),
+                decl_name: "Main".to_string(),
                 arg_list: vec![RuntimeType::IntRuntimeType; 1],
             },
             &coverage,
@@ -1022,8 +1022,8 @@ mod tests {
 
         let mut cache = Cache::new();
         let entry_method = MethodIdentifier {
-            method_name: "main",
-            decl_name: "Node",
+            method_name: "main".to_string(),
+            decl_name: "Node".to_string(),
             arg_list: vec![
                 RuntimeType::ReferenceRuntimeType {
                     type_: "Node".into(),
@@ -1033,7 +1033,7 @@ mod tests {
         };
 
         let (cost, pc_to_cost) = min_distance_to_uncovered_method(
-            entry_method.clone(),
+            &entry_method,
             &coverage,
             &program,
             &flows,
@@ -1065,13 +1065,13 @@ mod tests {
 
         let mut cache = Cache::new();
         let entry_method = MethodIdentifier {
-            method_name: "main",
-            decl_name: "Main",
+            method_name: "main".to_string(),
+            decl_name: "Main".to_string(),
             arg_list: vec![RuntimeType::IntRuntimeType],
         };
 
         let (cost, pc_to_cost) = min_distance_to_uncovered_method(
-            entry_method.clone(),
+            &entry_method,
             &coverage,
             &program,
             &flows,

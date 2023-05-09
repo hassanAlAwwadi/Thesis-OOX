@@ -1659,6 +1659,7 @@ pub enum Heuristic {
     DepthFirstSearch,
     RandomPath,
     MinDist2Uncovered,
+    RoundRobinMD2URandomPath
 }
 
 #[derive(Copy, Clone)]
@@ -1756,14 +1757,14 @@ pub fn verify(
         .collect();
 
     let entry_method = MethodIdentifier {
-        decl_name: class_name,
-        method_name: method_name,
+        decl_name: class_name.to_string(),
+        method_name: method_name.to_string(),
         arg_list: argument_types,
     };
 
     let pc = find_entry_for_static_invocation(
-        entry_method.decl_name,
-        entry_method.method_name,
+        &entry_method.decl_name,
+        &entry_method.method_name,
         entry_method.arg_list.iter().cloned(),
         &program,
         &symbol_table,
@@ -1825,6 +1826,7 @@ pub fn verify(
         Heuristic::DepthFirstSearch => heuristics::depth_first_search::sym_exec,
         Heuristic::RandomPath => heuristics::random_path::sym_exec,
         Heuristic::MinDist2Uncovered => heuristics::min_dist_to_uncovered::sym_exec,
+        Heuristic::RoundRobinMD2URandomPath => heuristics::round_robin::sym_exec
     };
     let sym_result = sym_exec(
         state,

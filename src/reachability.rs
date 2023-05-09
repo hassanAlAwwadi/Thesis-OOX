@@ -10,14 +10,14 @@ type ProgramCounter = u64;
 /// Computes the set of program points reachable from method.
 /// Does not check whether paths are unreachable logically.
 pub fn reachability<'a>(
-    method: MethodIdentifier<'a>,
+    method: MethodIdentifier,
     program: &'a HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     st: &SymbolTable,
 ) -> HashSet<u64> {
     let mut visited_methods = HashSet::from([method.clone()]);
     let mut reachability = HashSet::new();
-    let pc = find_entry_for_static_invocation(method.decl_name, method.method_name, method.arg_list.into_iter(), &program, st);
+    let pc = find_entry_for_static_invocation(&method.decl_name, &method.method_name, method.arg_list.into_iter(), &program, st);
 
     reachability.insert(pc);
 
@@ -27,14 +27,14 @@ pub fn reachability<'a>(
         if visited_methods.contains(&method) {
             continue;
         } else {
-            let pc = find_entry_for_static_invocation(method.decl_name, method.method_name, method.arg_list.clone().into_iter(), &program, st);
+            let pc = find_entry_for_static_invocation(&method.decl_name, &method.method_name, method.arg_list.clone().into_iter(), &program, st);
             unchecked_methods.extend(methods_called(pc, program, flow));
             visited_methods.insert(method);
         }
     }
 
     for method in visited_methods {
-        let pc = find_entry_for_static_invocation(method.decl_name, method.method_name, method.arg_list.into_iter(), &program, st);
+        let pc = find_entry_for_static_invocation(&method.decl_name, &method.method_name, method.arg_list.into_iter(), &program, st);
         reachability.extend(reachable_pc(pc, flow));
     }
 
@@ -46,7 +46,7 @@ fn methods_called<'a>(
     entry: u64,
     program: &'a HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
-) -> Vec<MethodIdentifier<'a>> {
+) -> Vec<MethodIdentifier> {
     let mut methods_called = Vec::new();
 
     let mut stack = vec![entry];

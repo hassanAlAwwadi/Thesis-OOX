@@ -525,8 +525,8 @@ pub mod cfg_pretty {
         let methods = class_methods
             .iter()
             .map(|(decl_name, method)| MethodIdentifier {
-                method_name: &method.name,
-                decl_name: decl_name,
+                method_name: method.name.to_string(),
+                decl_name: decl_name.to_string(),
                 arg_list: method.param_types().collect(),
             });
 
@@ -538,7 +538,7 @@ pub mod cfg_pretty {
     }
 
     pub fn pretty_print_cfg_method<'a, F>(
-        function_entry: MethodIdentifier<'a>,
+        function_entry: MethodIdentifier,
         decorator: &'a F,
         program: &HashMap<ProgramCounter, CFGStatement>,
         flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
@@ -548,8 +548,8 @@ pub mod cfg_pretty {
         F: Fn(u64) -> Option<String>,
     {
         let entry = find_entry_for_static_invocation(
-            function_entry.decl_name,
-            function_entry.method_name,
+            &function_entry.decl_name,
+            &function_entry.method_name,
             function_entry.arg_list.iter().cloned(),
             &program,
             st,

@@ -8,9 +8,9 @@ const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Derivative)]
 #[derivative(PartialOrd, Ord)]
-pub struct MethodIdentifier<'a> {
-    pub method_name: &'a str,
-    pub decl_name: &'a str,
+pub struct MethodIdentifier {
+    pub method_name: String,
+    pub decl_name: String,
     #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
     pub arg_list: Vec<RuntimeType>,
 }

@@ -23,6 +23,7 @@ use super::{IdCounter, State, SymResult};
 pub mod depth_first_search;
 pub mod min_dist_to_uncovered;
 pub mod random_path;
+pub mod round_robin;
 
 type Cost = u64;
 type ProgramCounter = u64;

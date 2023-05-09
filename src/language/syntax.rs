@@ -385,7 +385,7 @@ impl Invocation {
 
 
     /// Returns a list of methods that could be called at runtime depending on the runtimetype, by this invocation.
-pub fn methods_called<'a>(&'a self) -> Vec<MethodIdentifier<'a>> {
+pub fn methods_called<'a>(&'a self) -> Vec<MethodIdentifier> {
         match self {
             Invocation::InvokeMethod { resolved, .. } => {
                 // A regular method can resolve to multiple different methods due to dynamic dispatch, depending on the runtime type of the object.
@@ -398,8 +398,8 @@ pub fn methods_called<'a>(&'a self) -> Vec<MethodIdentifier<'a>> {
                 methods
                     .values()
                     .map(|(decl, method)| MethodIdentifier {
-                        method_name: &method.name,
-                        decl_name: decl.name(),
+                        method_name: method.name.to_string(),
+                        decl_name: decl.name().to_string(),
                         arg_list: method.param_types().collect(),
                     })
                     .collect()
@@ -411,8 +411,8 @@ pub fn methods_called<'a>(&'a self) -> Vec<MethodIdentifier<'a>> {
                 let (decl, method) = resolved.as_ref().unwrap().as_ref();
 
                 vec![MethodIdentifier {
-                    method_name: &method.name,
-                    decl_name: decl.name(),
+                    method_name: method.name.to_string(),
+                    decl_name: decl.name().to_string(),
                     arg_list: method.param_types().collect(),
                 }]
             }
