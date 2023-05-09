@@ -38,4 +38,8 @@ use std::sync::Mutex;
 
 pub use exec::{verify, Options, Heuristic};
 
+pub use typing::type_compilation_unit;
+
+pub use symbol_table::SymbolTable;
+
 static FILE_NAMES: Mutex<String> = Mutex::new(String::new());
