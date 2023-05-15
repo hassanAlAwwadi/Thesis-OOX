@@ -1,7 +1,6 @@
 use std::{fs::read_to_string, rc::Rc};
 
 use itertools::Itertools;
-use pom::set::Set;
 use pretty::{docs, Arena, BoxAllocator, DocAllocator, DocBuilder};
 
 // use super::{BinOp, Expression};
@@ -14,7 +13,10 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a CompilationUnit {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
         docs![
             allocator,
-            allocator.concat(self.members.iter().map(|decl| decl.pretty(allocator)))
+            allocator.intersperse(self.members
+                .iter()
+                .map(|decl| decl.pretty(allocator)), "\n\n"),
+            
         ]
     }
 }
@@ -64,7 +66,49 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a Declaration {
                     "}"
                 ]
             }
-            Declaration::Interface(_) => todo!(),
+            Declaration::Interface(interface) => {
+                docs![
+                    allocator,
+                    "interface ",
+                    interface.name.to_string(),
+                    " ",
+                    if interface.extends.len() > 0 {
+                        format!(
+                            "extends {}",
+                            interface
+                                .extends
+                                .iter()
+                                .map(Identifier::to_string)
+                                .join(", ")
+                        )
+                    } else {
+                        String::new()
+                    },
+                    allocator.softline_(),
+                    "{",
+                    docs![
+                        allocator,
+                        allocator.hardline(),
+                        allocator.concat(
+                            interface.members.iter().map(|member| member
+                                .pretty(allocator)
+                                .append(allocator.hardline()))
+                        )
+                    ]
+                    .nest(2),
+                    allocator.hardline(),
+                    "}"
+                ]
+            }
+        }
+    }
+}
+
+impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a InterfaceMember {
+    fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+        match self {
+            InterfaceMember::AbstractMethod(abstract_method) => abstract_method.pretty(allocator),
+            InterfaceMember::DefaultMethod(method) => method.pretty(allocator),
         }
     }
 }
@@ -123,6 +167,23 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a Method {
             docs![allocator, allocator.hardline(), body.pretty(allocator),].nest(2),
             allocator.hardline(),
             "}"
+        ]
+    }
+}
+
+impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a AbstractMethod {
+    fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
+        docs![
+            allocator,
+            allocator.hardline(),
+            if self.is_static { "static " } else { "" },
+            self.return_type.type_of(),
+            " ",
+            self.name.to_string(),
+            pretty_parameters(&self.params, allocator),
+            allocator.space(),
+            specifications(&self.specification, allocator),
+            ";"
         ]
     }
 }
@@ -349,6 +410,14 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Statement {
                 " ",
                 "{",
                 docs![allocator, allocator.hardline(), true_body.pretty(allocator)].nest(2),
+                allocator.hardline(),
+                "} else  {",
+                docs![
+                    allocator,
+                    allocator.hardline(),
+                    false_body.pretty(allocator)
+                ]
+                .nest(2),
                 allocator.hardline(),
                 "}"
             ],

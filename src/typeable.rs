@@ -43,7 +43,7 @@ pub trait Typeable {
             (ARRAYRuntimeType, ArrayRuntimeType { .. }) => true,
             (ArrayRuntimeType { .. }, ARRAYRuntimeType) => true,
             (ReferenceRuntimeType { type_: a }, ReferenceRuntimeType { type_: b }) => {
-                st.subtypes[&b].contains(&a)
+                st.subtypes.get(&b).unwrap_or_else(|| panic!("Could not get subtypes for type {:?}", b)).contains(&a)
             }
             (a, b) => a == b,
         }

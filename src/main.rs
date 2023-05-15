@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use itertools::Itertools;
 use lib::{verify, Options, parse_program, type_compilation_unit, SymbolTable};
+use pretty::{BoxAllocator};
 
 /// OOX symbolic verification
 #[derive(Parser)]
@@ -33,6 +34,9 @@ enum Commands {
     Check {
         // The OOX source file to type check
         source_path: String,
+        // Print the program to be evaluated.
+        #[arg(short, long, default_value_t = false)]
+        print: bool,
     }
 }
 
@@ -53,7 +57,7 @@ fn main() -> Result<(), String> {
                 println!("Entry point must be of the form 'class.method' and be unambiguous");
             }
         },
-        Commands::Check { source_path } => {
+        Commands::Check { source_path, print } => {
             let file_content = std::fs::read_to_string(&source_path).map_err(|err| err.to_string())?;
             let c =
                 parse_program(&file_content, true).map_err(
@@ -64,6 +68,9 @@ fn main() -> Result<(), String> {
                         }
                     },
                 )?;
+            if print {
+                println!("{}", pretty::Pretty::pretty(&c, &BoxAllocator).1.pretty(30));
+            }
             let symbol_table = SymbolTable::from_ast(&c)?;
             type_compilation_unit(c, &symbol_table)?;
             println!("Type check OK");

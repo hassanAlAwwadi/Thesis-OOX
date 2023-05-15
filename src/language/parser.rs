@@ -185,8 +185,10 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         + ((punct("{") * call(statement).opt() - punct("}")) | call(statement).map(Some)))
     .map(|(guard, body)| create_while(guard, body));
     let ite = (keyword("if") * punct("(") * expression() - punct(")")
-        + ((punct("{") * call(statement) - punct("}")) | call(statement))
-        + (keyword("else") * ((punct("{") * call(statement) - punct("}")) | call(statement)))
+        + ((punct("{") * call(statement) - punct("}")) | (punct("{") * punct("}")).map(|_| Statement::Skip) | call(statement))
+        + (keyword("else") * ((punct("{") * call(statement) - punct("}")) | (punct("{") * punct("}")).map(|_| Statement::Skip) 
+        | call(statement)
+    ))
             .opt())
     .map(|((guard, true_body), false_body)| create_ite(guard.into(), true_body, false_body));
     let continue_ = (keyword("continue") - punct(";")).map(|t| Statement::Continue {
