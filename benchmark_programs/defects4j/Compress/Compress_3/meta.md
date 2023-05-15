@@ -1,0 +1,2 @@
+ZipArchive and JarArchiveOutputStreams were ignored because of their size and complexity which is an issue when converting to OOX. (and unrelated to the bug)
+A reason to still include them would be to show the performance of searching large classes for bugs, but that trade off is not worth it due to time constraints.

@@ -1,0 +1,92 @@
+
+interface ArchiveEntry {
+
+    /** The name of the entry in the archive. May refer to a file or directory or other item */
+	int getName();
+	
+	/** The (uncompressed) size of the entry. May be -1 (SIZE_UNKNOWN) if the size is unknown */
+	int getSize();
+	
+	/** True if the entry refers to a directory */
+	bool isDirectory();
+}
+
+class ArArchiveEntry implements ArchiveEntry {
+
+    // The header for each entry
+    // int HEADER := 1;
+
+    // The trailer for each entry
+    // int TRAILER := 2;
+
+    ///
+    // SVR4/GNU adds a trailing / to names; BSD does not.
+    // They also vary in how names inter than 16 characters are represented.
+    // (Not yet supported by this implementation)
+    //
+    int name; // String name;
+    int userId;
+    int groupId;
+    int mode;
+    // int DEFAULT_MODE := 33188; // := (octal) 0100644
+    int lastModified;
+    int length;
+
+    ArArchiveEntry(int name, int length, int userId, int groupId, int mode, int lastModified) {
+        this.name := name;
+        this.length := length;
+        this.userId := userId;
+        this.groupId := groupId;
+        this.mode := mode;
+        this.lastModified := lastModified;
+    }
+
+    ArArchiveEntry(int name, int length) {
+        // ArArchiveEntry(name, length, 0, 0, DEFAULT_MODE, 0);
+        this.name := name;
+        this.length := length;
+        this.userId := 0;
+        this.groupId := 0;
+        this.mode := 33188;
+        this.lastModified := 0;
+    }
+
+    int getSize() {
+        int length := this.getLength();
+        return length;
+    }
+
+    int getName() {
+        int name := this.name;
+        return name;
+    }
+
+    int getUserId() {
+        int userId := this.userId;
+        return userId;
+    }
+
+    int getGroupId() {
+        int groupId := this.groupId;
+        return groupId;
+    }
+
+    int getMode() {
+        int mode := this.mode;
+        return mode;
+    }
+
+    int getLastModified() {
+        int lastModified := this.lastModified;
+        return lastModified;
+    }
+
+    int getLength() {
+        int length := this.length;
+        return length;
+    }
+
+    bool isDirectory() {
+        return false;
+    }
+}
