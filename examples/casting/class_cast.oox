@@ -1,0 +1,33 @@
+// aliasmap { x: [ X, X1]}
+
+class X {
+
+    void f(X x) {}
+}
+
+class X1 extends X {
+    void f(X x) {
+        X1 x1 := (X1) x;
+    }
+
+
+    // This test should be correct, since we convert the (X1) x cast to 
+    // if (x instanceof X1) {
+    //    assume x instanceof X1; // removing all classes that do not inherit from X1, in this case just X from aliasmap.
+    // } else {
+    //    assume !(x instanceof X1); // Removing all classes that inherit from X1
+    //    throw "classCastException"
+    // }
+    // since the cast assign statement splits up the path into two this is correct.
+    static void test1(X x)
+        exceptional(!(x instanceof X1)) {
+        x.f(x);
+    }
+
+    // Will not be correct since there is an exception thrown?
+    static void test1_invalid(X x)
+        exceptional(false)
+    {
+        x.f(x);
+    }
+}

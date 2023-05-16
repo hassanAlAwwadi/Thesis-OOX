@@ -1,6 +1,9 @@
 // use std::intrinsics::unreachable;
 
+use std::rc::Rc;
+
 use derivative::Derivative;
+use itertools::Either;
 
 use crate::{exec::this_str, positioned::SourcePos, syntax::*, typeable::Typeable};
 
@@ -22,7 +25,7 @@ pub struct MethodIdentifier {
 pub enum CFGStatement {
     /// Can be any Statement minus any of the branching statements in this enum
     Statement(Statement),
-    Ite(Expression, u64, u64),
+    Ite(Either<Rc<Expression>, TypeExpr>, u64, u64),
     While(Expression, u64),
     TryCatch(u64, u64, u64, u64), // l1: entry try body, l2: exit try body, l3: entry catch body, l4: exit catch body
     TryEntry(u64),

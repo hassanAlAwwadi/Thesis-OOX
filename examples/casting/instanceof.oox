@@ -1,0 +1,126 @@
+interface A_interface {
+
+}
+
+class A_super {
+    void f()
+      requires(true, this instanceof A)
+    {
+        if (this instanceof A) {
+            assert true;
+        } else {
+            // path should be pruned
+            assert false;
+        }
+    }
+    
+    void f_invalid()
+    {
+        if (this instanceof A) {
+            assert true;
+        } else {
+            // should not be pruned and thus fail
+            assert false;
+        }
+    }
+
+    void f_swapped()
+      requires(true, this instanceof A)
+    {
+        if (!this instanceof A) {
+            // path should be pruned
+            assert false;
+        } else {
+            assert true;
+        }
+    }
+
+    void f_super() {
+        if (this instanceof A_super) {
+            assert true;
+        } else {
+            // path should be pruned
+            assert false;
+        }
+    }
+
+    void f_implements() {
+        if (this instanceof A_interface) {
+            assert true;
+        } else {
+            assert false;
+        }
+    }
+
+    // not yet implemented:
+
+    // void assert_test_super() {
+    //     assert !this instanceof A_interface;
+    //     assert this instanceof A_super;
+    // }
+
+    // void assert_test_A() {
+    //     assert !this instanceof A_interface;
+    //     assert this instanceof A_super;
+    //     assert this instanceof A;
+    // }
+}
+
+class A extends A_super implements A_interface {
+
+    static void test1(A_super a)
+        requires(true, a instanceof A) {
+        // Should not assert false
+        a.f();
+        a.f_swapped();
+    }
+
+    // Should fail in the requires of f(), because a can also be of type A_super which is not an instance of A.
+    static void test1_invalid(A_super a) {
+        a.f();
+    }
+
+    // Should fail in the requires of f(), because a can also be of type A_super which is not an instance of A.
+    static void test1b_invalid(A_super a) {
+        a.f_invalid();
+    }
+
+    static void test2(A_super a) {
+        // Should not assert false
+        a.f_super();
+    }
+
+    static void test3_invalid(A_super a) {
+        // since A could be A_super, which does not implement A_interface
+        // the `assert false` will not be pruned.
+        a.f_implements();
+    }
+
+    static void test3a(A a) {
+        if (a instanceof A) {
+            a.f_implements();
+        }
+    }
+
+    static void test3b(A a)
+        requires(true, a instanceof A)
+    {
+        a.f_implements();
+    }
+
+    // not yet implemented:
+
+    // Invalid because a could be A_super which does is not an instanceof A.
+    // static void test4_invalid(A a)
+    // {
+    //     a.assert_test_A();
+    // }
+
+    // static void test4(A a)
+    //     requires(true, a instanceof A)
+    // {
+    //     a.assert_test_A();
+    // }
+}
+
+

@@ -1,4 +1,5 @@
 use derivative::Derivative;
+use itertools::Either;
 use ordered_float::NotNan;
 
 mod identifier;
@@ -110,7 +111,7 @@ pub struct Method {
 }
 
 impl Method {
-    pub fn requires(&self) -> Option<Rc<Expression>> {
+    pub fn requires(&self) -> Option<(Rc<Expression>, Option<TypeExpr>)> {
         self.specification.requires.clone()
     }
 
@@ -213,7 +214,7 @@ impl Parameter {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Specification {
-    pub requires: Option<Rc<Expression>>,
+    pub requires: Option<(Rc<Expression>, Option<TypeExpr>)>,
     pub ensures: Option<Rc<Expression>>,
     pub exceptional: Option<Rc<Expression>>,
 }
@@ -246,7 +247,7 @@ pub enum Statement {
         info: SourcePos,
     },
     Assume {
-        assumption: Expression,
+        assumption: Either<Rc<Expression>, TypeExpr>,
         #[derivative(PartialEq = "ignore")]
         info: SourcePos,
     },
@@ -257,7 +258,7 @@ pub enum Statement {
         info: SourcePos,
     },
     Ite {
-        guard: Expression,
+        guard: Either<Rc<Expression>, TypeExpr>,
         true_body: Box<Statement>,
         false_body: Box<Statement>,
         #[derivative(PartialEq = "ignore")]
@@ -631,7 +632,7 @@ pub enum Expression {
 
         #[derivative(PartialEq = "ignore", Hash = "ignore")]
         info: SourcePos,
-    },
+    }
 }
 
 impl Expression {
@@ -671,6 +672,13 @@ impl Expression {
     pub fn expect_reference(&self) -> Option<Reference> {
         if let Expression::Ref { ref_, .. } = self {
             return Some(*ref_);
+        }
+        None
+    }
+
+    pub fn expect_symbolic_ref(&self) -> Option<Identifier> {
+        if let Expression::SymbolicRef { var, .. } = self {
+            return Some(var.clone());
         }
         None
     }
@@ -794,5 +802,33 @@ impl RuntimeType {
             return Some(inner_type.deref().clone());
         }
         None
+    }
+}
+
+#[derive(Clone, Derivative, Debug)]
+#[derivative(PartialEq, Hash, Eq)]
+pub enum TypeExpr {
+    InstanceOf {
+        var: Identifier,
+        rhs: RuntimeType,
+
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        info: SourcePos,
+    },
+    NotInstanceOf {
+        var: Identifier,
+        rhs: RuntimeType,
+        
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        info: SourcePos,
+    }
+}
+
+impl TypeExpr {
+    pub fn not(self) -> TypeExpr {
+        match self {
+            TypeExpr::InstanceOf { var, rhs, info } => TypeExpr::NotInstanceOf {var, rhs, info},
+            TypeExpr::NotInstanceOf { var, rhs, info } => TypeExpr::InstanceOf { var, rhs, info },
+        }
     }
 }

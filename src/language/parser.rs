@@ -1,4 +1,4 @@
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use ordered_float::NotNan;
 use pom::parser::*;
 
@@ -12,15 +12,18 @@ use crate::dsl::{equal, greater_than_equal, less_than, negate, ors, size_of};
 use crate::exec::this_str;
 use crate::positioned::{SourcePos, WithPosition};
 use crate::syntax::*;
-
+use crate::typeable::Typeable;
 
 use self::interface::interface;
 use super::lexer::*;
 
 mod interface;
 
-/// Main entrypoint for parsing a program, 
-pub fn parse<'a>(tokens: &[Token<'a>], with_exceptional_clauses: bool) -> Result<CompilationUnit, pom::Error> {
+/// Main entrypoint for parsing a program,
+pub fn parse<'a>(
+    tokens: &[Token<'a>],
+    with_exceptional_clauses: bool,
+) -> Result<CompilationUnit, pom::Error> {
     (program() - end()).parse(tokens).map(|c| {
         if with_exceptional_clauses {
             insert_exceptional_clauses(c)
@@ -174,7 +177,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
             info: assert_token.get_position(),
         },
     );
-    let assume = (keyword("assume") + verification_expression() - punct(";")).map(
+    let assume = (keyword("assume") + expression_or_type_guard() - punct(";")).map(
         |(assume_token, assumption)| Statement::Assume {
             assumption,
             info: assume_token.get_position(),
@@ -184,13 +187,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     let while_ = (keyword("while") * punct("(") * expression() - punct(")")
         + ((punct("{") * call(statement).opt() - punct("}")) | call(statement).map(Some)))
     .map(|(guard, body)| create_while(guard, body));
-    let ite = (keyword("if") * punct("(") * expression() - punct(")")
-        + ((punct("{") * call(statement) - punct("}")) | (punct("{") * punct("}")).map(|_| Statement::Skip) | call(statement))
-        + (keyword("else") * ((punct("{") * call(statement) - punct("}")) | (punct("{") * punct("}")).map(|_| Statement::Skip) 
-        | call(statement)
-    ))
-            .opt())
-    .map(|((guard, true_body), false_body)| create_ite(guard.into(), true_body, false_body));
+
     let continue_ = (keyword("continue") - punct(";")).map(|t| Statement::Continue {
         info: t.get_position(),
     });
@@ -242,7 +239,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         | assert
         | assume
         | while_
-        | ite
+        | ite()
         | continue_
         | break_
         | return_
@@ -269,24 +266,49 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     })
 }
 
-fn create_ite(guard: Rc<Expression>, true_body: Statement, false_body: Option<Statement>) -> Statement {
+fn ite<'a>() -> Parser<'a, Token<'a>, Statement> {
+    let ite = (keyword("if") * punct("(") * expression_or_type_guard() - punct(")")
+        + ((punct("{") * call(statement) - punct("}"))
+            | (punct("{") * punct("}")).map(|_| Statement::Skip)
+            | call(statement))
+        + (keyword("else")
+            * ((punct("{") * call(statement) - punct("}"))
+                | (punct("{") * punct("}")).map(|_| Statement::Skip)
+                | call(statement)))
+        .opt())
+    .map(|((guard, true_body), false_body)| create_ite(guard, true_body, false_body));
+
+    ite
+}
+
+fn expression_or_type_guard<'a>() -> Parser<'a, Token<'a>, Either<Rc<Expression>, TypeExpr>> {
+    type_expr().map(Either::Right) | verification_expression().map(Rc::new).map(Either::Left)
+}
+
+fn create_ite(
+    guard: Either<Rc<Expression>, TypeExpr>,
+    true_body: Statement,
+    false_body: Option<Statement>,
+) -> Statement {
     Statement::Ite {
-        guard: guard.as_ref().clone(),
+        guard: guard.clone(),
+        info: guard.get_position(),
         true_body: Box::new(Statement::Seq {
             stat1: Box::new(Statement::Assume {
-                assumption: guard.as_ref().clone(),
+                assumption: guard.clone(),
                 info: guard.get_position(),
             }),
             stat2: Box::new(true_body),
         }),
         false_body: Box::new(Statement::Seq {
             stat1: Box::new(Statement::Assume {
-                assumption: negate(guard.clone()),
                 info: guard.get_position(),
+                assumption: guard
+                    .map_left(|guard| negate(guard).into())
+                    .map_right(|guard| guard.not()),
             }),
             stat2: Box::new(false_body.unwrap_or(Statement::Skip)),
         }),
-        info: guard.get_position(),
     }
 }
 
@@ -294,19 +316,19 @@ fn create_while(guard: Expression, body: Option<Statement>) -> Statement {
     if let Some(body) = body {
         Statement::Seq {
             stat1: Box::new(Statement::While {
+                info: guard.get_position(),
                 guard: guard.clone(),
                 body: Box::new(Statement::Seq {
                     stat1: Box::new(Statement::Assume {
-                        assumption: guard.clone(),
                         info: guard.get_position(),
+                        assumption: Either::Left(guard.clone().into()),
                     }),
                     stat2: Box::new(body),
                 }),
-                info: guard.get_position(),
             }),
             stat2: Box::new(Statement::Assume {
                 info: guard.get_position(),
-                assumption: negate(Rc::new(guard)),
+                assumption: Either::Left(negate(guard.into()).into()),
             }),
         }
     } else {
@@ -401,13 +423,15 @@ fn arguments<'a>() -> Parser<'a, Token<'a>, Vec<Rc<Expression>>> {
 }
 
 fn specification<'a>() -> Parser<'a, Token<'a>, Specification> {
-    let requires = keyword("requires") * punct("(") * verification_expression() - punct(")");
+    let requires = keyword("requires") * punct("(") * verification_expression()
+        + (punct(",") * type_expr()).opt()
+        - punct(")");
     let ensures = keyword("ensures") * punct("(") * verification_expression() - punct(")");
     let exceptional = keyword("exceptional") * punct("(") * verification_expression() - punct(")");
 
     (requires.opt() + ensures.opt() + exceptional.opt()).map(
         |((requires, ensures), exceptional)| Specification {
-            requires: requires.map(Rc::new),
+            requires: requires.map(|(guard, type_guard)| (Rc::new(guard), type_guard)),
             ensures: ensures.map(Rc::new),
             exceptional: exceptional.map(Rc::new),
         },
@@ -844,7 +868,11 @@ fn keyword<'a>(kw: &'a str) -> Parser<'a, Token<'a>, Token> {
     })
 }
 
-fn exceptional_assignment(lhs: &Lhs, rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Rc<Expression>> {
+fn exceptional_assignment(
+    lhs: &Lhs,
+    rhs: &Rhs,
+    class_names: &[Identifier],
+) -> HashSet<Rc<Expression>> {
     let mut lhs = exceptional_lhs(lhs);
     lhs.extend(exceptional_rhs(rhs, class_names).into_iter());
     lhs
@@ -1031,7 +1059,7 @@ fn create_exceptional_ites(
     let cond = ors(conditions);
     // In the original OOX, a nested ITE is made if there are multiple exception conditions, not sure why so I will do it like this for now.
     create_ite(
-        cond,
+        Either::Left(cond),
         Statement::Throw {
             message: "exception".into(),
             info: pos,
@@ -1266,7 +1294,7 @@ fn this_dot() {
 }
 
 #[test]
-fn ite() {
+fn ite_test() {
     let file_content = "
     int v := this.value ;
     if(x==v) { return true; }
@@ -1280,6 +1308,21 @@ fn ite() {
     //dbg!(&as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
                                                            //dbg!(c);
+}
+
+#[test]
+fn ite_test2() {
+    let file_content = "
+    int v := this.value ;
+    if(x instanceof Foo) { return true; }
+    else {
+        return false;
+    }";
+    let tokens = tokens(file_content).unwrap();
+    let as_ref = tokens.as_slice();
+    dbg!(&as_ref);
+    let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
+                                                           // let c = (type_expr() - end()).parse(&as_ref).unwrap(); // should not panic;
 }
 
 #[test]
@@ -1338,11 +1381,24 @@ fn parsing_empty_function() {
     c.unwrap(); // should not panic;
 }
 
-fn pite<'a>() -> Parser<'a, Token<'a>, Statement> {
-    (keyword("if") * punct("(") * expression() - punct(")")
-        + ((punct("{") * call(statement) - punct("}")) | call(statement))
-        + (keyword("else") * ((punct("{") * call(statement) - punct("}")) | call(statement))).opt())
-    .map(|((guard, true_body), false_body)| create_ite(guard.into(), true_body, false_body))
+fn type_expr<'a>() -> Parser<'a, Token<'a>, TypeExpr> {
+    (punct("!").opt() + identifier() + keyword("instanceof") + classtype()).map(
+        |(((negative, var), instance_token), rhs)| {
+            if negative.is_some() {
+                TypeExpr::NotInstanceOf {
+                    rhs: rhs.type_of(),
+                    info: instance_token.get_position(),
+                    var,
+                }
+            } else {
+                TypeExpr::InstanceOf {
+                    rhs: rhs.type_of(),
+                    info: instance_token.get_position(),
+                    var,
+                }
+            }
+        },
+    )
 }
 
 #[test]

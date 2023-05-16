@@ -36,7 +36,9 @@ extern crate pest_derive;
 
 use std::sync::Mutex;
 
-pub use exec::{verify, Options, Heuristic};
+pub use exec::{verify, Options, Heuristic, SymResult};
+
+pub use positioned::SourcePos;
 
 pub use typing::type_compilation_unit;
 

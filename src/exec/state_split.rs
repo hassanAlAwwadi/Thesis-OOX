@@ -4,6 +4,7 @@
 
 use std::{rc::Rc, collections::HashMap};
 
+use itertools::Either;
 use slog::{debug, info};
 
 use crate::{syntax::{Expression, Identifier, RuntimeType}, exec::{AliasEntry, array_initialisation}};
@@ -25,7 +26,7 @@ pub fn conditional_state_split(state: &mut State, en: &mut impl Engine, guard: R
     true_state.path_id = en.next_path_id();
     let feasible_path = exec_assume(
         &mut true_state,
-        guard.clone(),
+        Either::Left(guard.clone()),
         en,
     );
     if feasible_path {
@@ -36,7 +37,7 @@ pub fn conditional_state_split(state: &mut State, en: &mut impl Engine, guard: R
     let mut false_state = state;
     let feasible_path = exec_assume(
         &mut false_state,
-        guard,
+        Either::Left(crate::dsl::negate(guard).into()),
         en,
     );
     if feasible_path {

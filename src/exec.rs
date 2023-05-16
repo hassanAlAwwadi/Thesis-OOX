@@ -35,7 +35,8 @@ use crate::{
     language, parse_program,
     parser::parse,
     positioned::{SourcePos, WithPosition},
-    stack::{StackFrame, Stack},
+    reachability::reachability,
+    stack::{Stack, StackFrame},
     statistics::Statistics,
     symbol_table::SymbolTable,
     syntax::{
@@ -44,7 +45,7 @@ use crate::{
     },
     typeable::{runtime_to_nonvoidtype, Typeable},
     typing::type_compilation_unit,
-    utils, z3_checker, FILE_NAMES, reachability::reachability,
+    utils, z3_checker, TypeExpr, FILE_NAMES,
 };
 
 use crate::exec::state_split::exec_array_initialisation;
@@ -95,13 +96,12 @@ impl HeapValue {
 
 type PathConstraints = ImHashSet<Expression>;
 
-
 pub type AliasMap = ImHashMap<Identifier, AliasEntry>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AliasEntry {
     /// Expressions can only be Expression::Ref or null literal
-    pub aliases: Vec<Rc<Expression>>, 
+    pub aliases: Vec<Rc<Expression>>,
     uniform_type: bool, // whether all aliases have the same type, or subclasses appear.
 }
 
@@ -381,7 +381,9 @@ fn action(
 
     match action {
         CFGStatement::Statement(Statement::Declare { type_, var, info }) => {
-            state.stack.insert_variable(var.clone(), Rc::new(type_.default()));
+            state
+                .stack
+                .insert_variable(var.clone(), Rc::new(type_.default()));
 
             ActionResult::Continue
         }
@@ -416,8 +418,12 @@ fn action(
             }
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::Assume { assumption, .. }) => {
-            let is_feasible_path = exec_assume(state, Rc::new(assumption.clone()), en);
+        CFGStatement::Statement(Statement::Assume {
+            assumption,
+            ..
+        }) => {
+            let is_feasible_path =
+                exec_assume(state, assumption.clone(), en);
             if !is_feasible_path {
                 return ActionResult::InfeasiblePath;
             }
@@ -434,16 +440,25 @@ fn action(
             // only check preconditions when it's the first method called??
             // we assume that the previous stackframe is of this method
             let StackFrame { current_member, .. } = state.stack.current_stackframe().unwrap();
-            if let Some(requires) = current_member.requires() {
+            if let Some((requires, type_guard)) = current_member.requires() {
                 // if this is the program entry, assume that require is true, otherwise assert it.
-                if (state.path_length == 0) {
+                if state.path_length == 0 {
+                    // First check the normal expression
                     let expression = evaluate(state, requires, en);
-
                     if *expression == false_lit() {
                         println!("Constraint is infeasible");
                         return ActionResult::InfeasiblePath;
                     } else if *expression != true_lit() {
                         state.constraints.insert(expression.deref().clone());
+                    }
+                    // Also check the type guard expression if available.
+                    // Note these are separated from the normal expression 
+                    // since there is currently only simple instanceof support.
+                    if let Some(type_guard) = type_guard {
+                        let feasible = assume_type_guard(state, &type_guard, en);
+                        if !feasible {
+                            return ActionResult::InfeasiblePath;
+                        }
                     }
                 } else {
                     // Assert that requires is true
@@ -453,6 +468,14 @@ fn action(
                         return ActionResult::InvalidAssertion(requires.get_position());
                     }
                     state.constraints.insert(requires.deref().clone());
+
+                    // Also assert the type guard expression if available.
+                    if let Some(type_guard) = type_guard.as_ref() {
+                        let all_of_type = assert_type_guard(state, &type_guard, en);
+                        if !all_of_type {
+                            return ActionResult::InvalidAssertion(type_guard.get_position());
+                        }
+                    }
                 }
             }
 
@@ -554,7 +577,6 @@ fn exec_throw(state: &mut State, en: &mut impl Engine, message: &str) -> ActionR
 
         ActionResult::Return(catch_pc)
     } else {
-
         while let Some(stack_frame) = state.stack.current_stackframe() {
             if let Some(exceptional) = stack_frame.current_member.exceptional() {
                 let assertion = prepare_assert_expression(state, exceptional.clone(), en);
@@ -592,11 +614,16 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl E
             }
         } else {
             // dbg!(&symbolic_refs);
-            debug!(state.logger, "Unique symbolic refs: {}", symbolic_refs.len());
-            
+            debug!(
+                state.logger,
+                "Unique symbolic refs: {}",
+                symbolic_refs.len()
+            );
+
             // The number of combinations of each symbolic ref, which could be concretized.
             // If this number is too large we leave all the work to Z3 which seems to be faster in practice.
-            let n_combinations = &state.alias_map
+            let n_combinations = &state
+                .alias_map
                 .iter()
                 .fold(1, |a, (_, refs)| a * refs.aliases().len());
 
@@ -613,9 +640,14 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl E
 
                 // Cloning alias map is not optimal but needed due to borrow of state.
                 // Optimization: This can be avoided if we can make evaluate() (or a version of evaluate) not borrow state mutably.
-                let expressions = concretizations(expression.clone(), &symbolic_refs, state.alias_map.clone());
+                let expressions =
+                    concretizations(expression.clone(), &symbolic_refs, state.alias_map.clone());
 
-                debug!(state.logger, "Number of concretization expressions: {}", expressions.len());
+                debug!(
+                    state.logger,
+                    "Number of concretization expressions: {}",
+                    expressions.len()
+                );
                 // This introduces branching in computation for each concretization proposed:
                 en.statistics().measure_branches(expressions.len() as u32);
                 // dbg!(&expressions);
@@ -839,7 +871,14 @@ pub fn find_entry_for_static_invocation(
                 false
             }
         })
-        .unwrap_or_else(|| panic!("Could not find the method {}.{}({:?})", class_name, method_name, argument_types.clone().collect_vec()));
+        .unwrap_or_else(|| {
+            panic!(
+                "Could not find the method {}.{}({:?})",
+                class_name,
+                method_name,
+                argument_types.clone().collect_vec()
+            )
+        });
 
     *entry
 }
@@ -944,7 +983,9 @@ fn exec_super_constructor(
     let parameters = std::iter::once(&this_param).chain(parameters.iter());
 
     // instead of allocating a new object, add the new fields to the existing 'this' object.
-    let object_ref = state.stack.lookup(&this_str())
+    let object_ref = state
+        .stack
+        .lookup(&this_str())
         .expect("super() is called in a constructor with a 'this' object on the stack");
     let arguments = std::iter::once(object_ref).chain(arguments.iter().cloned());
 
@@ -1219,14 +1260,14 @@ fn init_symbolic_object(
                     None
                 }
             } else {
-                Some(Either::Right(
-                    x.aliases.iter().filter(|x| if let Some(ref_type) = x.type_of().as_reference_type() {
+                Some(Either::Right(x.aliases.iter().filter(|x| {
+                    if let Some(ref_type) = x.type_of().as_reference_type() {
                         instance_types.contains(ref_type)
                     } else {
                         // null
                         false
-                    },
-                )))
+                    }
+                })))
             }
         })
         .flat_map(|x| x.into_iter())
@@ -1260,7 +1301,10 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
             type_,
             info,
         } => {
-            let o = state.stack.lookup(var).unwrap_or_else(|| panic!("infeasible, object does not exit"));
+            let o = state
+                .stack
+                .lookup(var)
+                .unwrap_or_else(|| panic!("infeasible, object does not exit"));
 
             match o.as_ref() {
                 Expression::Ref { ref_, type_, .. } => {
@@ -1307,7 +1351,10 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
             type_,
             info,
         } => {
-            let ref_ = state.stack.lookup(var).unwrap_or_else(|| panic!("infeasible, array does not exit"));
+            let ref_ = state
+                .stack
+                .lookup(var)
+                .unwrap_or_else(|| panic!("infeasible, array does not exit"));
 
             let ref_ = single_alias_elimination(ref_, &state.alias_map);
 
@@ -1331,14 +1378,13 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
     match rhs {
         Rhs::RhsExpression { value, .. } => {
             match value {
-                Expression::Var { var, .. } => state.stack.lookup(var)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "Could not find {:?} on the stack {:?}",
-                            var,
-                            &state.stack.current_variables()
-                        )
-                    }),
+                Expression::Var { var, .. } => state.stack.lookup(var).unwrap_or_else(|| {
+                    panic!(
+                        "Could not find {:?} on the stack {:?}",
+                        var,
+                        &state.stack.current_variables()
+                    )
+                }),
                 _ => Rc::new(value.clone()), // might have to expand on this when dealing with complex quantifying expressions and array
             }
         }
@@ -1356,9 +1402,7 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
         }
         // We expect that this symbolic reference has been initialised into multiple states,
         // where in each state the aliasmap is left with one concrete array.
-        Rhs::RhsElem {
-            var, index, ..
-        } => {
+        Rhs::RhsElem { var, index, .. } => {
             if let Expression::Var { var, .. } = var {
                 let array = state.stack.lookup(var).unwrap();
                 exec_rhs_elem(state, array, index.to_owned().into(), en)
@@ -1624,17 +1668,93 @@ fn exec_array_construction(
 }
 
 /// Helper function, does not invoke Z3 but tries to evaluate the assumption locally.
-/// Returns whether the assumption was found to be infeasible.
+/// Returns whether the assumption was found to be feasible.
 /// Otherwise it inserts the assumption into the constraints.
-fn exec_assume(state: &mut State, assumption: Rc<Expression>, en: &mut impl Engine) -> bool {
-    let expression = evaluate(state, assumption, en);
-
-    if *expression == false_lit() {
-        return false;
-    } else if *expression != true_lit() {
-        state.constraints.insert(expression.deref().clone());
+fn exec_assume(
+    state: &mut State,
+    assumption: Either<Rc<Expression>, TypeExpr>,
+    en: &mut impl Engine,
+) -> bool {
+    // special case for instanceof, since we don't add them to the path constraints but their assumption is made by ensuring it in the alias map.
+    match assumption {
+        Either::Left(assumption) => {
+            let expression = evaluate(state, assumption, en);
+            if *expression == false_lit() {
+                return false;
+            } else if *expression != true_lit() {
+                state.constraints.insert(expression.deref().clone());
+            }
+        },
+        Either::Right(assumption) => {
+            let type_guard_feasible = assume_type_guard(state, &assumption, en);
+            if !type_guard_feasible {
+                debug!(
+                    state.logger,
+                    "No aliases left after instanceof operator, pruning path"
+                );
+                return false;
+            }
+        },
     }
     true
+}
+
+fn get_alias_for_var<'a>(
+    state: &'a mut State,
+    var: &Identifier,
+    en: &mut impl Engine,
+) -> &'a mut AliasEntry {
+    let symbolic_ref = state.stack.lookup(&var).unwrap();
+
+    let symbolic_ref = evaluate(state, symbolic_ref, en)
+        .expect_symbolic_ref()
+        .unwrap();
+    state
+        .alias_map
+        .get_mut(&symbolic_ref)
+        .unwrap_or_else(|| panic!("expected '{:?}' to be a symbolic object with aliases", var))
+}
+
+// Returns whether the assertion holds for the type guard.
+fn assert_type_guard(state: &mut State, type_guard: &TypeExpr, en: &mut impl Engine) -> bool {
+    let (var, rhs, not) = match type_guard {
+        TypeExpr::InstanceOf { var, rhs, .. } => (var, rhs, false),
+        TypeExpr::NotInstanceOf { var, rhs, .. } => (var, rhs, true),
+    };
+
+    let alias_entry = get_alias_for_var(state, &var, en);
+
+    alias_entry.aliases.iter().all(|alias| {
+        let alias_of_type = alias.is_of_type(rhs, en.symbol_table());
+        if not {
+            !alias_of_type
+        } else {
+            alias_of_type
+        }
+    })
+}
+
+// Returns whether the path is feasible
+fn assume_type_guard(state: &mut State, type_guard: &TypeExpr, en: &mut impl Engine) -> bool {
+    let (var, rhs, not) = match type_guard {
+        TypeExpr::InstanceOf { var, rhs, .. } => (var, rhs, false),
+        TypeExpr::NotInstanceOf { var, rhs, .. } => (var, rhs, true),
+    };
+
+    let alias_entry = get_alias_for_var(state, var, en);
+
+    alias_entry
+        .aliases
+        .retain(|alias| {
+            let alias_of_type = alias.is_of_type(rhs, en.symbol_table());
+            if not {
+                !alias_of_type
+            } else {
+                alias_of_type
+            }
+        });
+
+    alias_entry.aliases.len() > 0
 }
 
 /// Checks whether there is only one alias for the given symbolic reference, if so return the alias otherwise return the expression.
@@ -1659,7 +1779,7 @@ pub enum Heuristic {
     DepthFirstSearch,
     RandomPath,
     MinDist2Uncovered,
-    RoundRobinMD2URandomPath
+    RoundRobinMD2URandomPath,
 }
 
 #[derive(Copy, Clone)]
@@ -1671,7 +1791,7 @@ pub struct Options {
 }
 
 impl Options {
-    fn default_with_k(k: u64) -> Options {
+    pub fn default_with_k(k: u64) -> Options {
         Options {
             k,
             quiet: false,
@@ -1680,7 +1800,7 @@ impl Options {
         }
     }
 
-    fn default_with_k_and_heuristic(k: u64, heuristic: Heuristic) -> Options {
+    pub fn default_with_k_and_heuristic(k: u64, heuristic: Heuristic) -> Options {
         Options {
             k,
             quiet: false,
@@ -1826,7 +1946,7 @@ pub fn verify(
         Heuristic::DepthFirstSearch => heuristics::depth_first_search::sym_exec,
         Heuristic::RandomPath => heuristics::random_path::sym_exec,
         Heuristic::MinDist2Uncovered => heuristics::min_dist_to_uncovered::sym_exec,
-        Heuristic::RoundRobinMD2URandomPath => heuristics::round_robin::sym_exec
+        Heuristic::RoundRobinMD2URandomPath => heuristics::round_robin::sym_exec,
     };
     let sym_result = sym_exec(
         state,
@@ -1878,8 +1998,7 @@ pub fn verify(
             "  #coverage:        {}/{} ({:.1}%)",
             statistics.covered_statements,
             statistics.reachable_statements,
-            (statistics.covered_statements as f32 /
-            statistics.reachable_statements as f32) * 100.0
+            (statistics.covered_statements as f32 / statistics.reachable_statements as f32) * 100.0
         )
     }
 
@@ -1916,7 +2035,6 @@ fn sym_exec_method() {
 //     let file_content = std::fs::read_to_string("./examples/psv/fib.oox").unwrap();
 //     assert_eq!(verify(&file_content, "Main", "main", 50), SymResult::Valid);
 // }
-
 
 #[test]
 fn sym_exec_div_by_n() {

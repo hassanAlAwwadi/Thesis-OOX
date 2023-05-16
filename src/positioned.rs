@@ -1,7 +1,10 @@
 use std::fmt::Display;
+use std::rc::Rc;
+
+use itertools::Either;
 
 use crate::syntax::{Expression, Invocation, Lhs, Method, NonVoidType, Rhs};
-use crate::FILE_NAMES;
+use crate::{FILE_NAMES, TypeExpr};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum SourcePos {
@@ -122,6 +125,33 @@ impl WithPosition for &Expression {
             Expression::Ref { info, .. } => *info,
             Expression::SymbolicRef { info, .. } => *info,
             Expression::Conditional { info, .. } => *info,
+        }
+    }
+}
+
+impl WithPosition for Either<Rc<Expression>, TypeExpr> {
+    fn get_position(&self) -> SourcePos {
+        match self {
+            Either::Left(guard) => guard.get_position(),
+            Either::Right(guard) => guard.get_position(),
+        }
+    }
+}
+
+impl WithPosition for TypeExpr {
+    fn get_position(&self) -> SourcePos {
+        match self {
+            TypeExpr::InstanceOf { info, .. } => *info,
+            TypeExpr::NotInstanceOf { info, .. } => *info,
+        }
+    }
+}
+
+impl WithPosition for &TypeExpr {
+    fn get_position(&self) -> SourcePos {
+        match self {
+            TypeExpr::InstanceOf { info, .. } => *info,
+            TypeExpr::NotInstanceOf { info, .. } => *info,
         }
     }
 }

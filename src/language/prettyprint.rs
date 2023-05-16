@@ -1,6 +1,6 @@
 use std::{fs::read_to_string, rc::Rc};
 
-use itertools::Itertools;
+use itertools::{Itertools, Either};
 use pretty::{docs, Arena, BoxAllocator, DocAllocator, DocBuilder};
 
 // use super::{BinOp, Expression};
@@ -13,10 +13,10 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a CompilationUnit {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
         docs![
             allocator,
-            allocator.intersperse(self.members
-                .iter()
-                .map(|decl| decl.pretty(allocator)), "\n\n"),
-            
+            allocator.intersperse(
+                self.members.iter().map(|decl| decl.pretty(allocator)),
+                "\n\n"
+            ),
         ]
     }
 }
@@ -203,12 +203,21 @@ fn specifications<'a, D: DocAllocator<'a>>(
     docs![
         // specifications
         allocator,
-        specification.requires.clone().map(|requires| docs![
-            allocator,
-            allocator.hardline(),
-            "requires",
-            requires.pretty(allocator).parens(),
-        ]),
+        specification
+            .requires
+            .clone()
+            .map(|(requires, type_requires)| docs![
+                allocator,
+                allocator.hardline(),
+                "requires",
+                "(",
+                requires.pretty(allocator),
+                type_requires.clone().map(|type_guard| docs![
+                    allocator,
+                    ", ",
+                    type_expr(&type_guard, allocator)
+                ])
+            ]),
         specification.ensures.clone().map(|requires| docs![
             allocator,
             allocator.hardline(),
@@ -344,6 +353,30 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Expression {
     }
 }
 
+fn if_guard<'a, D: DocAllocator<'a>>(
+    assumption: Either<Rc<Expression>, TypeExpr>,
+    allocator: &'a D,
+) -> DocBuilder<'a, D, ()> {
+    match assumption {
+        Either::Left(assumption) => pretty::Pretty::pretty(assumption.as_ref(), allocator),
+        Either::Right(assumption) => type_expr(&assumption, allocator)
+    }
+}
+
+fn type_expr<'a, D: DocAllocator<'a>>(
+    expr: &TypeExpr,
+    allocator: &'a D,
+) -> DocBuilder<'a, D, ()> {
+    match expr {
+        TypeExpr::InstanceOf { var, rhs, .. } => {
+            docs![allocator, var.to_string(), " instanceof ", rhs]
+        }
+        TypeExpr::NotInstanceOf { var, rhs, .. } => 
+        
+        docs![allocator, "!", var.to_string(), " instanceof ", rhs]
+    }
+}
+
 impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Statement {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
         let semicolon = || allocator.text(";");
@@ -380,7 +413,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Statement {
                 allocator,
                 "assume",
                 " ",
-                assumption.pretty(allocator),
+                if_guard(assumption.clone(), allocator),
                 semicolon()
             ],
             Statement::While { guard, body, .. } => {
@@ -406,7 +439,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Statement {
                 allocator,
                 "if",
                 " ",
-                guard.pretty(allocator).parens(),
+                if_guard(guard.clone(), allocator),
                 " ",
                 "{",
                 docs![allocator, allocator.hardline(), true_body.pretty(allocator)].nest(2),
@@ -574,6 +607,8 @@ pub mod cfg_pretty {
     use itertools::Itertools;
     use pretty::{docs, BoxAllocator, DocAllocator, DocBuilder};
 
+    use super::if_guard;
+
     type ProgramCounter = u64;
 
     /// Pretty prints the compilation unit, with optionally a decorator to decorate each statement with a comment with additional information
@@ -718,7 +753,7 @@ pub mod cfg_pretty {
                 result = docs![
                     allocator,
                     "if (",
-                    e,
+                    if_guard(e.clone(), allocator),
                     ") {",
                     decorator(current).map(|decoration| { format!(" // {}", decoration) }),
                     docs![
@@ -848,7 +883,7 @@ pub mod cfg_pretty {
                 }
                 CFGStatement::Ite(e, _, _) => {
                     write!(f, "if (")?;
-                    pretty::Pretty::pretty(e, &allocator).1.render_fmt(w, f)?;
+                    if_guard(e.clone(), &allocator).1.render_fmt(w, f)?;
                     write!(f, ") {{ .. }} else {{ .. }}")
                 }
                 CFGStatement::While(e, _) => {

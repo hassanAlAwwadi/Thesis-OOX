@@ -9,7 +9,7 @@ use crate::{
     syntax::{
         DeclarationMember, Expression, Invocation, Lhs, Lit, Method, NonVoidType, Parameter, Rhs,
         RuntimeType, Type,
-    },
+    }, TypeExpr,
 };
 
 pub trait Typeable {
@@ -314,5 +314,17 @@ impl Typeable for Method {
 impl Typeable for Parameter {
     fn type_of(&self) -> RuntimeType {
         self.type_.type_of()
+    }
+}
+
+impl Typeable for TypeExpr {
+    fn type_of(&self) -> RuntimeType {
+        RuntimeType::BoolRuntimeType
+    }
+}
+
+impl Typeable for &TypeExpr {
+    fn type_of(&self) -> RuntimeType {
+        RuntimeType::BoolRuntimeType
     }
 }

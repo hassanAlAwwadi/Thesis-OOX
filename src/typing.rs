@@ -7,6 +7,7 @@
 /// Also any method invocations in the bodies of the methods are resolved, by assigning a reference to the invoked method(s).
 use std::{collections::HashMap, rc::Rc};
 
+use itertools::Either;
 use queues::IsQueue;
 use queues::{queue, Queue};
 
@@ -207,10 +208,13 @@ fn type_specification(
     env: &mut TypeEnvironment,
     st: &SymbolTable,
 ) -> Result<Specification, TypeError> {
-    if let Some(requires) = specification.requires.clone() {
+    if let Some((requires, type_guard)) = specification.requires.clone() {
         let requires = type_expression(requires, env, st)?;
         matches_type(&requires, RuntimeType::BoolRuntimeType, st)?;
-        specification.requires = Some(Rc::new(requires));
+        if let Some(type_guard) = type_guard.as_ref() {
+            matches_type(type_guard, RuntimeType::BoolRuntimeType, st)?;
+        }
+        specification.requires = Some((Rc::new(requires), type_guard));
     }
 
     if let Some(ensures) = specification.ensures.clone() {
@@ -221,7 +225,7 @@ fn type_specification(
             env.declare_var(retval(), method_type)?;
             let ensures = type_expression(ensures, &mut env, st)?;
             matches_type(&ensures, RuntimeType::BoolRuntimeType, st)?;
-            specification.requires = Some(Rc::new(ensures));
+            specification.ensures = Some(Rc::new(ensures));
         }
     }
 
@@ -285,8 +289,10 @@ fn type_statement(
                 statements.push(Statement::Assert { assertion, info });
             }
             Statement::Assume { assumption, info } => {
-                let assumption = type_expression(assumption.into(), env, st)?;
-                matches_type(&assumption, RuntimeType::BoolRuntimeType, st)?;
+                if let Either::Left(assumption) = &assumption {
+                    let assumption = type_expression(assumption.clone(), env, st)?;
+                    matches_type(&assumption, RuntimeType::BoolRuntimeType, st)?;
+                }
                 statements.push(Statement::Assume { assumption, info });
             }
             Statement::While { guard, body, info } => {
@@ -313,8 +319,14 @@ fn type_statement(
                 false_body,
                 info,
             } => {
-                let guard = type_expression(guard.into(), env, st)?;
-                matches_type(&guard, RuntimeType::BoolRuntimeType, st)?;
+                let guard = match guard {
+                    Either::Left(guard) => {
+                        let guard = type_expression(guard.clone(), env, st)?;
+                        matches_type(&guard, RuntimeType::BoolRuntimeType, st)?;
+                        Either::Left(Rc::new(guard))
+                    },
+                    type_guard => type_guard
+                };
                 let mut env = env.clone();
                 let true_body = type_statement(
                     *true_body,
@@ -807,6 +819,7 @@ fn type_expression(
         },
         Expression::SymbolicRef { .. } => unreachable!("Symbolic object in analysis phase"),
         Expression::Conditional { .. } => unreachable!("Ite in analysis phase"),
+        // instance_of@Expression::InstanceOf { .. } => instance_of,
     };
     Ok(expr)
 }
