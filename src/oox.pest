@@ -39,6 +39,7 @@ keyword = { "assert" | "catch" | "else"
 | "extends"
 | "implements"
 | "super"
+| "instanceof"
 }
 
 punctuator = {

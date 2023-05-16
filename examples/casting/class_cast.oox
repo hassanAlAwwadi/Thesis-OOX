@@ -7,7 +7,7 @@ class X {
 
 class X1 extends X {
     void f(X x) {
-        X1 x1 := (X1) x;
+        // X1 x1 := (X1) x;
     }
 
 
@@ -20,7 +20,7 @@ class X1 extends X {
     // }
     // since the cast assign statement splits up the path into two this is correct.
     static void test1(X x)
-        exceptional(!(x instanceof X1)) {
+        exceptional(true, !x instanceof X1) {
         x.f(x);
     }
 

@@ -115,11 +115,11 @@ impl Method {
         self.specification.requires.clone()
     }
 
-    pub fn post_condition(&self) -> Option<Rc<Expression>> {
+    pub fn post_condition(&self) -> Option<(Rc<Expression>, Option<TypeExpr>)> {
         self.specification.ensures.clone()
     }
 
-    pub fn exceptional(&self) -> Option<Rc<Expression>> {
+    pub fn exceptional(&self) -> Option<(Rc<Expression>, Option<TypeExpr>)> {
         self.specification.exceptional.clone()
     }
 
@@ -215,8 +215,8 @@ impl Parameter {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Specification {
     pub requires: Option<(Rc<Expression>, Option<TypeExpr>)>,
-    pub ensures: Option<Rc<Expression>>,
-    pub exceptional: Option<Rc<Expression>>,
+    pub ensures: Option<(Rc<Expression>, Option<TypeExpr>)>,
+    pub exceptional: Option<(Rc<Expression>, Option<TypeExpr>)>,
 }
 
 #[derive(Debug, Clone, Derivative)]
@@ -295,6 +295,14 @@ pub enum Statement {
         stat1: Box<Statement>,
         stat2: Box<Statement>,
     },
+    CastAssign {
+        lhs: Lhs,
+        rhs: Rhs,
+        cast_type: RuntimeType,
+
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
+    }
 }
 
 #[derive(Clone, Derivative)]

@@ -216,19 +216,34 @@ fn specifications<'a, D: DocAllocator<'a>>(
                     allocator,
                     ", ",
                     type_expr(&type_guard, allocator)
-                ])
+                ]),
+                ")"
             ]),
-        specification.ensures.clone().map(|requires| docs![
+        specification.ensures.clone().map(|(ensures, type_ensures)| docs![
             allocator,
             allocator.hardline(),
             "ensures",
-            requires.pretty(allocator).parens(),
+            "(",
+            ensures.pretty(allocator),
+                type_ensures.clone().map(|type_guard| docs![
+                    allocator,
+                    ", ",
+                    type_expr(&type_guard, allocator)
+                ]),
+            ")"
         ]),
-        specification.exceptional.clone().map(|requires| docs![
+        specification.exceptional.clone().map(|(exceptional, type_exceptional)| docs![
             allocator,
             allocator.hardline(),
             "exceptional",
-            requires.pretty(allocator).parens(),
+            "(",
+            exceptional.pretty(allocator),
+                type_exceptional.clone().map(|type_guard| docs![
+                    allocator,
+                    ", ",
+                    type_expr(&type_guard, allocator)
+                ]),
+            ")"
         ])
     ]
     .nest(2)
@@ -492,6 +507,17 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Statement {
                 stat1.as_ref(),
                 allocator.hardline(),
                 stat2.as_ref()
+            ],
+            Statement::CastAssign { lhs, rhs, cast_type, .. } => docs![
+                allocator,
+                lhs.pretty(allocator),
+                " ",
+                ":=",
+                " ",
+                cast_type.pretty(allocator).parens(),
+                " ",
+                rhs.pretty(allocator),
+                semicolon()
             ],
         }
     }

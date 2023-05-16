@@ -409,6 +409,7 @@ fn action(
 
             ActionResult::Continue
         }
+        CFGStatement::Statement(Statement::CastAssign { lhs, rhs, cast_type, info }) => todo!(),
         CFGStatement::Statement(Statement::Assert { assertion, .. }) => {
             let expression = prepare_assert_expression(state, Rc::new(assertion.clone()), en);
 
@@ -493,12 +494,18 @@ fn action(
                 params,
                 ..
             } = state.stack.current_stackframe().unwrap();
-            if let Some(post_condition) = current_member.post_condition() {
+            if let Some((post_condition, type_guard)) = current_member.post_condition() {
                 let expression = prepare_assert_expression(state, post_condition.clone(), en);
                 let is_valid = eval_assertion(state, expression, en);
                 if !is_valid {
                     // postcondition invalid
                     return ActionResult::InvalidAssertion(post_condition.get_position());
+                }
+                if let Some(type_guard) = type_guard.as_ref() {
+                    let all_of_type = assert_type_guard(state, &type_guard, en);
+                    if !all_of_type {
+                        return ActionResult::InvalidAssertion(type_guard.get_position());
+                    }
                 }
             }
             if state.stack.len() == 1 {
@@ -562,7 +569,7 @@ fn exec_throw(state: &mut State, en: &mut impl Engine, message: &str) -> ActionR
                 .pop()
                 .unwrap_or_else(|| panic!("Unexpected empty stack"));
 
-            if let Some(exceptional) = stack_frame.current_member.exceptional() {
+            if let Some((exceptional, type_guard)) = stack_frame.current_member.exceptional() {
                 let assertion = prepare_assert_expression(state, exceptional.clone(), en);
                 //dbg!(&assertion);
                 let is_valid = eval_assertion(state, assertion.clone(), en);
@@ -571,6 +578,13 @@ fn exec_throw(state: &mut State, en: &mut impl Engine, message: &str) -> ActionR
                     error!(state.logger, "Exceptional error: {:?}", message);
                     return ActionResult::InvalidAssertion(exceptional.get_position());
                 }
+                // Also assert the type_guard if available
+                if let Some(type_guard) = type_guard.as_ref() {
+                    let all_of_type = assert_type_guard(state, &type_guard, en);
+                    if !all_of_type {
+                        return ActionResult::InvalidAssertion(type_guard.get_position());
+                    }
+                }
             }
             current_depth -= 1;
         }
@@ -578,13 +592,20 @@ fn exec_throw(state: &mut State, en: &mut impl Engine, message: &str) -> ActionR
         ActionResult::Return(catch_pc)
     } else {
         while let Some(stack_frame) = state.stack.current_stackframe() {
-            if let Some(exceptional) = stack_frame.current_member.exceptional() {
+            if let Some((exceptional, type_guard)) = stack_frame.current_member.exceptional() {
                 let assertion = prepare_assert_expression(state, exceptional.clone(), en);
                 //dbg!(&assertion);
                 let is_valid = eval_assertion(state, assertion.clone(), en);
                 if !is_valid {
                     error!(state.logger, "Exceptional error: {:?}", message);
                     return ActionResult::InvalidAssertion(exceptional.get_position());
+                }
+                // Also assert the type_guard if available
+                if let Some(type_guard) = type_guard.as_ref() {
+                    let all_of_type = assert_type_guard(state, &type_guard, en);
+                    if !all_of_type {
+                        return ActionResult::InvalidAssertion(type_guard.get_position());
+                    }
                 }
             }
             state.stack.pop();

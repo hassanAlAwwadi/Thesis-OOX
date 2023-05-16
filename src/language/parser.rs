@@ -231,6 +231,14 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         // });
         .map(|body| body.unwrap_or(Statement::Skip));
 
+    let cast_assign =
+        (lhs() - punct(":=") + (punct("(") * classtype() - punct(")")) + rhs() - punct(";")).map(|((lhs, cast_type), rhs)| Statement::CastAssign {
+            info: lhs.get_position(),
+            lhs,
+            cast_type: cast_type.type_of(),
+            rhs,
+        });
+
     // lock, fork & join are left out
     let p_statement = declaration
         | assignment
@@ -426,14 +434,16 @@ fn specification<'a>() -> Parser<'a, Token<'a>, Specification> {
     let requires = keyword("requires") * punct("(") * verification_expression()
         + (punct(",") * type_expr()).opt()
         - punct(")");
-    let ensures = keyword("ensures") * punct("(") * verification_expression() - punct(")");
-    let exceptional = keyword("exceptional") * punct("(") * verification_expression() - punct(")");
+    let ensures = keyword("ensures") * punct("(") * verification_expression()
+        + (punct(",") * type_expr()).opt() - punct(")");
+    let exceptional = keyword("exceptional") * punct("(") * verification_expression()
+        + (punct(",") * type_expr()).opt() - punct(")");
 
     (requires.opt() + ensures.opt() + exceptional.opt()).map(
         |((requires, ensures), exceptional)| Specification {
             requires: requires.map(|(guard, type_guard)| (Rc::new(guard), type_guard)),
-            ensures: ensures.map(Rc::new),
-            exceptional: exceptional.map(Rc::new),
+            ensures: ensures.map(|(guard, type_guard)| (Rc::new(guard), type_guard)),
+            exceptional: exceptional.map(|(guard, type_guard)| (Rc::new(guard), type_guard)),
         },
     )
 }

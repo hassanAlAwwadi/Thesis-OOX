@@ -217,7 +217,7 @@ fn type_specification(
         specification.requires = Some((Rc::new(requires), type_guard));
     }
 
-    if let Some(ensures) = specification.ensures.clone() {
+    if let Some((ensures, type_guard)) = specification.ensures.clone() {
         let method_type = declaration_member.type_of();
         if !method_type.is_of_type(RuntimeType::VoidRuntimeType, st) {
             let mut env = env.clone();
@@ -225,14 +225,21 @@ fn type_specification(
             env.declare_var(retval(), method_type)?;
             let ensures = type_expression(ensures, &mut env, st)?;
             matches_type(&ensures, RuntimeType::BoolRuntimeType, st)?;
-            specification.ensures = Some(Rc::new(ensures));
+            if let Some(type_guard) = type_guard.as_ref() {
+                matches_type(type_guard, RuntimeType::BoolRuntimeType, st)?;
+            }
+            specification.ensures = Some((Rc::new(ensures), type_guard));
         }
     }
 
-    if let Some(exceptional) = specification.exceptional.clone() {
+    if let Some((exceptional, type_guard)) = specification.exceptional.clone() {
         let exceptional = type_expression(exceptional, env, st)?;
         matches_type(&exceptional, RuntimeType::BoolRuntimeType, st)?;
-        specification.exceptional = Some(Rc::new(exceptional));
+
+        if let Some(type_guard) = type_guard.as_ref() {
+            matches_type(type_guard, RuntimeType::BoolRuntimeType, st)?;
+        }
+        specification.exceptional = Some((Rc::new(exceptional), type_guard));
     }
 
     Ok(specification)
@@ -438,6 +445,13 @@ fn type_statement(
                     body: Box::new(body),
                 })
             }
+            Statement::CastAssign { lhs, rhs, cast_type, info } => {
+                let lhs = type_lhs(lhs, env, st)?;
+                let rhs = type_rhs(rhs, env, st, declaration)?;
+                matches_type(&lhs, &cast_type, st)?;
+                matches_type(&rhs, &lhs, st)?;
+                statements.push(Statement::CastAssign { lhs, rhs, cast_type, info });
+            },
         };
     }
     // Turn the array of Statements back into the Linked 'Seq' statement.

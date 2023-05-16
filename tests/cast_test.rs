@@ -74,3 +74,24 @@ fn instance_of() {
     //     options
     // ), Ok(SymResult::Valid));
 }
+
+
+#[test]
+fn class_cast() {
+    let k = 50;
+    let options = Options::default_with_k(k);
+    
+    assert_eq!(verify(
+        "./examples/casting/class_cast.oox",
+        "X1",
+        "test1",
+        options
+    ), Ok(SymResult::Valid));
+
+    assert_eq!(verify(
+        "./examples/casting/class_cast.oox",
+        "X1",
+        "test1_invalid",
+        options
+    ), Ok(SymResult::Invalid(SourcePos::new(29, 21))));
+}

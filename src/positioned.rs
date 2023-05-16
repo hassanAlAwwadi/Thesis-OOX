@@ -94,6 +94,16 @@ impl WithPosition for Lhs {
     }
 }
 
+impl WithPosition for &Lhs {
+    fn get_position(&self) -> SourcePos {
+        match self {
+            Lhs::LhsVar { info, .. } => *info,
+            Lhs::LhsField { info, .. } => *info,
+            Lhs::LhsElem { info, .. } => *info,
+        }
+    }
+}
+
 impl WithPosition for Invocation {
     fn get_position(&self) -> SourcePos {
         match self {
