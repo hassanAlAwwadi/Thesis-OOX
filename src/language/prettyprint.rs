@@ -454,7 +454,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Statement {
                 allocator,
                 "if",
                 " ",
-                if_guard(guard.clone(), allocator),
+                if_guard(guard.clone(), allocator).parens(),
                 " ",
                 "{",
                 docs![allocator, allocator.hardline(), true_body.pretty(allocator)].nest(2),
@@ -508,17 +508,6 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Statement {
                 allocator.hardline(),
                 stat2.as_ref()
             ],
-            Statement::CastAssign { lhs, rhs, cast_type, .. } => docs![
-                allocator,
-                lhs.pretty(allocator),
-                " ",
-                ":=",
-                " ",
-                cast_type.pretty(allocator).parens(),
-                " ",
-                rhs.pretty(allocator),
-                semicolon()
-            ],
         }
     }
 }
@@ -551,6 +540,13 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Rhs {
                 }
                 result
             }
+            Rhs::RhsCast { cast_type, var, info } => 
+            docs![
+                allocator, 
+                cast_type.type_of().pretty(allocator).parens(),
+                " ",
+                var.to_string()
+            ],
         }
     }
 }

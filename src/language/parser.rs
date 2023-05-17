@@ -133,21 +133,23 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     let declaration = (nonvoidtype() + identifier() + (punct(":=") * rhs()).opt() - punct(";"))
         .map(|((type_, var), rhs)| {
             if let Some(rhs) = rhs {
+                let assignment = Statement::Assign {
+                    info: rhs.get_position(),
+                    lhs: Lhs::LhsVar {
+                        info: var.get_position(),
+                        var: var.clone(),
+                        type_: RuntimeType::UnknownRuntimeType,
+                    },
+                    rhs: rhs.clone(),
+                };
+                let stat2 = class_cast_rhs(&rhs, assignment);
                 Statement::Seq {
                     stat1: Box::new(Statement::Declare {
                         info: type_.get_position(),
                         type_,
                         var: var.clone(),
                     }),
-                    stat2: Box::new(Statement::Assign {
-                        info: rhs.get_position(),
-                        lhs: Lhs::LhsVar {
-                            info: var.get_position(),
-                            var,
-                            type_: RuntimeType::UnknownRuntimeType,
-                        },
-                        rhs,
-                    }),
+                    stat2: Box::new(stat2),
                 }
             } else {
                 Statement::Declare {
@@ -160,12 +162,14 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
 
     // let declaration = (nonvoidtype() + identifier() - punct(";"))
     //     .map(|(type_, var)| Statement::Declare { type_, var });
-    let assignment =
-        (lhs() - punct(":=") + rhs() - punct(";")).map(|(lhs, rhs)| Statement::Assign {
+    let assignment = (lhs() - punct(":=") + rhs() - punct(";")).map(|(lhs, rhs)| {
+        let assignment = Statement::Assign {
             info: lhs.get_position(),
             lhs,
-            rhs,
-        });
+            rhs: rhs.clone(),
+        };
+        class_cast_rhs(&rhs, assignment)
+    });
     let call_ = (invocation() - punct(";")).map(|invocation| Statement::Call {
         info: invocation.get_position(),
         invocation,
@@ -231,14 +235,6 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         // });
         .map(|body| body.unwrap_or(Statement::Skip));
 
-    let cast_assign =
-        (lhs() - punct(":=") + (punct("(") * classtype() - punct(")")) + rhs() - punct(";")).map(|((lhs, cast_type), rhs)| Statement::CastAssign {
-            info: lhs.get_position(),
-            lhs,
-            cast_type: cast_type.type_of(),
-            rhs,
-        });
-
     // lock, fork & join are left out
     let p_statement = declaration
         | assignment
@@ -272,6 +268,31 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         }
         return stmt;
     })
+}
+
+/// Edge case for class_cast which inserts the exceptional clause here.
+fn class_cast_rhs(rhs: &Rhs, assignment: Statement) -> Statement {
+    if let Rhs::RhsCast {
+        cast_type,
+        var,
+        info,
+    } = &rhs
+    {
+        create_ite(
+            Either::Right(TypeExpr::InstanceOf {
+                var: var.clone(),
+                rhs: cast_type.type_of(),
+                info: SourcePos::UnknownPosition,
+            }),
+            assignment,
+            Some(Statement::Throw {
+                message: "ClassCastException".to_string(),
+                info: SourcePos::UnknownPosition,
+            }),
+        )
+    } else {
+        assignment
+    }
 }
 
 fn ite<'a>() -> Parser<'a, Token<'a>, Statement> {
@@ -435,9 +456,11 @@ fn specification<'a>() -> Parser<'a, Token<'a>, Specification> {
         + (punct(",") * type_expr()).opt()
         - punct(")");
     let ensures = keyword("ensures") * punct("(") * verification_expression()
-        + (punct(",") * type_expr()).opt() - punct(")");
+        + (punct(",") * type_expr()).opt()
+        - punct(")");
     let exceptional = keyword("exceptional") * punct("(") * verification_expression()
-        + (punct(",") * type_expr()).opt() - punct(")");
+        + (punct(",") * type_expr()).opt()
+        - punct(")");
 
     (requires.opt() + ensures.opt() + exceptional.opt()).map(
         |((requires, ensures), exceptional)| Specification {
@@ -723,7 +746,16 @@ fn rhs<'a>() -> Parser<'a, Token<'a>, Rhs> {
         type_: RuntimeType::UnknownRuntimeType,
     });
 
-    rhs_call | rhs_field | rhs_elem | rhs_expression | rhs_array
+    let rhs_cast =
+        (punct("(") * classtype() - punct(")") + identifier()).map(|(cast_type, var)| {
+            Rhs::RhsCast {
+                info: cast_type.get_position(),
+                cast_type,
+                var,
+            }
+        });
+
+    rhs_cast | rhs_call | rhs_field | rhs_elem | rhs_expression | rhs_array
 }
 
 fn parameters<'a>() -> Parser<'a, Token<'a>, Vec<Parameter>> {
@@ -958,6 +990,10 @@ fn exceptional_rhs(rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Rc<Expressi
             array_type,
             sizes,
             type_,
+            ..
+        } => HashSet::new(),
+        // Exceptional for RhsCast is handled in `class_cast_rhs(..)`
+        Rhs::RhsCast {
             ..
         } => HashSet::new(),
     }
@@ -1531,4 +1567,15 @@ fn parsing_array1() {
     dbg!(as_ref);
     let c = parse(&as_ref, true).unwrap();
     dbg!(&c);
+}
+
+#[test]
+fn parse_cast_assign() {
+    let file_content = "X1 x1 := (X1) x;";
+
+    let tokens = tokens(&file_content).unwrap();
+    let as_ref = tokens.as_slice();
+    // dbg!(as_ref);
+    let c = (statement() - end()).parse(&as_ref).unwrap();
+    // dbg!(&c);
 }

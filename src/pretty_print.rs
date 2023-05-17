@@ -256,6 +256,7 @@ impl Display for Rhs {
                 }
                 Ok(())
             }
+            Rhs::RhsCast { cast_type, var, info } => todo!(),
         }
     }
 }

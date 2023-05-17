@@ -74,6 +74,7 @@ impl WithPosition for Rhs {
             Rhs::RhsElem { info, .. } => info,
             Rhs::RhsCall { info, .. } => info,
             Rhs::RhsArray { info, .. } => info,
+            Rhs::RhsCast { info, .. } => info,
         }
     }
 }

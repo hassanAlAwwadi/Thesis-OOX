@@ -409,7 +409,6 @@ fn action(
 
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::CastAssign { lhs, rhs, cast_type, info }) => todo!(),
         CFGStatement::Statement(Statement::Assert { assertion, .. }) => {
             let expression = prepare_assert_expression(state, Rc::new(assertion.clone()), en);
 
@@ -419,12 +418,8 @@ fn action(
             }
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::Assume {
-            assumption,
-            ..
-        }) => {
-            let is_feasible_path =
-                exec_assume(state, assumption.clone(), en);
+        CFGStatement::Statement(Statement::Assume { assumption, .. }) => {
+            let is_feasible_path = exec_assume(state, assumption.clone(), en);
             if !is_feasible_path {
                 return ActionResult::InfeasiblePath;
             }
@@ -453,7 +448,7 @@ fn action(
                         state.constraints.insert(expression.deref().clone());
                     }
                     // Also check the type guard expression if available.
-                    // Note these are separated from the normal expression 
+                    // Note these are separated from the normal expression
                     // since there is currently only simple instanceof support.
                     if let Some(type_guard) = type_guard {
                         let feasible = assume_type_guard(state, &type_guard, en);
@@ -563,56 +558,61 @@ fn exec_throw(state: &mut State, en: &mut impl Engine, message: &str) -> ActionR
         mut current_depth,
     }) = state.exception_handler.pop_last()
     {
+        // A catch was found, starting from now untill the catch we check any exceptional(..) clauses.
         while current_depth > 0 {
-            let stack_frame = state
+            if let Some((exceptional, type_guard)) = state
                 .stack
                 .pop()
-                .unwrap_or_else(|| panic!("Unexpected empty stack"));
-
-            if let Some((exceptional, type_guard)) = stack_frame.current_member.exceptional() {
-                let assertion = prepare_assert_expression(state, exceptional.clone(), en);
-                //dbg!(&assertion);
-                let is_valid = eval_assertion(state, assertion.clone(), en);
-                info!(state.logger, "is valid: {}", is_valid);
-                if !is_valid {
-                    error!(state.logger, "Exceptional error: {:?}", message);
+                .and_then(|frame| frame.current_member.exceptional())
+            {
+                if !assert_exceptional(state, en, exceptional.clone(), type_guard, message) {
                     return ActionResult::InvalidAssertion(exceptional.get_position());
-                }
-                // Also assert the type_guard if available
-                if let Some(type_guard) = type_guard.as_ref() {
-                    let all_of_type = assert_type_guard(state, &type_guard, en);
-                    if !all_of_type {
-                        return ActionResult::InvalidAssertion(type_guard.get_position());
-                    }
                 }
             }
             current_depth -= 1;
         }
-
         ActionResult::Return(catch_pc)
     } else {
+        // No catch found, starting from now untill the initial method we check any exceptional(..) clauses.
         while let Some(stack_frame) = state.stack.current_stackframe() {
             if let Some((exceptional, type_guard)) = stack_frame.current_member.exceptional() {
-                let assertion = prepare_assert_expression(state, exceptional.clone(), en);
-                //dbg!(&assertion);
-                let is_valid = eval_assertion(state, assertion.clone(), en);
-                if !is_valid {
-                    error!(state.logger, "Exceptional error: {:?}", message);
+                if !assert_exceptional(state, en, exceptional.clone(), type_guard, message) {
                     return ActionResult::InvalidAssertion(exceptional.get_position());
-                }
-                // Also assert the type_guard if available
-                if let Some(type_guard) = type_guard.as_ref() {
-                    let all_of_type = assert_type_guard(state, &type_guard, en);
-                    if !all_of_type {
-                        return ActionResult::InvalidAssertion(type_guard.get_position());
-                    }
                 }
             }
             state.stack.pop();
         }
-        // Throw exception path explored, but is valid so we can prune this path.
         ActionResult::Finish
     }
+}
+
+fn assert_exceptional(
+    state: &mut State,
+    en: &mut impl Engine,
+    exceptional: Rc<Expression>,
+    type_guard: Option<TypeExpr>,
+    message: &str,
+) -> bool {
+    let assertion = prepare_assert_expression(state, exceptional.clone(), en);
+    let is_valid = eval_assertion(state, assertion.clone(), en);
+    if !is_valid {
+        error!(state.logger, "Exceptional message: {:?}", message);
+        return false;
+    }
+    if let Some(type_guard) = type_guard.as_ref() {
+        let path_constraints = collect_path_constraints(state);
+        dbg!(&path_constraints);
+        let path_constraints_sat = !eval_assertion(state, path_constraints.into(), en);
+        dbg!(path_constraints_sat);
+        // if the path constraints are satisfiable, we have to check this otherwise the path is unfeasible and we don't.
+        if path_constraints_sat {
+            let all_of_type = assert_type_guard(state, &type_guard, en);
+            if !all_of_type {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl Engine) -> bool {
@@ -1048,18 +1048,7 @@ fn prepare_assert_expression(
     en: &mut impl Engine,
 ) -> Rc<Expression> {
     let expression = if state.constraints.len() >= 1 {
-        let assumptions = state
-            .constraints
-            .iter()
-            .cloned()
-            .reduce(|x, y| Expression::BinOp {
-                bin_op: BinOp::And,
-                lhs: Rc::new(x),
-                rhs: Rc::new(y),
-                type_: RuntimeType::BoolRuntimeType,
-                info: SourcePos::UnknownPosition,
-            })
-            .unwrap();
+        let assumptions = collect_path_constraints(state);
 
         negate(Rc::new(Expression::BinOp {
             bin_op: BinOp::Implies,
@@ -1088,6 +1077,22 @@ fn prepare_assert_expression(
     let z = evaluate(state, Rc::new(expression), en);
     debug!(state.logger, "Evaluated expression: {:?}", z);
     z
+}
+
+/// Collects the path constraints into an expression
+fn collect_path_constraints(state: &State) -> Expression {
+    state
+        .constraints
+        .iter()
+        .cloned()
+        .reduce(|x, y| Expression::BinOp {
+            bin_op: BinOp::And,
+            lhs: Rc::new(x),
+            rhs: Rc::new(y),
+            type_: RuntimeType::BoolRuntimeType,
+            info: SourcePos::UnknownPosition,
+        })
+        .unwrap()
 }
 
 fn read_field_concrete_ref(heap: &mut Heap, ref_: i64, field: &Identifier) -> Rc<Expression> {
@@ -1445,7 +1450,26 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
         } => {
             return exec_array_construction(state, array_type, sizes, type_, en);
         }
-        _ => unimplemented!(),
+        Rhs::RhsCast {
+            cast_type,
+            var,
+            info,
+        } => {
+            let object = state.stack.lookup(var).unwrap_or_else(|| {
+                panic!(
+                    "Could not find {:?} on the stack {:?}",
+                    var,
+                    &state.stack.current_variables()
+                )
+            });
+
+            match object.as_ref() {
+                Expression::Ref { ref_, type_: _old_type, info } => Expression::Ref { ref_: *ref_, type_: cast_type.type_of(), info: *info }.into(),
+                Expression::SymbolicRef { var, type_: _old_type, info } => Expression::SymbolicRef { var: var.clone(), type_: cast_type.type_of(), info: *info }.into(),
+                _ => panic!("Expected class cast operator to cast on ref or symbolic ref, found {:?}", object)
+            }
+
+        }
     }
 }
 
@@ -1705,7 +1729,7 @@ fn exec_assume(
             } else if *expression != true_lit() {
                 state.constraints.insert(expression.deref().clone());
             }
-        },
+        }
         Either::Right(assumption) => {
             let type_guard_feasible = assume_type_guard(state, &assumption, en);
             if !type_guard_feasible {
@@ -1715,7 +1739,7 @@ fn exec_assume(
                 );
                 return false;
             }
-        },
+        }
     }
     true
 }
@@ -1736,7 +1760,8 @@ fn get_alias_for_var<'a>(
         .unwrap_or_else(|| panic!("expected '{:?}' to be a symbolic object with aliases", var))
 }
 
-// Returns whether the assertion holds for the type guard.
+/// Returns whether the assertion holds for the type guard.
+/// This is checked using the aliasmap, no Z3 involved.
 fn assert_type_guard(state: &mut State, type_guard: &TypeExpr, en: &mut impl Engine) -> bool {
     let (var, rhs, not) = match type_guard {
         TypeExpr::InstanceOf { var, rhs, .. } => (var, rhs, false),
@@ -1764,16 +1789,14 @@ fn assume_type_guard(state: &mut State, type_guard: &TypeExpr, en: &mut impl Eng
 
     let alias_entry = get_alias_for_var(state, var, en);
 
-    alias_entry
-        .aliases
-        .retain(|alias| {
-            let alias_of_type = alias.is_of_type(rhs, en.symbol_table());
-            if not {
-                !alias_of_type
-            } else {
-                alias_of_type
-            }
-        });
+    alias_entry.aliases.retain(|alias| {
+        let alias_of_type = alias.is_of_type(rhs, en.symbol_table());
+        if not {
+            !alias_of_type
+        } else {
+            alias_of_type
+        }
+    });
 
     alias_entry.aliases.len() > 0
 }

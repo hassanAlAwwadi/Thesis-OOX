@@ -87,11 +87,26 @@ fn class_cast() {
         "test1",
         options
     ), Ok(SymResult::Valid));
+    
+    assert_eq!(verify(
+        "./examples/casting/class_cast.oox",
+        "X1",
+        "test1a",
+        options
+    ), Ok(SymResult::Valid));
 
     assert_eq!(verify(
         "./examples/casting/class_cast.oox",
         "X1",
-        "test1_invalid",
+        "test1a_invalid",
         options
-    ), Ok(SymResult::Invalid(SourcePos::new(29, 21))));
+    ), Ok(SymResult::Invalid(SourcePos::new(37, 21))));
+
+
+    assert_eq!(verify(
+        "./examples/casting/class_cast.oox",
+        "X1",
+        "test1b_invalid",
+        options
+    ), Ok(SymResult::Invalid(SourcePos::new(45, 21))));
 }

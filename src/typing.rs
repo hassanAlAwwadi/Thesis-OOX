@@ -445,13 +445,6 @@ fn type_statement(
                     body: Box::new(body),
                 })
             }
-            Statement::CastAssign { lhs, rhs, cast_type, info } => {
-                let lhs = type_lhs(lhs, env, st)?;
-                let rhs = type_rhs(rhs, env, st, declaration)?;
-                matches_type(&lhs, &cast_type, st)?;
-                matches_type(&rhs, &lhs, st)?;
-                statements.push(Statement::CastAssign { lhs, rhs, cast_type, info });
-            },
         };
     }
     // Turn the array of Statements back into the Linked 'Seq' statement.
@@ -602,6 +595,13 @@ fn type_rhs(
                 info,
             })
         }
+        Rhs::RhsCast { cast_type, var, info } => {
+            let var_type = env.get_var_type(&var)?;
+            matches_type(cast_type.clone(), var_type, st)?;
+            Ok(
+                Rhs::RhsCast { cast_type, var, info }
+            )
+        },
     }
 }
 

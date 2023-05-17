@@ -282,26 +282,26 @@ impl Typeable for &Lhs {
 impl Typeable for Rhs {
     fn type_of(&self) -> RuntimeType {
         match self {
-            Rhs::RhsExpression { type_, .. } => type_,
-            Rhs::RhsField { type_, .. } => type_,
-            Rhs::RhsElem { type_, .. } => type_,
-            Rhs::RhsCall { type_, .. } => type_,
-            Rhs::RhsArray { type_, .. } => type_,
+            Rhs::RhsExpression { type_, .. } => type_.clone(),
+            Rhs::RhsField { type_, .. } => type_.clone(),
+            Rhs::RhsElem { type_, .. } => type_.clone(),
+            Rhs::RhsCall { type_, .. } => type_.clone(),
+            Rhs::RhsArray { type_, .. } => type_.clone(),
+            Rhs::RhsCast { cast_type, .. } => cast_type.type_of(),
         }
-        .clone()
     }
 }
 
 impl Typeable for &Rhs {
     fn type_of(&self) -> RuntimeType {
         match self {
-            Rhs::RhsExpression { type_, .. } => type_,
-            Rhs::RhsField { type_, .. } => type_,
-            Rhs::RhsElem { type_, .. } => type_,
-            Rhs::RhsCall { type_, .. } => type_,
-            Rhs::RhsArray { type_, .. } => type_,
+            Rhs::RhsExpression { type_, .. } => type_.clone(),
+            Rhs::RhsField { type_, .. } => type_.clone(),
+            Rhs::RhsElem { type_, .. } => type_.clone(),
+            Rhs::RhsCall { type_, .. } => type_.clone(),
+            Rhs::RhsArray { type_, .. } => type_.clone(),
+            Rhs::RhsCast { cast_type, .. } => cast_type.type_of(),
         }
-        .clone()
     }
 }
 

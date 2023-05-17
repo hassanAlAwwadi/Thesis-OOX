@@ -294,14 +294,6 @@ pub enum Statement {
     Seq {
         stat1: Box<Statement>,
         stat2: Box<Statement>,
-    },
-    CastAssign {
-        lhs: Lhs,
-        rhs: Rhs,
-        cast_type: RuntimeType,
-
-        #[derivative(PartialEq = "ignore")]
-        info: SourcePos,
     }
 }
 
@@ -550,6 +542,13 @@ pub enum Rhs {
         #[derivative(PartialEq = "ignore")]
         info: SourcePos,
     },
+    RhsCast {
+        cast_type: NonVoidType,
+        var: Identifier,
+
+        #[derivative(PartialEq = "ignore")]
+        info: SourcePos,
+    }
 }
 
 #[derive(Clone, Derivative)]
