@@ -1,0 +1,8 @@
+
+class ZipArchiveEntry implements ArchiveEntry {
+    int name;
+
+    ZipArchiveEntry(int name) {
+        this.name := name;
+    }
+}

@@ -1,0 +1,33 @@
+class CpioArchiveEntry implements ArchiveEntry {
+
+    int fileFormat;
+    int fileSize;
+    int name;
+    int nlink;
+
+
+    CpioArchiveEntry(int name) {
+        this.fileFormat := 1;
+        this.fileSize := 0;
+        this.name := 12345;
+    }
+
+    int getFormat() {
+        int fileFormat := this.fileFormat;
+        return fileFormat;
+    }
+
+    int getSize() {
+        int fileSize := this.fileSize;
+        return fileSize;
+    }
+
+    void setName(int name) {
+        this.name := name;
+    }
+
+    void setNumberOfLinks(int nlink) {
+        this.nlink := nlink;
+    }
+
+}

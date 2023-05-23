@@ -1,0 +1,39 @@
+class TarArchiveEntry implements ArchiveEntry {
+    int name;
+    int size;
+    File file;
+
+    TarArchiveEntry() {
+        this.name := 0;
+        this.file := null;
+    }
+
+    TarArchiveEntry(int name) {
+        this.name := name;
+        this.file := null;
+        this.size := 0;
+    }
+
+    int getName() {
+        int name := this.name;
+        return name;
+    }
+
+    int getNameLength() {
+        int name := this.getName();
+        return (name + 10);
+    }
+
+    void setName(int name) {
+        this.name := name;
+    }
+
+    int getSize() {
+        int size := this.size;
+        return size;
+    }
+
+    bool isDirectory() {
+        return false;
+    }
+}

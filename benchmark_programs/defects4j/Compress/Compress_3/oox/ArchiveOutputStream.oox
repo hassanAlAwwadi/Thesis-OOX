@@ -1,103 +1,17 @@
 interface ArchiveOutputStream {
 
-    // void putArchiveEntry(ArchiveEntry entry);
+    void putArchiveEntry(ArchiveEntry entry);
 
     void closeArchiveEntry();
 
     void finish();
 }
 
-class ArArchiveEntry {
 
-    int getLength() { return 0; }
-}
 
 class OutputStream {
-
+    OutputStream() {}
 }
 
-
-// class ArArchiveOutputStream {
-class ArArchiveOutputStream implements ArchiveOutputStream {
-
-    OutputStream out;
-    int archiveOffset;
-    int entryOffset;
-    ArArchiveEntry prevEntry;
-    bool haveUnclosedEntry;
-
-    ArArchiveOutputStream( OutputStream pOut ) {
-        this.out := pOut;
-
-        this.archiveOffset := 0;
-        this.entryOffset := 0;
-        this.haveUnclosedEntry := true;
-    }
-
-    int writeArchiveHeader() {
-        // byte [] header := ArchiveUtils.toAsciiBytes(ArArchiveEntry.HEADER);
-        // out.write(header);
-        return 10;
-    }
-
-    void closeArchiveEntry() {
-        bool haveUnclosedEntry := this.haveUnclosedEntry;
-        ArArchiveEntry prevEntry := this.prevEntry;
-        int entryOffset := this.entryOffset;
-
-        if (prevEntry != null && haveUnclosedEntry && (entryOffset % 2) != 0) {
-            // out.write('\n'); // Pad byte
-            int archiveOffset := this.archiveOffset;
-            this.archiveOffset := archiveOffset + 1;
-        }
-        this.haveUnclosedEntry := false;
-    }
-
-    void putArchiveEntry( ArArchiveEntry pArEntry ) {
-        ArArchiveEntry prevEntry := this.prevEntry;
-
-        if (prevEntry == null) {
-            int archiveOffset := this.archiveOffset;
-            int writeArchiveHeader := this.writeArchiveHeader();
-            this.archiveOffset := archiveOffset + writeArchiveHeader;
-            
-        } else {
-            int prevEntrylength := prevEntry.getLength();
-            int entryOffset := this.entryOffset;
-
-            if (prevEntrylength != entryOffset) {
-                throw "new IOException length does not match entry ( + prevEntry.getLength() +  !=  + entryOffset)";
-            }
-
-            this.closeArchiveEntry();
-        }
-
-        this.prevEntry := pArEntry;
-        int archiveOffset := this.archiveOffset;
-        int writeEntryHeader := this.writeEntryHeader();
-        this.archiveOffset := archiveOffset + writeEntryHeader;
-
-        this.entryOffset := 0;
-        this.haveUnclosedEntry := true;
-    }
-
-
-    int writeEntryHeader( ArArchiveEntry pEntry ) {
-        int offset := 0;
-
-        // writing header, bug is not related to this.
-
-        return offset;
-    }
-
-
-    //  /* (non-Javadoc)
-    //  * @see org.apache.commons.compress.archivers.ArchiveOutputStream#finish()
-    //  */
-    void finish() {
-        bool haveUnclosedEntry := this.haveUnclosedEntry;
-        if(haveUnclosedEntry) {
-            throw "new IOException(This archives contains unclosed entries.);";
-        }
-    }
+class File {
 }

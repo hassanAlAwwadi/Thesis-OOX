@@ -1,0 +1,11 @@
+interface ArchiveEntry {
+
+    // /** The name of the entry in the archive. May refer to a file or directory or other item */
+	int getName();
+	
+	// /** The (uncompressed) size of the entry. May be -1 (SIZE_UNKNOWN) if the size is unknown */
+	int getSize();
+	
+	// /** True if the entry refers to a directory */
+	bool isDirectory();
+}

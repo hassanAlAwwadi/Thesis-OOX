@@ -1,0 +1,21 @@
+class StringConstants {
+    static int ar() {
+        return 101;
+    }
+
+    static int zip() {
+        return 102;
+    }
+
+    static int tar() {
+        return 103;
+    }
+
+    static int jar() {
+        return 104;
+    }
+
+    static int cpio() {
+        return 105;
+    }
+}

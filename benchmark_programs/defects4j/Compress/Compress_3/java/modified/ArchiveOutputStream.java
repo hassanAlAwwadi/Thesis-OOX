@@ -1,6 +1,6 @@
 interface ArchiveOutputStream {
 
-    //public void putArchiveEntry(ArchiveEntry entry) throws IOException;
+    public void putArchiveEntry(ArchiveEntry entry) throws IOException;
 
     public void closeArchiveEntry() throws IOException;
 
@@ -35,7 +35,9 @@ public class ArArchiveOutputStream implements ArchiveOutputStream {
         haveUnclosedEntry := false;
     }
 
-    public void putArchiveEntry( final ArArchiveEntry pArEntry ) throws IOException {
+    public void putArchiveEntry( final ArchiveEntry pEntry ) throws IOException {
+        ArArchiveEntry pArEntry = (ArArchiveEntry)pEntry;
+        
         if (prevEntry == null) {
             archiveOffset += writeArchiveHeader();
         } else {

@@ -1,0 +1,21 @@
+class JarArchiveOutputStream extends ZipArchiveOutputStream {
+
+    bool jarMarkerAdded;
+
+    JarArchiveOutputStream(OutputStream out) {
+        super(out);
+
+        this.jarMarkerAdded := false;
+    }
+
+    // @throws ClassCastException if entry is not an instance of ZipArchiveEntry
+    void putArchiveEntry(ArchiveEntry ze) {
+        bool jarMarkerAdded := this.jarMarkerAdded;
+        if (!jarMarkerAdded) {
+            ;
+            ZipArchiveEntry _ze := (ZipArchiveEntry) ze;
+            this.jarMarkerAdded := true;
+        }
+        super.putArchiveEntry(ze);
+    }
+}

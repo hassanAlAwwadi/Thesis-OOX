@@ -1,0 +1,107 @@
+class OutputStream {}
+
+
+class TarArchiveOutputStream implements ArchiveOutputStream {
+    int LONGFILE_ERROR;
+    int LONGFILE_TRUNCATE;
+    int LONGFILE_GNU;
+
+    int currSize;
+    int currName;
+    int currBytes;
+    int assemLen;
+    int longFileMode;
+    bool closed;
+    OutputStream out;
+
+  
+    TarArchiveOutputStream(OutputStream os) {
+        this.closed := false;
+
+        this.LONGFILE_ERROR := 0;
+        this.LONGFILE_TRUNCATE := 1;
+        this.LONGFILE_GNU := 2;
+
+
+        this.out := os;
+        int blockSize := 512 * 20;
+        int recordSize := 512;
+
+        // this.buffer := new TarBuffer(os, blockSize, recordSize);
+        this.assemLen := 0;
+        // this.assemBuf := new byte[recordSize];
+        // this.recordBuf := new byte[recordSize];
+        this.longFileMode := 0;
+    }
+
+    void finish() {
+        
+    }
+
+    
+    void putArchiveEntry(ArchiveEntry archiveEntry) {
+        TarArchiveEntry entry := (TarArchiveEntry) archiveEntry;
+        int getNameLengthResult := entry.getNameLength();
+        if (getNameLengthResult >= 100) {
+            int longFileMode := this.longFileMode;
+            int LONGFILE_GNU := this.LONGFILE_GNU;
+            int LONGFILE_TRUNCATE := this.LONGFILE_TRUNCATE;
+            if (longFileMode == LONGFILE_GNU) {
+                TarArchiveEntry longLinkEntry := new TarArchiveEntry(10001);
+                this.putArchiveEntry(longLinkEntry);
+                this.closeArchiveEntry();
+            } else if (longFileMode != LONGFILE_TRUNCATE) {
+                throw "new RuntimeException(file name + entry.getName()+ is too long ( > + 100 + bytes))";
+            }
+        }
+
+        // entry.writeEntryHeader(recordBuf);
+        // buffer.writeRecord(recordBuf);
+
+        this.currBytes := 0;
+        bool entryIsDirectory := entry.isDirectory();
+        if (entryIsDirectory) {
+            this.currSize := 0;
+        } else {
+            this.currSize := entry.getSize();
+        }
+        this.currName := entry.getName();
+    }
+
+
+    void closeArchiveEntry() {
+        int assemLen := this.assemLen;
+        if (assemLen > 0) {
+            // for (int i := assemLen; i < assemBuf.length; ++i) {
+            //     assemBuf[i] := 0;
+            // }
+
+            // buffer.writeRecord(assemBuf);
+            int currBytes := this.currBytes;
+            this.currBytes := currBytes + assemLen;
+            this.assemLen := 0;
+        }
+        int currBytes := this.currBytes;
+        int currSize := this.currSize;
+        if (currBytes < currSize) {
+            throw "new IOException(entry  + currName +  closed at + currBytes+  before the  + currSize +  bytes specified in the header were written)";
+        }
+    }
+
+
+    // // void write(byte[] wBuf, int wOffset, int numToWrite) throws IOException {
+    // void write(int wOffset, int numToWrite) {
+    //     int currBytes := this.currBytes;
+    //     numToWrite := this.numToWrite;
+    //     int currSize := this.currSize;
+    //     if ((currBytes + numToWrite) > currSize) {
+    //         throw "new IOException()";
+    //     }
+
+    //     while (numToWrite > 0) {
+    //         ;
+    //     }
+    // }
+
+
+}

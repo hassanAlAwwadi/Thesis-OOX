@@ -1,0 +1,120 @@
+interface ArchiveOutputStream {
+
+    void putArchiveEntry(ArchiveEntry entry);
+
+    void closeArchiveEntry();
+
+    void finish();
+}
+
+interface ArchiveEntry {
+
+    // /** The name of the entry in the archive. May refer to a file or directory or other item */
+	int getName();
+	
+	// /** The (uncompressed) size of the entry. May be -1 (SIZE_UNKNOWN) if the size is unknown */
+	int getSize();
+	
+	// /** True if the entry refers to a directory */
+	bool isDirectory();
+}
+
+
+class FilterOutputStream extends OutputStream {
+    FilterOutputStream(OutputStream out) {}
+}
+
+class OutputStream {}
+
+
+class CpioArchiveOutputStream implements ArchiveOutputStream {
+
+    CpioArchiveEntry entry;
+
+    bool closed;
+
+    bool finished;
+
+    int entryFormat;
+
+    int crc;
+
+    int written;
+
+    OutputStream out;
+
+
+   
+    CpioArchiveOutputStream(OutputStream out) {
+        this.closed := false;
+        this.out := new FilterOutputStream(out);
+        this.entryFormat := 1;
+        this.crc := 0;
+    }
+
+
+    void ensureOpen() {
+        bool closed := this.closed;
+        if (closed) {
+            throw "new IOException(Stream closed)";
+        }
+    }
+
+
+    void putArchiveEntry(ArchiveEntry entry) {
+        CpioArchiveEntry e := (CpioArchiveEntry) entry;
+        this.ensureOpen();
+        CpioArchiveEntry thisEntry := this.entry;
+        if (thisEntry != null) {
+            this.closeArchiveEntry(); // close previous entry
+        }
+
+        int format := e.getFormat();
+        int entryFormat := this.entryFormat;
+        if (format != entryFormat){
+            throw "new IOException(Header format: +format+ does not match existing format: +this.entryFormat)";
+        }
+
+        this.entry := e;
+        this.written := 0;
+    }
+
+
+
+
+    void closeArchiveEntry() {
+        this.ensureOpen();
+
+        CpioArchiveEntry entry := this.entry;
+        int entryGetSize := entry.getSize();
+        int written := this.written;
+        if (entryGetSize != written) {
+            throw "new IOException()";
+        }
+
+        this.entry := null;
+        this.crc := 0;
+        this.written := 0;
+    }
+
+    void finish() {
+        this.ensureOpen();
+
+        bool isFinished := this.finished;
+        if (isFinished) {
+            return;
+        }
+        CpioArchiveEntry entry := this.entry;
+        if (entry != null) {
+            throw "new IOException(This archives contains unclosed entries)";
+        }
+        int entryFormat := this.entryFormat;
+        entry := new CpioArchiveEntry(entryFormat);
+        entry.setName(10002);
+        entry.setNumberOfLinks(1);
+        this.entry := entry;
+        // writeHeader(this.entry);
+        this.closeArchiveEntry();
+    }
+
+}

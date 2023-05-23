@@ -1,0 +1,38 @@
+class ArchiveStreamFactory {
+
+
+    ArchiveStreamFactory() {}
+
+    ArchiveOutputStream createArchiveOutputStream(int archiverName, OutputStream out) {
+        if (archiverName == 0 || out == null) {
+            throw "new IllegalArgumentException(Archivername and stream must not be null.)";
+        }
+        // Replacement constants for strings.
+        int ar := StringConstants.ar();
+        int zip := StringConstants.zip();
+        int tar := StringConstants.tar();
+        int jar := StringConstants.jar();
+        int cpio := StringConstants.cpio();
+
+        ArchiveOutputStream result;
+
+        if (ar == archiverName) {
+            result := new ArArchiveOutputStream(out);
+            return result;
+        } else if (zip == archiverName) {
+            result := new ZipArchiveOutputStream(out);
+            return result;
+        } else if (tar == archiverName) {
+            result := new TarArchiveOutputStream(out);
+            return result;
+        } else if (jar == archiverName) {
+            result := new JarArchiveOutputStream(out);
+            return result;
+        } else if (cpio == archiverName) {
+            result := new CpioArchiveOutputStream(out);
+            return result;
+        }
+        throw "new ArchiveException(Archiver:  + archiverName +  not found.)";
+    }
+}
+
