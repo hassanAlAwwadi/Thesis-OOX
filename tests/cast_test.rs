@@ -6,30 +6,30 @@ fn instance_of() {
     let options = Options::default_with_k(k);
 
     assert_eq!(verify(
-        "./examples/casting/instanceof.oox",
+        &["./examples/casting/instanceof.oox"],
         "A",
         "test1",
         options
     ), Ok(SymResult::Valid));
 
     assert_eq!(verify(
-        "./examples/casting/instanceof.oox",
+        &["./examples/casting/instanceof.oox"],
         "A",
         "test1_invalid",
         options
-    ), Ok(SymResult::Invalid(SourcePos::new(7, 27))));
+    ), Ok(SymResult::Invalid(SourcePos::new(7, 27, 0))));
 
 
 
     assert_eq!(verify(
-        "./examples/casting/instanceof.oox",
+        &["./examples/casting/instanceof.oox"],
         "A",
         "test1b_invalid",
         options
-    ), Ok(SymResult::Invalid(SourcePos::new(23, 20))));
+    ), Ok(SymResult::Invalid(SourcePos::new(23, 20, 0))));
 
     assert_eq!(verify(
-        "./examples/casting/instanceof.oox",
+        &["./examples/casting/instanceof.oox"],
         "A",
         "test2",
         options
@@ -37,22 +37,22 @@ fn instance_of() {
 
 
     assert_eq!(verify(
-        "./examples/casting/instanceof.oox",
+        &["./examples/casting/instanceof.oox"],
         "A",
         "test3_invalid",
         options
-    ), Ok(SymResult::Invalid(SourcePos::new(51, 20))));
+    ), Ok(SymResult::Invalid(SourcePos::new(51, 20, 0))));
 
 
     assert_eq!(verify(
-        "./examples/casting/instanceof.oox",
+        &["./examples/casting/instanceof.oox"],
         "A",
         "test3a",
         options
     ), Ok(SymResult::Valid));
 
     assert_eq!(verify(
-        "./examples/casting/instanceof.oox",
+        &["./examples/casting/instanceof.oox"],
         "A",
         "test3b",
         options
@@ -61,14 +61,14 @@ fn instance_of() {
     // not yet implemented:
 
     // assert_eq!(verify(
-    //     "./examples/casting/instanceof.oox",
+    //     "./examples/casting/instanceof.oox"],
     //     "A",
     //     "test4",
     //     options
     // ), Ok(SymResult::Valid));
 
     // assert_eq!(verify(
-    //     "./examples/casting/instanceof.oox",
+    //     "./examples/casting/instanceof.oox"],
     //     "A",
     //     "test4_invalid",
     //     options
@@ -82,31 +82,31 @@ fn class_cast() {
     let options = Options::default_with_k(k);
     
     assert_eq!(verify(
-        "./examples/casting/class_cast.oox",
+        &["./examples/casting/class_cast.oox"],
         "X1",
         "test1",
         options
     ), Ok(SymResult::Valid));
     
     assert_eq!(verify(
-        "./examples/casting/class_cast.oox",
+        &["./examples/casting/class_cast.oox"],
         "X1",
         "test1a",
         options
     ), Ok(SymResult::Valid));
 
     assert_eq!(verify(
-        "./examples/casting/class_cast.oox",
+        &["./examples/casting/class_cast.oox"],
         "X1",
         "test1a_invalid",
         options
-    ), Ok(SymResult::Invalid(SourcePos::new(37, 21))));
+    ), Ok(SymResult::Invalid(SourcePos::new(37, 21, 0))));
 
 
     assert_eq!(verify(
-        "./examples/casting/class_cast.oox",
+        &["./examples/casting/class_cast.oox"],
         "X1",
         "test1b_invalid",
         options
-    ), Ok(SymResult::Invalid(SourcePos::new(45, 21))));
+    ), Ok(SymResult::Invalid(SourcePos::new(45, 21, 0))));
 }

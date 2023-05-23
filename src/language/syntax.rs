@@ -61,6 +61,17 @@ impl CompilationUnit {
         }
         None
     }
+
+    pub fn empty() -> CompilationUnit {
+        CompilationUnit { members: vec![] }
+    }
+
+    /// Merge the members of this compilation unit with the other.
+    /// Useful when combining compilation units from different files.
+    pub fn merge(mut self, c: CompilationUnit) -> CompilationUnit {
+        self.members.extend(c.members.into_iter());
+        self
+    }
 }
 
 #[derive(Debug, Clone, Derivative)]

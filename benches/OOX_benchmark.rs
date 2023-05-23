@@ -12,7 +12,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function("One Node", |b| {
         b.iter(|| {
             verify(
-                "./benchmark_programs/experiment1/1Node.oox",
+                &["./benchmark_programs/experiment1/1Node.oox"],
                 "Main",
                 "test2",
                 options,
@@ -22,7 +22,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function("Two Nodes", |b| {
         b.iter(|| {
             verify(
-                "./benchmark_programs/experiment1/2Node.oox",
+                &["./benchmark_programs/experiment1/2Node.oox"],
                 "Main",
                 "test2",
                 options
@@ -32,7 +32,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function("Three Nodes", |b| {
         b.iter(|| {
             verify(
-                "./benchmark_programs/experiment1/3Node.oox",
+                &["./benchmark_programs/experiment1/3Node.oox"],
                 "Main",
                 "test2",
                 options,
@@ -42,7 +42,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function("Four Nodes", |b| {
         b.iter(|| {
             verify(
-                "./benchmark_programs/experiment1/4Node.oox",
+                &["./benchmark_programs/experiment1/4Node.oox"],
                 "Main",
                 "test2",
                 options,

@@ -44,4 +44,4 @@ pub use typing::type_compilation_unit;
 
 pub use symbol_table::SymbolTable;
 
-static FILE_NAMES: Mutex<String> = Mutex::new(String::new());
+pub static FILE_NAMES: Mutex<Vec<String>> = Mutex::new(vec![]);

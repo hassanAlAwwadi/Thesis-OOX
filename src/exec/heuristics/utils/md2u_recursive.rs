@@ -644,7 +644,7 @@ mod tests {
     use crate::{
         cfg::labelled_statements, parse_program,
         prettyprint::cfg_pretty::pretty_print_compilation_unit, typing::type_compilation_unit,
-        utils, RuntimeType,
+        utils, RuntimeType, insert_exceptional_clauses,
     };
 
     use super::*;
@@ -681,7 +681,7 @@ mod tests {
         let file_content = std::fs::read_to_string(path).unwrap();
 
         let mut coverage = HashMap::new();
-        let c = parse_program(&file_content, true).unwrap();
+        let c = insert_exceptional_clauses(parse_program(&file_content, 0).unwrap());
 
         let symbol_table = SymbolTable::from_ast(&c).unwrap();
         let c = type_compilation_unit(c, &symbol_table).unwrap();

@@ -20,17 +20,8 @@ use super::lexer::*;
 mod interface;
 
 /// Main entrypoint for parsing a program,
-pub fn parse<'a>(
-    tokens: &[Token<'a>],
-    with_exceptional_clauses: bool,
-) -> Result<CompilationUnit, pom::Error> {
-    (program() - end()).parse(tokens).map(|c| {
-        if with_exceptional_clauses {
-            insert_exceptional_clauses(c)
-        } else {
-            c
-        }
-    })
+pub fn parse<'a>(tokens: &[Token<'a>]) -> Result<CompilationUnit, pom::Error> {
+    (program() - end()).parse(tokens)
 }
 
 fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit> {
@@ -222,8 +213,10 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     });
     let try_ = (keyword("try") - punct("{")
         + call(statement)
-        + punct("}") * keyword("catch") * punct("{") * call(statement)
-        - punct("}"))
+        + punct("}")
+            * keyword("catch")
+            * (punct("{") * call(statement).opt().map(|s| s.unwrap_or(Statement::Skip))
+                - punct("}")))
     .map(|((try_token, try_body), catch_body)| Statement::Try {
         try_body: Box::new(try_body),
         catch_body: Box::new(catch_body),
@@ -993,9 +986,7 @@ fn exceptional_rhs(rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Rc<Expressi
             ..
         } => HashSet::new(),
         // Exceptional for RhsCast is handled in `class_cast_rhs(..)`
-        Rhs::RhsCast {
-            ..
-        } => HashSet::new(),
+        Rhs::RhsCast { .. } => HashSet::new(),
     }
 }
 
@@ -1280,7 +1271,7 @@ where
 fn class_with_constructor() {
     let file_content = include_str!("../../examples/class_with_constructor.oox");
 
-    let tokens = tokens(file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = program().parse(&as_ref).unwrap(); // should not panic;
@@ -1291,7 +1282,7 @@ fn class_with_constructor() {
 fn test_statement() {
     let file_content = "int p; p := 0;";
 
-    let tokens = tokens(file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
@@ -1302,7 +1293,7 @@ fn test_statement() {
 fn class_with_methods() {
     let file_content = include_str!("../../examples/class_with_methods.oox");
 
-    let tokens = tokens(file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
@@ -1317,7 +1308,7 @@ fn class_with_methods() {
 fn bsort_test() {
     let file_content = include_str!("../../examples/bsort.oox");
 
-    let tokens = tokens(file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
@@ -1332,7 +1323,7 @@ fn bsort_test() {
 fn this_dot() {
     let file_content = "p := this.value;";
 
-    let tokens = tokens(file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
@@ -1349,7 +1340,7 @@ fn ite_test() {
         bool b := n.member(x) ;
         return b ;
     }";
-    let tokens = tokens(file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     //dbg!(&as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
@@ -1364,7 +1355,7 @@ fn ite_test2() {
     else {
         return false;
     }";
-    let tokens = tokens(file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     dbg!(&as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
@@ -1374,7 +1365,7 @@ fn ite_test2() {
 #[test]
 fn boolean() {
     let file_content = "true";
-    let tokens = tokens(file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
@@ -1387,7 +1378,7 @@ fn test_statement2() {
     bool b;
     b := n.member(x) ;
     return b;";
-    let tokens = tokens(file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     //dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
@@ -1397,7 +1388,7 @@ fn test_statement2() {
 #[test]
 fn forall() {
     let file_content = "(forall x, i : a : i<k ==> (forall x, i : a : i<k ==> true))";
-    let tokens = tokens(file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
@@ -1407,7 +1398,7 @@ fn forall() {
 fn absolute_simplest() {
     let file_content = include_str!("../../examples/absolute_simplest.oox");
 
-    let tokens = tokens(file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
@@ -1419,7 +1410,7 @@ fn absolute_simplest() {
 fn parsing_empty_function() {
     let file_content = "class X { static int fib(int n) {  } }";
 
-    let tokens = tokens(&file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
@@ -1456,7 +1447,7 @@ fn parsing_else_if() {
     }
     ";
 
-    let tokens = tokens(&file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     // let c = (pite() - end()).parse(&as_ref);
@@ -1473,7 +1464,7 @@ fn parsing_while() {
         total := total ;
        }";
 
-    let tokens = tokens(&file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     //dbg!(&tokens);
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
@@ -1486,7 +1477,7 @@ fn parsing_while() {
 fn parsing_fib() {
     let file_content = std::fs::read_to_string("./examples/psv/fib.oox").unwrap();
 
-    let tokens = tokens(&file_content).unwrap();
+    let tokens = tokens(&file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
@@ -1498,7 +1489,7 @@ fn parsing_fib() {
 fn parse_capital_variable() {
     let file_content = "int N := 10;";
 
-    let tokens = tokens(&file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     dbg!(&tokens);
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
@@ -1513,7 +1504,7 @@ fn parse_while_loop() {
     while (i<N)
         i := i+1 ;";
 
-    let tokens = tokens(&file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     dbg!(&tokens);
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
@@ -1526,7 +1517,7 @@ fn parse_while_loop() {
 fn parsing_linked_list() {
     let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
 
-    let tokens = tokens(&file_content).unwrap();
+    let tokens = tokens(&file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
     let c = (program() - end()).parse(&as_ref);
@@ -1538,10 +1529,10 @@ fn parsing_linked_list() {
 fn parsing_exceptions() {
     let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
 
-    let tokens = tokens(&file_content).unwrap();
+    let tokens = tokens(&file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     dbg!(as_ref);
-    let c = parse(&as_ref, true).unwrap();
+    let c = insert_exceptional_clauses(parse(&as_ref).unwrap());
     dbg!(&c);
 }
 
@@ -1549,7 +1540,7 @@ fn parsing_exceptions() {
 fn parse_array_elem_assign() {
     let file_content = "a[0] := 1;";
 
-    let tokens = tokens(&file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     dbg!(&tokens);
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
@@ -1562,10 +1553,10 @@ fn parse_array_elem_assign() {
 fn parsing_array1() {
     let file_content = std::fs::read_to_string("./examples/array/array1.oox").unwrap();
 
-    let tokens = tokens(&file_content).unwrap();
+    let tokens = tokens(&file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     dbg!(as_ref);
-    let c = parse(&as_ref, true).unwrap();
+    let c = insert_exceptional_clauses(parse(&as_ref).unwrap());
     dbg!(&c);
 }
 
@@ -1573,7 +1564,7 @@ fn parsing_array1() {
 fn parse_cast_assign() {
     let file_content = "X1 x1 := (X1) x;";
 
-    let tokens = tokens(&file_content).unwrap();
+    let tokens = tokens(file_content, 0).unwrap();
     let as_ref = tokens.as_slice();
     // dbg!(as_ref);
     let c = (statement() - end()).parse(&as_ref).unwrap();

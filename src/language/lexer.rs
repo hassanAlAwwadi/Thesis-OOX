@@ -45,8 +45,8 @@ impl<'a> Display for Token<'a> {
     }
 }
 
-// pub fn tokens(file: &str) -> Vec<(Token, (usize, usize))> {
-pub(crate) fn tokens<'a>(file: &'a str) -> Result<Vec<Token<'a>>, (usize, usize)> {
+/// Create a list of tokens from the file, or return the lexer error position.
+pub(crate) fn tokens<'a>(file: &'a str, file_number: usize) -> Result<Vec<Token<'a>>, (usize, usize)> {
     let file = OOXLexer::parse(Rule::input, file)
         .map_err(|error| match error.line_col {
             pest::error::LineColLocation::Pos((line, col)) => (line, col),
@@ -84,7 +84,7 @@ pub(crate) fn tokens<'a>(file: &'a str) -> Result<Vec<Token<'a>>, (usize, usize)
                             Rule::punctuator => Token::Punctuator,
                             Rule::literal => Token::Literal,
                             _ => unreachable!(),
-                        }(&token_str, SourcePos::SourcePos { line, col });
+                        }(&token_str, SourcePos::SourcePos { line, col, file_number });
                     // (token, token_pair.as_span().start_pos().line_col())
                     token
                 })

@@ -54,7 +54,7 @@ fn parse_interface() {
         void animalSound();
     }";
 
-    let tokens = tokens(&file_content).unwrap();
+    let tokens = tokens(&file_content, 0).unwrap();
     dbg!(&tokens);
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);

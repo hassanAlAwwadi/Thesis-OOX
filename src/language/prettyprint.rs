@@ -945,7 +945,7 @@ pub mod cfg_pretty {
 #[test]
 fn feature() {
     use crate::{language::lexer::tokens, parser::expression};
-    let tokens = tokens("x && y").unwrap();
+    let tokens = tokens("x && y", 0).unwrap();
     let exp = expression().parse(&tokens).unwrap();
     let allocator = BoxAllocator;
     println!("{}", pretty::Pretty::pretty(&exp, &allocator).1.pretty(10));

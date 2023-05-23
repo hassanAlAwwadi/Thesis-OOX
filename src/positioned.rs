@@ -4,25 +4,45 @@ use std::rc::Rc;
 use itertools::Either;
 
 use crate::syntax::{Expression, Invocation, Lhs, Method, NonVoidType, Rhs};
-use crate::{FILE_NAMES, TypeExpr};
+use crate::{TypeExpr, FILE_NAMES};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum SourcePos {
     UnknownPosition,
-    SourcePos { line: usize, col: usize },
+    SourcePos {
+        line: usize,
+        col: usize,
+        /// Ideally this would be a &str, but due to borrowing we would need to add lifetimes everywhere.
+        file_number: usize,
+    },
 }
 
 impl SourcePos {
-    pub fn new(line: usize, col: usize) -> SourcePos {
-        SourcePos::SourcePos { line, col }
+    pub fn new(line: usize, col: usize, file_number: usize) -> SourcePos {
+        SourcePos::SourcePos {
+            line,
+            col,
+            file_number,
+        }
     }
 }
 
 impl Display for SourcePos {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let SourcePos::SourcePos { line, col } = self {
-            let path = FILE_NAMES.lock().unwrap();
-            write!(f, "{}:{}:{}", path, line, col)
+        if let SourcePos::SourcePos {
+            line,
+            col,
+            file_number,
+        } = self
+        {
+            let paths = FILE_NAMES.lock().unwrap();
+            write!(
+                f,
+                "{}:{}:{}",
+                paths.get(*file_number).map(AsRef::as_ref).unwrap_or("?"),
+                line,
+                col
+            )
         } else {
             Ok(())
         }

@@ -143,7 +143,7 @@ mod tests {
         let options = Options::default_with_k_and_heuristic(k, crate::Heuristic::MinDist2Uncovered);
 
         assert_eq!(
-            crate::verify(&path, "Foo", "min", options).unwrap(),
+            crate::verify(&[path], "Foo", "min", options).unwrap(),
             SymResult::Valid
         );
     }
