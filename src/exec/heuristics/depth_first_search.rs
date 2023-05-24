@@ -24,6 +24,7 @@ pub(crate) fn sym_exec(
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &mut Statistics,
     _entry_method: crate::cfg::MethodIdentifier,
+    _visualize_heuristic: bool,
 ) -> SymResult {
     let mut remaining_states = vec![state];
 

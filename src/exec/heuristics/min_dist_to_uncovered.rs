@@ -25,9 +25,8 @@ use crate::{
     DeclarationMember,
 };
 
-
 use super::{
-    execution_tree::{ExecutionTree, ExecutionTreeBasedHeuristic, sym_exec_execution_tree},
+    execution_tree::{sym_exec_execution_tree, ExecutionTree, ExecutionTreeBasedHeuristic},
     utils::md2u_recursive::{self, Distance},
     ProgramCounter,
 };
@@ -68,7 +67,6 @@ fn choice<'a>(
         Err(err) => panic!("{}", err),
     }
 }
-
 
 pub(super) struct MinDist2Uncovered {
     rng: ThreadRng,
@@ -126,8 +124,21 @@ pub(crate) fn sym_exec(
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &mut Statistics,
     entry_method: MethodIdentifier,
+    visualize_heuristic: bool,
 ) -> SymResult {
-    sym_exec_execution_tree(state, program, flows, k, st, root_logger, path_counter, statistics, entry_method, MinDist2Uncovered::new())
+    sym_exec_execution_tree(
+        state,
+        program,
+        flows,
+        k,
+        st,
+        root_logger,
+        path_counter,
+        statistics,
+        entry_method,
+        MinDist2Uncovered::new(),
+        visualize_heuristic
+    )
 }
 
 #[cfg(test)]

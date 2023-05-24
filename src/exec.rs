@@ -33,8 +33,8 @@ use crate::{
     eval::{self, evaluate, evaluate_as_int},
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
     insert_exceptional_clauses, language, parse_program,
-    parser::parse,
     positioned::{SourcePos, WithPosition},
+    prettyprint::cfg_pretty::pretty_print_compilation_unit,
     reachability::reachability,
     stack::{Stack, StackFrame},
     statistics::Statistics,
@@ -1791,7 +1791,7 @@ fn get_alias_for_var<'a>(
 }
 
 /// helper function for `is_of_type`, that can not `!` the result.
-fn is_of_type_or_not(a: impl Typeable, b: impl Typeable, not: bool, st: &SymbolTable)-> bool {
+fn is_of_type_or_not(a: impl Typeable, b: impl Typeable, not: bool, st: &SymbolTable) -> bool {
     let ref_of_type = a.is_of_type(b, st);
     if not {
         !ref_of_type
@@ -1809,14 +1809,13 @@ fn assert_type_guard(state: &mut State, type_guard: &TypeExpr, en: &mut impl Eng
     };
 
     match get_expression_for_var(state, var, en).as_ref() {
-        Expression::Ref { type_, .. } => {
-            is_of_type_or_not(type_, rhs, not, en.symbol_table())
-        }
+        Expression::Ref { type_, .. } => is_of_type_or_not(type_, rhs, not, en.symbol_table()),
         Expression::SymbolicRef { var, .. } => {
             let alias_entry = &mut state.alias_map[var];
-            alias_entry.aliases.iter().all(|alias| {
-                is_of_type_or_not(alias.as_ref(), rhs, not, en.symbol_table())
-            })
+            alias_entry
+                .aliases
+                .iter()
+                .all(|alias| is_of_type_or_not(alias.as_ref(), rhs, not, en.symbol_table()))
         }
         _ => panic!("expected ref or symbolic ref"),
     }
@@ -1830,14 +1829,12 @@ fn assume_type_guard(state: &mut State, type_guard: &TypeExpr, en: &mut impl Eng
     };
 
     match get_expression_for_var(state, var, en).as_ref() {
-        Expression::Ref { type_, .. } => {
-            is_of_type_or_not(type_, rhs, not, en.symbol_table())
-        }
+        Expression::Ref { type_, .. } => is_of_type_or_not(type_, rhs, not, en.symbol_table()),
         Expression::SymbolicRef { var, .. } => {
             let alias_entry = &mut state.alias_map[var];
-            alias_entry.aliases.retain(|alias| {
-                is_of_type_or_not(alias.as_ref(), rhs, not, en.symbol_table())
-            });
+            alias_entry
+                .aliases
+                .retain(|alias| is_of_type_or_not(alias.as_ref(), rhs, not, en.symbol_table()));
 
             alias_entry.aliases.len() > 0
         }
@@ -1876,6 +1873,8 @@ pub struct Options {
     pub quiet: bool,
     pub with_exceptional_clauses: bool,
     pub heuristic: Heuristic,
+    pub visualize_heuristic: bool,
+    pub visualize_coverage: bool,
 }
 
 impl Options {
@@ -1885,15 +1884,15 @@ impl Options {
             quiet: false,
             with_exceptional_clauses: true,
             heuristic: Heuristic::DepthFirstSearch,
+            visualize_heuristic: false,
+            visualize_coverage: false,
         }
     }
 
     pub fn default_with_k_and_heuristic(k: u64, heuristic: Heuristic) -> Options {
         Options {
-            k,
-            quiet: false,
-            with_exceptional_clauses: true,
-            heuristic: heuristic,
+            heuristic,
+            ..Self::default_with_k(k)
         }
     }
 }
@@ -2051,6 +2050,7 @@ pub fn verify(
         path_counter.clone(),
         &mut statistics,
         entry_method.clone(),
+        options.visualize_heuristic,
     );
 
     let duration = start.elapsed();
@@ -2074,6 +2074,18 @@ pub fn verify(
         }
         SymResult::Invalid(SourcePos::UnknownPosition) => "INVALID at unknown position".to_string(),
     };
+
+    if options.visualize_coverage {
+        let contents = pretty_print_compilation_unit(
+            &|pc: u64| {
+                Some(format!("pc: {}, covered: {}", pc, statistics.coverage.contains(&pc).to_string()))
+            },
+            &program,
+            &flows,
+            &symbol_table,
+        );
+        std::fs::write("coverage_visualized.txt", contents).unwrap();
+    }
 
     if options.quiet && sym_result != SymResult::Valid {
         println!("{}", result_text);

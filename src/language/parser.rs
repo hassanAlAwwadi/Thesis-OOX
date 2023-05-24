@@ -916,14 +916,20 @@ fn exceptional_assignment(
 fn exceptional_lhs(lhs: &Lhs) -> HashSet<Rc<Expression>> {
     match lhs {
         Lhs::LhsVar { .. } => HashSet::new(),
-        Lhs::LhsField { var, var_type, .. } => HashSet::from([equal(
-            Expression::Var {
-                info: var.get_position(),
-                var: var.clone(),
-                type_: var_type.clone(),
-            },
-            Expression::NULL,
-        )]),
+        Lhs::LhsField { var, var_type, .. } => {
+            if var.as_ref() == "this" {
+                HashSet::new()
+            } else {
+                HashSet::from([equal(
+                    Expression::Var {
+                        info: var.get_position(),
+                        var: var.clone(),
+                        type_: var_type.clone(),
+                    },
+                    Expression::NULL,
+                )])
+            }
+        }
         Lhs::LhsElem {
             var,
             index,
@@ -952,7 +958,23 @@ fn exceptional_lhs(lhs: &Lhs) -> HashSet<Rc<Expression>> {
 fn exceptional_rhs(rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Rc<Expression>> {
     match rhs {
         Rhs::RhsExpression { value, .. } => exceptional_expression(value),
-        Rhs::RhsField { var, .. } => HashSet::from([equal(var.clone(), Expression::NULL)]),
+        Rhs::RhsField { var, .. } => {
+            let var_name = if let Expression::Var {
+                var: var_name,
+                type_: _,
+                ..
+            } = var
+            {
+                var_name
+            } else {
+                panic!("expected variable in rhs elem, found: {:?}", var)
+            };
+            if var_name.as_ref() == "this" {
+                HashSet::new()
+            } else {
+                HashSet::from([equal(var.clone(), Expression::NULL)])
+            }
+        }
         Rhs::RhsElem { var, index, .. } => {
             let var_name = if let Expression::Var {
                 var: var_name,
@@ -1062,6 +1084,9 @@ fn exceptional_invoke_method(
     arguments: &Vec<Rc<Expression>>,
     class_names: &[Identifier],
 ) -> HashSet<Rc<Expression>> {
+    if lhs.as_ref() == "this" {
+        return HashSet::new();
+    }
     let exceptional_args: HashSet<_> = arguments
         .into_iter()
         .flat_map(|arg| exceptional_expression(arg).into_iter())

@@ -139,6 +139,7 @@ pub(crate) fn sym_exec(
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &mut Statistics,
     entry_method: crate::cfg::MethodIdentifier,
+    visualize_heuristic: bool,
 ) -> SymResult {
     sym_exec_execution_tree(
         state,
@@ -151,6 +152,7 @@ pub(crate) fn sym_exec(
         statistics,
         entry_method,
         RandomPath::new(),
+        visualize_heuristic,
     )
 }
 

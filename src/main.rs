@@ -30,6 +30,14 @@ enum Commands {
         // The heuristic used to choose branches
         #[arg(value_enum, long, default_value_t = lib::Heuristic::DepthFirstSearch)]
         heuristic: lib::Heuristic,
+
+        // After execution it prints a visualization of the coverage for each method.
+        #[arg(short, long, default_value_t = false)]
+        visualize_coverage: bool,
+
+        // Will create a file visualize.txt, showing the current program exploration guided by heuristic.
+        #[arg(short, long, default_value_t = false)]
+        visualize_heuristic: bool,
     },
     /// Parse and typecheck an OOX source file
     Check {
@@ -45,9 +53,9 @@ enum Commands {
 fn main() -> Result<(), String> {
     let args = Args::parse();
     match args.command {
-        Commands::Verify { source_paths, k, function, quiet, heuristic } => {
+        Commands::Verify { source_paths, k, function, quiet, heuristic, visualize_heuristic, visualize_coverage } => {
             if let Some((class_name, method_name)) = function.split(".").collect_tuple() {
-                let options = Options {k, quiet, with_exceptional_clauses: true, heuristic};
+                let options = Options {k, quiet, with_exceptional_clauses: true, heuristic, visualize_heuristic, visualize_coverage};
                 verify(
                     source_paths.as_slice(),
                     class_name,

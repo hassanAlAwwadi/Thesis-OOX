@@ -26,7 +26,7 @@ pub mod random_path;
 pub mod round_robin;
 
 type Cost = u64;
-type ProgramCounter = u64;
+pub type ProgramCounter = u64;
 
 mod execution_tree;
 mod utils;

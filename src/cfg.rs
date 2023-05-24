@@ -644,11 +644,11 @@ pub mod utils {
 
 #[test]
 fn cfg_for_min() {
-    use crate::language;
+    use crate::{language, insert_exceptional_clauses};
     let file_content = include_str!("../examples/psv/min.oox");
 
     let c = language::parse_program(file_content, 0).unwrap();
-    let c = crate::insert_exceptional_clauses(c);
+    let c = insert_exceptional_clauses(c);
 
     // //dbg!(&c);
 

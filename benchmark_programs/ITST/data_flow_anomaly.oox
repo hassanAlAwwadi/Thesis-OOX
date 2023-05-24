@@ -1,0 +1,103 @@
+class Field {
+
+    int i;
+
+    Field() {}
+
+    void use() {
+        int i := this.i;
+        this.i := i + 1;
+    }
+}
+
+
+class A {
+    Field t;
+    Field u;
+    Field v;
+    Field w;
+
+    A() {}
+
+    void d() {
+        this.g();
+    }
+
+    void g() {
+        this.h();
+    }
+
+    void h() {
+        this.u := new Field();
+        this.w := new Field();
+        this.i();
+    }
+
+    void i() {
+        Field u := this.u;
+        u.use();
+        this.j();
+    }
+
+    void j() {
+        this.v := new Field();
+        Field w := this.w;
+        w.use();
+    }
+
+    void l() {
+        Field v := this.v;
+        v.use();
+    }
+}
+
+class B extends A {
+    Field x;
+
+    B() {}
+
+    void h() {
+        this.x := new Field();
+        this.i();
+    }
+
+    void i() {
+        Field x := this.x;
+        x.use();
+        super.i();
+    }
+
+    void k() {
+        this.l();
+    }
+}
+
+class C extends B {
+    Field y;
+
+    C() {}
+
+    void i() {
+        this.y := new Field();
+        super.i();
+    }
+
+    void j() {
+        Field y := this.y;
+        y.use();
+        this.k();
+    }
+
+    void l() {
+        Field v := this.v;
+        v.use();
+    }
+}
+
+
+class Test {
+    static void test1(A a)
+        exceptional(true) {
+        a.d();
+    }
+}

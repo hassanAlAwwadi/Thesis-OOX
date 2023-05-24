@@ -11,7 +11,7 @@ pub struct Statistics {
     // Coverage
     pub reachable_statements: u32,
     pub covered_statements: u32,
-    coverage: HashSet<u64>,
+    pub coverage: HashSet<u64>,
 }
 
 impl Default for Statistics {

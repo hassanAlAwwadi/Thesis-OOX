@@ -64,6 +64,7 @@ pub(crate) fn sym_exec(
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &mut Statistics,
     entry_method: crate::cfg::MethodIdentifier,
+    visualize_heuristic: bool,
 ) -> SymResult {
     let heuristic = RoundRobin::md2u_with_random_path();
     sym_exec_execution_tree(
@@ -77,5 +78,6 @@ pub(crate) fn sym_exec(
         statistics,
         entry_method,
         heuristic,
+        visualize_heuristic,
     )
 }
