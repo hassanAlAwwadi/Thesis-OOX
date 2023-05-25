@@ -9,10 +9,9 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 
 use crate::{
-    cfg::{CFGStatement, MethodIdentifier, self},
+    cfg::{self, CFGStatement, MethodIdentifier},
     exec::find_entry_for_static_invocation,
     symbol_table::SymbolTable,
-    Invocation, Rhs, Statement,
 };
 
 use super::super::{Cost, ProgramCounter};
@@ -111,7 +110,7 @@ impl CumulativeCost {
 /// Returns:
 ///  - the distance of this method to the closest uncovered statement, or the end of the method.
 ///  - a mapping for every program counter explored to its distance
-///  - a cache for methods explored may be reused.
+///  - and mutably updates the cache for methods explored.
 pub(crate) fn min_distance_to_uncovered_method<'a>(
     method: &MethodIdentifier,
     coverage: &HashMap<ProgramCounter, usize>,
@@ -145,13 +144,7 @@ fn min_distance_to_uncovered_method_with_visited<'a>(
     cache: &mut Cache,
 ) -> (Distance, HashMap<ProgramCounter, Distance>) {
     let (cost, pc_to_cost) = min_distance_to_uncovered_method_helper(
-        method,
-        coverage,
-        program,
-        flow,
-        st,
-        visited,
-        cache,
+        method, coverage, program, flow, st, visited, cache,
     );
 
     // dbg!(&cost, &method);
@@ -217,7 +210,6 @@ fn min_distance_to_uncovered_method_helper<'a>(
 
     let method_body_cost = min_distance_to_statement(
         pc,
-        &method,
         coverage,
         program,
         flow,
@@ -263,11 +255,11 @@ fn min_distance_to_uncovered_method_helper<'a>(
     (method_body_cost, pc_to_cost)
 }
 
-/// Computes the minimal distance to uncovered methods for all program counters in this method
+/// Computes the minimal distance to uncovered methods for all program counters in the method of `pc`.
+/// `pc`is usually the entry of a method.
 /// Recursively computes the minimal distance for any method calls referenced.
 fn min_distance_to_statement<'a>(
     pc: ProgramCounter,
-    method: &MethodIdentifier,
     coverage: &HashMap<ProgramCounter, usize>,
     program: &'a HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
@@ -320,7 +312,9 @@ fn min_distance_to_statement<'a>(
                 multiple => {
                     let mut remaining_costs = multiple.iter().map(|next_pc| {
                         if let CFGStatement::While(_, _) = &program[&next_pc] {
-                            if visited.contains(next_pc) && cfg::utils::while_body_pcs(*next_pc, flow, program).contains(&pc) {
+                            if visited.contains(next_pc)
+                                && cfg::utils::while_body_pcs(*next_pc, flow, program).contains(&pc)
+                            {
                                 // Cycle detected (while loop or recursive function)
                                 return (next_pc, CumulativeCost::Cycle(*next_pc));
                             }
@@ -376,21 +370,27 @@ fn min_distance_to_statement<'a>(
                 pc_to_cost.insert(pc, cost.clone());
             }
             CumulativeCost::Plus(_, _) => {
-                let cost =
-                    CumulativeCost::Plus(Box::new(cost_of_this_statement), Box::new(remaining_cost));
+                let cost = CumulativeCost::Plus(
+                    Box::new(cost_of_this_statement),
+                    Box::new(remaining_cost),
+                );
 
                 pc_to_cost.insert(pc, cost.clone());
             }
             CumulativeCost::UnexploredMethodCall(_) => {
-                let cost =
-                    CumulativeCost::Plus(Box::new(cost_of_this_statement), Box::new(remaining_cost));
+                let cost = CumulativeCost::Plus(
+                    Box::new(cost_of_this_statement),
+                    Box::new(remaining_cost),
+                );
                 pc_to_cost.insert(pc, cost.clone());
             }
             CumulativeCost::Cycle(_pc) => unreachable!(),
 
             CumulativeCost::Minimal(_, _) => {
-                let cost =
-                    CumulativeCost::Plus(Box::new(cost_of_this_statement), Box::new(remaining_cost));
+                let cost = CumulativeCost::Plus(
+                    Box::new(cost_of_this_statement),
+                    Box::new(remaining_cost),
+                );
                 pc_to_cost.insert(pc, cost.clone());
             }
         }
@@ -538,7 +538,7 @@ fn reduce(c: &CumulativeCost) -> Option<Distance> {
             }
         }
         CumulativeCost::Cycle(_) => None,
-        _ => unreachable!("{:?}", c),
+        // _ => unreachable!("{:?}", c),
     }
 }
 
@@ -642,9 +642,9 @@ fn minimize(a: CumulativeCost, b: CumulativeCost) -> CumulativeCost {
 mod tests {
 
     use crate::{
-        cfg::labelled_statements, parse_program,
+        cfg::labelled_statements, insert_exceptional_clauses, parse_program,
         prettyprint::cfg_pretty::pretty_print_compilation_unit, typing::type_compilation_unit,
-        utils, RuntimeType, insert_exceptional_clauses,
+        utils, RuntimeType,
     };
 
     use super::*;
@@ -705,13 +705,16 @@ mod tests {
         let path = "./examples/reachability/while.oox";
         let (coverage, program, flows, symbol_table) = setup(path);
 
-        let s =
-            pretty_print_compilation_unit(&|pc| format!("{}", pc).into(), &program, &flows, &symbol_table);
+        let s = pretty_print_compilation_unit(
+            &|pc| format!("{}", pc).into(),
+            &program,
+            &flows,
+            &symbol_table,
+        );
         println!("{}", s);
 
-
         let mut cache = Cache::new();
-        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
+        let (_cost, pc_to_cost) = min_distance_to_uncovered_method(
             &MethodIdentifier {
                 method_name: "main".to_string(),
                 decl_name: "Main".to_string(),
@@ -739,8 +742,8 @@ mod tests {
 
         assert_eq!(pc_to_cost, expected_result);
 
-
-        let s = pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
+        let s =
+            pretty_print_compilation_unit(&decorator(&pc_to_cost), &program, &flows, &symbol_table);
         println!("{}", s);
         // dbg!(cost, pc_to_cost, cache);
     }
@@ -754,7 +757,7 @@ mod tests {
         coverage.remove(&12);
 
         let mut cache = Cache::new();
-        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
+        let (_cost, pc_to_cost) = min_distance_to_uncovered_method(
             &MethodIdentifier {
                 method_name: "main".to_string(),
                 decl_name: "Main".to_string(),
@@ -797,7 +800,7 @@ mod tests {
             arg_list: vec![RuntimeType::IntRuntimeType; 1],
         };
         let mut cache = Cache::new();
-        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
+        let (_cost, pc_to_cost) = min_distance_to_uncovered_method(
             &method,
             &coverage,
             &program,
@@ -848,7 +851,7 @@ mod tests {
             arg_list: vec![RuntimeType::IntRuntimeType; 1],
         };
 
-        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
+        let (_cost, pc_to_cost) = min_distance_to_uncovered_method(
             &entry_method,
             &coverage,
             &program,
@@ -892,7 +895,7 @@ mod tests {
     #[test]
     fn md2u_recursive3() {
         let path = "./examples/reachability/recursive2.oox";
-        let (mut coverage, program, flows, symbol_table) = setup(path);
+        let (coverage, program, flows, symbol_table) = setup(path);
 
         let mut cache = Cache::new();
         let entry_method = MethodIdentifier {
@@ -901,7 +904,7 @@ mod tests {
             arg_list: vec![RuntimeType::IntRuntimeType; 1],
         };
 
-        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
+        let (_cost, pc_to_cost) = min_distance_to_uncovered_method(
             &entry_method,
             &coverage,
             &program,
@@ -964,7 +967,7 @@ mod tests {
         let (coverage, program, flows, symbol_table) = setup(path);
 
         let mut cache = Cache::new();
-        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
+        let (_cost, pc_to_cost) = min_distance_to_uncovered_method(
             &MethodIdentifier {
                 method_name: "main".to_string(),
                 decl_name: "Main".to_string(),
@@ -1032,7 +1035,7 @@ mod tests {
             ],
         };
 
-        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
+        let (_cost, pc_to_cost) = min_distance_to_uncovered_method(
             &entry_method,
             &coverage,
             &program,
@@ -1070,7 +1073,7 @@ mod tests {
             arg_list: vec![RuntimeType::IntRuntimeType],
         };
 
-        let (cost, pc_to_cost) = min_distance_to_uncovered_method(
+        let (_cost, pc_to_cost) = min_distance_to_uncovered_method(
             &entry_method,
             &coverage,
             &program,

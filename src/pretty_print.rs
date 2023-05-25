@@ -1,12 +1,7 @@
-use std::{
-    fmt::{Debug, Display},
-    rc::Rc,
-};
+use std::fmt::{Debug, Display};
 
 use crate::{
-    syntax::{
-        BinOp, Expression, Invocation, Lhs, Lit, NonVoidType, Rhs, RuntimeType, Statement, UnOp,
-    },
+    syntax::{BinOp, Expression, Invocation, Lhs, Lit, Rhs, RuntimeType, UnOp},
     typeable::Typeable,
 };
 
@@ -15,11 +10,7 @@ impl Debug for Expression {
         fn helper(expression: &Expression, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match expression {
                 Expression::BinOp {
-                    bin_op,
-                    lhs,
-                    rhs,
-                    type_,
-                    info,
+                    bin_op, lhs, rhs, ..
                 } => {
                     let op_str = match bin_op {
                         BinOp::Implies => "==>",
@@ -56,12 +47,7 @@ impl Debug for Expression {
                     helper(rhs, f)?;
                     // }
                 }
-                Expression::UnOp {
-                    un_op,
-                    value,
-                    type_,
-                    info,
-                } => {
+                Expression::UnOp { un_op, value, .. } => {
                     match un_op {
                         UnOp::Negative => write!(f, "-")?,
                         UnOp::Negate => write!(f, "!")?,
@@ -70,9 +56,9 @@ impl Debug for Expression {
                     helper(value, f)?;
                     write!(f, ")")?;
                 }
-                Expression::Var { var, type_, info } => write!(f, "{}", var)?,
-                Expression::SymbolicVar { var, type_, info } => write!(f, "${}", var)?,
-                Expression::Lit { lit, type_, info } => match lit {
+                Expression::Var { var, .. } => write!(f, "{}", var)?,
+                Expression::SymbolicVar { var, .. } => write!(f, "${}", var)?,
+                Expression::Lit { lit, .. } => match lit {
                     Lit::NullLit => write!(f, "null")?,
                     Lit::BoolLit { bool_value } => write!(f, "{}", bool_value)?,
                     Lit::UIntLit { uint_value } => write!(f, "{}", uint_value)?,
@@ -82,14 +68,13 @@ impl Debug for Expression {
                     Lit::CharLit { char_value } => write!(f, "{}", char_value)?,
                 },
                 Expression::SizeOf { var, .. } => write!(f, "#{}", var)?,
-                Expression::Ref { ref_, type_, info } => write!(f, "#{}", ref_)?,
-                Expression::SymbolicRef { var, type_, info } => write!(f, "%{}", var)?,
+                Expression::Ref { ref_, .. } => write!(f, "#{}", ref_)?,
+                Expression::SymbolicRef { var, .. } => write!(f, "%{}", var)?,
                 Expression::Conditional {
                     guard,
                     true_,
                     false_,
-                    type_,
-                    info,
+                    ..
                 } => {
                     helper(guard, f)?;
                     write!(f, " ? ")?;
@@ -118,8 +103,7 @@ impl Debug for Expression {
                     range,
                     domain,
                     formula,
-                    type_,
-                    info,
+                    ..
                 } => {
                     // exists elem, index : a : elem > 0
                     write!(f, "exists {}, {} : {} : ", elem, range, domain)?;
@@ -245,10 +229,7 @@ impl Display for Rhs {
                 write!(f, "{}: {}", invocation, type_)
             }
             Rhs::RhsArray {
-                array_type,
-                sizes,
-                type_,
-                ..
+                array_type, sizes, ..
             } => {
                 write!(f, "new {}", array_type.type_of())?;
                 for size in sizes {
@@ -256,7 +237,7 @@ impl Display for Rhs {
                 }
                 Ok(())
             }
-            Rhs::RhsCast { cast_type, var, info } => todo!(),
+            Rhs::RhsCast { .. } => unimplemented!(),
         }
     }
 }
@@ -298,11 +279,7 @@ impl Display for Invocation {
                 }
                 write!(f, ")")
             }
-            Self::InvokeSuperConstructor {
-                arguments,
-                resolved,
-                ..
-            } => {
+            Self::InvokeSuperConstructor { arguments, .. } => {
                 write!(f, "super(")?;
                 for arg in arguments {
                     write!(f, "{:?}", arg)?;
@@ -314,24 +291,29 @@ impl Display for Invocation {
     }
 }
 
-#[test]
-fn test() {
-    let e = Expression::BinOp {
-        bin_op: BinOp::Implies,
-        lhs: Rc::new(Expression::Var {
-            var: "x".into(),
-            type_: RuntimeType::ANYRuntimeType,
-            info: crate::positioned::SourcePos::UnknownPosition,
-        }),
-        rhs: Rc::new(Expression::Var {
-            var: "y".into(),
-            type_: RuntimeType::ANYRuntimeType,
-            info: crate::positioned::SourcePos::UnknownPosition,
-        }),
-        type_: RuntimeType::ANYRuntimeType,
-        info: crate::positioned::SourcePos::UnknownPosition,
-    };
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let s = format!("{:?}", e);
-    assert_eq!(s, "x ==> y".to_string());
+    #[test]
+    fn test() {
+        let e = Expression::BinOp {
+            bin_op: BinOp::Implies,
+            lhs: std::rc::Rc::new(Expression::Var {
+                var: "x".into(),
+                type_: RuntimeType::ANYRuntimeType,
+                info: crate::positioned::SourcePos::UnknownPosition,
+            }),
+            rhs: std::rc::Rc::new(Expression::Var {
+                var: "y".into(),
+                type_: RuntimeType::ANYRuntimeType,
+                info: crate::positioned::SourcePos::UnknownPosition,
+            }),
+            type_: RuntimeType::ANYRuntimeType,
+            info: crate::positioned::SourcePos::UnknownPosition,
+        };
+
+        let s = format!("{:?}", e);
+        assert_eq!(s, "x ==> y".to_string());
+    }
 }

@@ -331,8 +331,8 @@ fn type_statement(
                         let guard = type_expression(guard.clone(), env, st)?;
                         matches_type(&guard, RuntimeType::BoolRuntimeType, st)?;
                         Either::Left(Rc::new(guard))
-                    },
-                    type_guard => type_guard
+                    }
+                    type_guard => type_guard,
                 };
                 let mut env = env.clone();
                 let true_body = type_statement(
@@ -595,13 +595,19 @@ fn type_rhs(
                 info,
             })
         }
-        Rhs::RhsCast { cast_type, var, info } => {
+        Rhs::RhsCast {
+            cast_type,
+            var,
+            info,
+        } => {
             let var_type = env.get_var_type(&var)?;
             matches_type(cast_type.clone(), var_type, st)?;
-            Ok(
-                Rhs::RhsCast { cast_type, var, info }
-            )
-        },
+            Ok(Rhs::RhsCast {
+                cast_type,
+                var,
+                info,
+            })
+        }
     }
 }
 

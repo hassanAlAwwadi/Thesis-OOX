@@ -1,7 +1,7 @@
-use std::{fs::read_to_string, rc::Rc};
+use std::rc::Rc;
 
-use itertools::{Itertools, Either};
-use pretty::{docs, Arena, BoxAllocator, DocAllocator, DocBuilder};
+use itertools::{Either, Itertools};
+use pretty::{docs, DocAllocator, DocBuilder};
 
 // use super::{BinOp, Expression};
 
@@ -118,7 +118,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a DeclarationMember {
         match self {
             DeclarationMember::Constructor(method) => pretty_constructor(method, allocator),
             DeclarationMember::Method(method) => method.pretty(allocator),
-            DeclarationMember::Field { type_, name, info } => {
+            DeclarationMember::Field { type_, name, .. } => {
                 docs![
                     allocator,
                     type_.type_of().pretty(allocator),
@@ -219,32 +219,38 @@ fn specifications<'a, D: DocAllocator<'a>>(
                 ]),
                 ")"
             ]),
-        specification.ensures.clone().map(|(ensures, type_ensures)| docs![
-            allocator,
-            allocator.hardline(),
-            "ensures",
-            "(",
-            ensures.pretty(allocator),
+        specification
+            .ensures
+            .clone()
+            .map(|(ensures, type_ensures)| docs![
+                allocator,
+                allocator.hardline(),
+                "ensures",
+                "(",
+                ensures.pretty(allocator),
                 type_ensures.clone().map(|type_guard| docs![
                     allocator,
                     ", ",
                     type_expr(&type_guard, allocator)
                 ]),
-            ")"
-        ]),
-        specification.exceptional.clone().map(|(exceptional, type_exceptional)| docs![
-            allocator,
-            allocator.hardline(),
-            "exceptional",
-            "(",
-            exceptional.pretty(allocator),
+                ")"
+            ]),
+        specification
+            .exceptional
+            .clone()
+            .map(|(exceptional, type_exceptional)| docs![
+                allocator,
+                allocator.hardline(),
+                "exceptional",
+                "(",
+                exceptional.pretty(allocator),
                 type_exceptional.clone().map(|type_guard| docs![
                     allocator,
                     ", ",
                     type_expr(&type_guard, allocator)
                 ]),
-            ")"
-        ])
+                ")"
+            ])
     ]
     .nest(2)
     .append(allocator.hardline())
@@ -277,7 +283,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a Parameter {
 impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Expression {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
         let comma = || allocator.text(",");
-        let colon = || allocator.text(":");
+        let _colon = || allocator.text(":");
 
         match self {
             Expression::Var { var, .. } => allocator.text(var.to_string()),
@@ -374,21 +380,18 @@ fn if_guard<'a, D: DocAllocator<'a>>(
 ) -> DocBuilder<'a, D, ()> {
     match assumption {
         Either::Left(assumption) => pretty::Pretty::pretty(assumption.as_ref(), allocator),
-        Either::Right(assumption) => type_expr(&assumption, allocator)
+        Either::Right(assumption) => type_expr(&assumption, allocator),
     }
 }
 
-fn type_expr<'a, D: DocAllocator<'a>>(
-    expr: &TypeExpr,
-    allocator: &'a D,
-) -> DocBuilder<'a, D, ()> {
+fn type_expr<'a, D: DocAllocator<'a>>(expr: &TypeExpr, allocator: &'a D) -> DocBuilder<'a, D, ()> {
     match expr {
         TypeExpr::InstanceOf { var, rhs, .. } => {
             docs![allocator, var.to_string(), " instanceof ", rhs]
         }
-        TypeExpr::NotInstanceOf { var, rhs, .. } => 
-        
-        docs![allocator, "!", var.to_string(), " instanceof ", rhs]
+        TypeExpr::NotInstanceOf { var, rhs, .. } => {
+            docs![allocator, "!", var.to_string(), " instanceof ", rhs]
+        }
     }
 }
 
@@ -540,9 +543,8 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Rhs {
                 }
                 result
             }
-            Rhs::RhsCast { cast_type, var, info } => 
-            docs![
-                allocator, 
+            Rhs::RhsCast { cast_type, var, .. } => docs![
+                allocator,
                 cast_type.type_of().pretty(allocator).parens(),
                 " ",
                 var.to_string()
@@ -696,7 +698,7 @@ pub mod cfg_pretty {
         F: Fn(u64) -> Option<String>,
     {
         let allocator = BoxAllocator;
-        let mut result = allocator.nil();
+        let mut result;
 
         if let CFGStatement::FunctionEntry {
             decl_name,
@@ -723,7 +725,7 @@ pub mod cfg_pretty {
             let next_statement = flow[&function_entry][0];
             let next = program
                 .iter()
-                .find(|(k, v)| {
+                .find(|(_k, v)| {
                     if let CFGStatement::Seq(a, _) = v {
                         next_statement == *a
                     } else {
@@ -947,7 +949,7 @@ fn feature() {
     use crate::{language::lexer::tokens, parser::expression};
     let tokens = tokens("x && y", 0).unwrap();
     let exp = expression().parse(&tokens).unwrap();
-    let allocator = BoxAllocator;
+    let allocator = pretty::BoxAllocator;
     println!("{}", pretty::Pretty::pretty(&exp, &allocator).1.pretty(10));
 }
 

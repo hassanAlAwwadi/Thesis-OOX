@@ -14,7 +14,7 @@ use crate::{
 
 use super::{
     exec_method, exec_static_method, find_entry_for_static_invocation, remove_symbolic_null,
-    state_split::{split_states_with_aliases, self},
+    state_split::{self, split_states_with_aliases},
     ActionResult, Engine,
 };
 
@@ -185,12 +185,21 @@ pub(super) fn multiple_method_invocation(
                 //dbg!(resulting_alias.keys());
 
                 // We need to split states such that each resulting path has a single type for the object in the alias map.
-                let symbolic_object_ref  = var.clone();
+                let symbolic_object_ref = var.clone();
                 split_states_with_aliases(en, state, symbolic_object_ref, resulting_alias);
                 // Try again with updated states.
-                return multiple_method_invocation(state, invocation_lhs, invocation, potential_methods, return_point, lhs, program, en);
+                return multiple_method_invocation(
+                    state,
+                    invocation_lhs,
+                    invocation,
+                    potential_methods,
+                    return_point,
+                    lhs,
+                    program,
+                    en,
+                );
             }
-        },
+        }
         Expression::Conditional {
             guard,
             true_,
@@ -206,7 +215,16 @@ pub(super) fn multiple_method_invocation(
                 invocation_lhs.clone(),
             );
             // Try again with split states.
-            return multiple_method_invocation(state, invocation_lhs, invocation, potential_methods, return_point, lhs, program, en);
+            return multiple_method_invocation(
+                state,
+                invocation_lhs,
+                invocation,
+                potential_methods,
+                return_point,
+                lhs,
+                program,
+                en,
+            );
         }
         _ => unreachable!("Expected Ref or SymbolicRef, found {:?}", object),
     };
@@ -273,7 +291,7 @@ fn non_static_resolved_method_invocation(
         en,
         this,
     );
-    
+
     let next_entry = find_entry_for_static_invocation(
         class_name,
         invocation.identifier(),

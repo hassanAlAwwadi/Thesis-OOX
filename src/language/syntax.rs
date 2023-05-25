@@ -2,8 +2,8 @@ use derivative::Derivative;
 use itertools::Either;
 use ordered_float::NotNan;
 
-mod identifier;
 mod classes;
+mod identifier;
 mod interfaces;
 
 pub use identifier::*;
@@ -11,22 +11,14 @@ pub use identifier::*;
 pub type Reference = i64;
 
 pub type Float = NotNan<f64>;
-use std::{
-    cell::{Cell, Ref, RefCell},
-    collections::HashMap,
-    fmt::{Debug, Display},
-    ops::Deref,
-    rc::{Rc, Weak},
-    str::FromStr,
-};
+use std::{cell::RefCell, collections::HashMap, fmt::Debug, ops::Deref, rc::Rc};
 
-use crate::{positioned::SourcePos, typeable::Typeable, cfg::MethodIdentifier};
+use crate::{cfg::MethodIdentifier, positioned::SourcePos, typeable::Typeable};
 
 pub use self::{
     classes::Class, interfaces::find_interface_method, interfaces::Interface,
     interfaces::InterfaceMember,
 };
-
 
 #[derive(Debug, Derivative)]
 #[derivative(PartialEq, Eq)]
@@ -134,7 +126,7 @@ impl Method {
         self.specification.exceptional.clone()
     }
 
-    pub fn param_types<'a>(&'a self) -> impl Iterator<Item=RuntimeType> + 'a {
+    pub fn param_types<'a>(&'a self) -> impl Iterator<Item = RuntimeType> + 'a {
         self.params.iter().map(|p| p.type_of())
     }
 }
@@ -203,8 +195,7 @@ impl DeclarationMember {
     }
 }
 
-#[derive(Debug, Clone, Derivative)]
-#[derive(Eq, PartialEq)]
+#[derive(Debug, Clone, Derivative, Eq, PartialEq)]
 pub struct Parameter {
     pub type_: NonVoidType,
     pub name: Identifier,
@@ -305,7 +296,7 @@ pub enum Statement {
     Seq {
         stat1: Box<Statement>,
         stat2: Box<Statement>,
-    }
+    },
 }
 
 #[derive(Clone, Derivative)]
@@ -369,9 +360,8 @@ impl Invocation {
     //     }
     // }
 
-    pub fn argument_types(&self) -> impl ExactSizeIterator<Item=RuntimeType> + '_ + Clone {
-        self
-            .arguments()
+    pub fn argument_types(&self) -> impl ExactSizeIterator<Item = RuntimeType> + '_ + Clone {
+        self.arguments()
             .iter()
             .map(AsRef::as_ref)
             .map(Typeable::type_of)
@@ -395,9 +385,8 @@ impl Invocation {
         }
     }
 
-
     /// Returns a list of methods that could be called at runtime depending on the runtimetype, by this invocation.
-pub fn methods_called<'a>(&'a self) -> Vec<MethodIdentifier> {
+    pub fn methods_called<'a>(&'a self) -> Vec<MethodIdentifier> {
         match self {
             Invocation::InvokeMethod { resolved, .. } => {
                 // A regular method can resolve to multiple different methods due to dynamic dispatch, depending on the runtime type of the object.
@@ -440,7 +429,7 @@ impl Debug for Invocation {
                 rhs,
                 arguments,
                 resolved,
-                info,
+                ..
             } => f
                 .debug_struct("InvokeMethod")
                 .field("lhs", lhs)
@@ -452,7 +441,7 @@ impl Debug for Invocation {
                 rhs,
                 arguments,
                 resolved,
-                info,
+                ..
             } => f
                 .debug_struct("InvokeSuperMethod")
                 .field("rhs", rhs)
@@ -463,7 +452,7 @@ impl Debug for Invocation {
                 class_name,
                 arguments,
                 resolved,
-                info,
+                ..
             } => f
                 .debug_struct("InvokeConstructor")
                 .field("class_name", class_name)
@@ -473,7 +462,7 @@ impl Debug for Invocation {
             Self::InvokeSuperConstructor {
                 arguments,
                 resolved,
-                info,
+                ..
             } => f
                 .debug_struct("InvokeSuperConstructor")
                 .field("arguments", arguments)
@@ -559,7 +548,7 @@ pub enum Rhs {
 
         #[derivative(PartialEq = "ignore")]
         info: SourcePos,
-    }
+    },
 }
 
 #[derive(Clone, Derivative)]
@@ -650,7 +639,7 @@ pub enum Expression {
 
         #[derivative(PartialEq = "ignore", Hash = "ignore")]
         info: SourcePos,
-    }
+    },
 }
 
 impl Expression {
@@ -836,16 +825,16 @@ pub enum TypeExpr {
     NotInstanceOf {
         var: Identifier,
         rhs: RuntimeType,
-        
+
         #[derivative(PartialEq = "ignore", Hash = "ignore")]
         info: SourcePos,
-    }
+    },
 }
 
 impl TypeExpr {
     pub fn not(self) -> TypeExpr {
         match self {
-            TypeExpr::InstanceOf { var, rhs, info } => TypeExpr::NotInstanceOf {var, rhs, info},
+            TypeExpr::InstanceOf { var, rhs, info } => TypeExpr::NotInstanceOf { var, rhs, info },
             TypeExpr::NotInstanceOf { var, rhs, info } => TypeExpr::InstanceOf { var, rhs, info },
         }
     }

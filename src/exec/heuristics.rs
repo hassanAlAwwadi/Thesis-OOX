@@ -1,12 +1,7 @@
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    ops::DerefMut,
-    rc::{Rc, Weak},
-};
+use std::{cell::RefCell, collections::HashMap, ops::DerefMut, rc::Rc};
 
 use itertools::Itertools;
-use slog::{Logger};
+use slog::Logger;
 
 use crate::{
     cfg::CFGStatement,
@@ -73,7 +68,6 @@ fn execute_instruction_for_all_states(
         let next = action(
             &mut state,
             program,
-            k,
             &mut crate::exec::DFSEngine {
                 remaining_states: &mut remaining_states,
                 path_counter: path_counter.clone(),
@@ -125,7 +119,7 @@ fn execute_instruction_for_all_states(
                     resulting_states.entry(state.pc).or_default().push(state);
                 } else {
                     // Function exit of the main function under verification
-                    if let CFGStatement::FunctionExit { decl_name, .. } = &program[&state.pc] {
+                    if let CFGStatement::FunctionExit { .. } = &program[&state.pc] {
                         // Valid program exit, continue
                         statistics.measure_finish();
                     } else {
@@ -162,7 +156,7 @@ fn execute_instruction_for_all_states(
 ///
 /// TODO:
 /// Removing any branching node where there is only one unpruned/unfinished state left.
-fn finish_state_in_path(mut leaf: Rc<RefCell<ExecutionTree>>, path: Vec<ProgramCounter>) -> bool {
+fn finish_state_in_path(mut leaf: Rc<RefCell<ExecutionTree>>) -> bool {
     loop {
         let parent = if let Some(parent) = leaf.borrow().parent().upgrade() {
             parent

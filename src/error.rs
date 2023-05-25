@@ -101,11 +101,7 @@ pub fn cannot_call_super_method_on_interface_methods(
     )
 }
 
-pub fn expected_superclass(
-    class_name: &Identifier,
-    method_name: &Identifier,
-    info: SourcePos,
-) -> String {
+pub fn expected_superclass(class_name: &Identifier, info: SourcePos) -> String {
     format!("Expected {} to have a superclass {}", class_name, info)
 }
 

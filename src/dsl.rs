@@ -44,18 +44,18 @@ where
     }
 }
 
-fn bin_op<E1, E2>(e1: E1, e2: E2, bin_op: BinOp, type_: RuntimeType) ->  Rc<Expression>
+fn bin_op<E1, E2>(e1: E1, e2: E2, bin_op: BinOp, type_: RuntimeType) -> Rc<Expression>
 where
     E1: Into<Rc<Expression>>,
     E2: Into<Rc<Expression>>,
 {
     Rc::new(Expression::BinOp {
-            bin_op,
-            lhs: e1.into(),
-            rhs: e2.into(),
-            type_,
-            info: SourcePos::UnknownPosition,
-        })
+        bin_op,
+        lhs: e1.into(),
+        rhs: e2.into(),
+        type_,
+        info: SourcePos::UnknownPosition,
+    })
 }
 pub(crate) fn equal<E1, E2>(e1: E1, e2: E2) -> Rc<Expression>
 where

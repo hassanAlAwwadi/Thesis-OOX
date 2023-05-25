@@ -36,13 +36,9 @@ impl Stack {
         stack_frame.params.remove(identifier);
     }
 
-    pub fn lookup<'a>(
-        &self,
-        identifier: &Identifier,
-    ) -> Option<Rc<Expression>> {
+    pub fn lookup<'a>(&self, identifier: &Identifier) -> Option<Rc<Expression>> {
         self.current_variables().unwrap().get(identifier).cloned()
     }
-    
 
     pub fn pop(&mut self) -> Option<StackFrame> {
         self.0.pop_back()
@@ -60,4 +56,3 @@ pub struct StackFrame {
     pub params: HashMap<Identifier, Rc<Expression>>,
     pub current_member: Rc<Method>,
 }
-

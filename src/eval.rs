@@ -50,27 +50,20 @@ fn eval_locally(
 ) -> Rc<Expression> {
     match expression.as_ref() {
         Expression::BinOp {
-            bin_op,
-            lhs,
-            rhs,
-            type_,
-            info,
+            bin_op, lhs, rhs, ..
         } => {
             let lhs = eval_locally(state, lhs.clone(), en);
             let rhs = eval_locally(state, rhs.clone(), en);
             evaluate_binop(bin_op.clone(), &lhs, &rhs)
         }
-        Expression::UnOp {
-            un_op,
-            value,
-            type_,
-            info,
-        } => {
+        Expression::UnOp { un_op, value, .. } => {
             let value = eval_locally(state, value.clone(), en);
             evaluate_unop(un_op.clone(), value)
         }
-        Expression::Var { var, type_, info } => {
-            let o = state.stack.lookup(var)
+        Expression::Var { var, .. } => {
+            let o = state
+                .stack
+                .lookup(var)
                 .unwrap_or_else(|| panic!("infeasible, object does not exist: {:?}", var));
 
             let exp = eval_locally(state, o.clone(), en);
@@ -79,14 +72,12 @@ fn eval_locally(
         }
         Expression::SymbolicVar { .. } => expression,
         Expression::Lit { .. } => expression,
-        Expression::SizeOf { var, type_, info } => {
+        Expression::SizeOf { var, .. } => {
             let expr = single_alias_elimination(state.stack.lookup(var).unwrap(), &state.alias_map);
 
             match expr.as_ref() {
                 Expression::Lit {
-                    lit: Lit::NullLit,
-                    type_,
-                    info,
+                    lit: Lit::NullLit, ..
                 } => {
                     // infeasible path
                     return Expression::int(-1);
@@ -146,16 +137,14 @@ fn eval_locally(
             range,
             domain,
             formula,
-            type_,
-            info,
+            ..
         } => evaluate_quantifier(ands, elem, range, domain, formula, state, en),
         Expression::Exists {
             elem,
             range,
             domain,
             formula,
-            type_,
-            info,
+            ..
         } => evaluate_quantifier(ors, elem, range, domain, formula, state, en),
     }
 }
@@ -267,8 +256,7 @@ fn evaluate_binop(bin_op: BinOp, lhs: &Expression, rhs: &Expression) -> Rc<Expre
             _,
             Lit {
                 lit: IntLit { int_value: 0 },
-                type_,
-                info: SourcePos::UnknownPosition,
+                ..
             },
         ) => panic!("infeasible, division/modulo by zero"),
         (
@@ -408,7 +396,7 @@ where
         Expression::Lit {
             lit: Lit::NullLit, ..
         } => Expression::FALSE.into(), // return false?
-        Expression::Ref { ref_, type_, info } => {
+        Expression::Ref { ref_, .. } => {
             let len = if let HeapValue::ArrayValue { elements, .. } = state.heap.get(&ref_).unwrap()
             {
                 elements.len()

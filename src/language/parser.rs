@@ -199,8 +199,8 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     let throw = (keyword("throw") * literal() - punct(";")).map(|x| {
         if let Expression::Lit {
             lit: Lit::StringLit { string_value },
-            type_,
             info,
+            ..
         } = x
         {
             Statement::Throw {
@@ -265,12 +265,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
 
 /// Edge case for class_cast which inserts the exceptional clause here.
 fn class_cast_rhs(rhs: &Rhs, assignment: Statement) -> Statement {
-    if let Rhs::RhsCast {
-        cast_type,
-        var,
-        info,
-    } = &rhs
-    {
+    if let Rhs::RhsCast { cast_type, var, .. } = &rhs {
         create_ite(
             Either::Right(TypeExpr::InstanceOf {
                 var: var.clone(),
@@ -858,8 +853,7 @@ fn literal<'a>() -> Parser<'a, Token<'a>, Expression> {
                             unreachable!()
                         }
                     }
-                }
-                _ => unreachable!(),
+                } // _ => unreachable!(),
             },
             type_: RuntimeType::ANYRuntimeType,
             info: pos,
@@ -931,10 +925,7 @@ fn exceptional_lhs(lhs: &Lhs) -> HashSet<Rc<Expression>> {
             }
         }
         Lhs::LhsElem {
-            var,
-            index,
-            type_,
-            info,
+            var, index, type_, ..
         } => union(
             HashSet::from([
                 equal(
@@ -979,7 +970,7 @@ fn exceptional_rhs(rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Rc<Expressi
             let var_name = if let Expression::Var {
                 var: var_name,
                 type_: _,
-                info,
+                ..
             } = var
             {
                 var_name
@@ -998,15 +989,8 @@ fn exceptional_rhs(rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Rc<Expressi
                 exceptional_expression(index),
             )
         }
-        Rhs::RhsCall {
-            invocation, type_, ..
-        } => exceptional_invocation(invocation, class_names),
-        Rhs::RhsArray {
-            array_type,
-            sizes,
-            type_,
-            ..
-        } => HashSet::new(),
+        Rhs::RhsCall { invocation, .. } => exceptional_invocation(invocation, class_names),
+        Rhs::RhsArray { .. } => HashSet::new(),
         // Exceptional for RhsCast is handled in `class_cast_rhs(..)`
         Rhs::RhsCast { .. } => HashSet::new(),
     }
@@ -1042,23 +1026,9 @@ fn exceptional_expression(expression: &Expression) -> HashSet<Rc<Expression>> {
             union(exceptional_expression(guard), exceptional_expression(true_)),
             exceptional_expression(false_),
         ),
-        Expression::Forall {
-            elem,
-            range,
-            domain,
-            formula,
-            type_,
-            info,
-        } => todo!(),
-        Expression::Exists {
-            elem,
-            range,
-            domain,
-            formula,
-            type_,
-            info,
-        } => todo!(),
-        Expression::SizeOf { var, type_, info } => todo!(),
+        Expression::Forall { .. } => HashSet::new(),
+        Expression::Exists { .. } => HashSet::new(),
+        Expression::SizeOf { .. } => todo!(),
         _ => HashSet::new(),
     }
 }
@@ -1292,157 +1262,6 @@ where
     set1
 }
 
-#[test]
-fn class_with_constructor() {
-    let file_content = include_str!("../../examples/class_with_constructor.oox");
-
-    let tokens = tokens(file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    //dbg!(as_ref);
-    let c = program().parse(&as_ref).unwrap(); // should not panic;
-                                               //dbg!(c);
-}
-
-#[test]
-fn test_statement() {
-    let file_content = "int p; p := 0;";
-
-    let tokens = tokens(file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    //dbg!(as_ref);
-    let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
-                                                           //dbg!(c);
-}
-
-#[test]
-fn class_with_methods() {
-    let file_content = include_str!("../../examples/class_with_methods.oox");
-
-    let tokens = tokens(file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    // //dbg!(as_ref);
-    let c = (program() - end()).parse(&as_ref);
-    // //dbg!(&c);
-    c.unwrap(); // should not panic;
-
-    // //dbg!(c);
-    // assert!(false);
-}
-
-#[test]
-fn bsort_test() {
-    let file_content = include_str!("../../examples/bsort.oox");
-
-    let tokens = tokens(file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    // //dbg!(as_ref);
-    let c = (program() - end()).parse(&as_ref);
-    // //dbg!(&c);
-    c.unwrap(); // should not panic;
-
-    // //dbg!(c);
-    // assert!(false);
-}
-
-#[test]
-fn this_dot() {
-    let file_content = "p := this.value;";
-
-    let tokens = tokens(file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    //dbg!(as_ref);
-    let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
-                                                           //dbg!(c);
-}
-
-#[test]
-fn ite_test() {
-    let file_content = "
-    int v := this.value ;
-    if(x==v) { return true; }
-    else {
-        Node n := this.next ;
-        bool b := n.member(x) ;
-        return b ;
-    }";
-    let tokens = tokens(file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    //dbg!(&as_ref);
-    let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
-                                                           //dbg!(c);
-}
-
-#[test]
-fn ite_test2() {
-    let file_content = "
-    int v := this.value ;
-    if(x instanceof Foo) { return true; }
-    else {
-        return false;
-    }";
-    let tokens = tokens(file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    dbg!(&as_ref);
-    let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
-                                                           // let c = (type_expr() - end()).parse(&as_ref).unwrap(); // should not panic;
-}
-
-#[test]
-fn boolean() {
-    let file_content = "true";
-    let tokens = tokens(file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    //dbg!(as_ref);
-    let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
-                                                            //dbg!(c);
-}
-
-#[test]
-fn test_statement2() {
-    let file_content = "Node n; n := this.next ;
-    bool b;
-    b := n.member(x) ;
-    return b;";
-    let tokens = tokens(file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    //dbg!(as_ref);
-    let c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
-                                                           //dbg!(c);
-}
-
-#[test]
-fn forall() {
-    let file_content = "(forall x, i : a : i<k ==> (forall x, i : a : i<k ==> true))";
-    let tokens = tokens(file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    // //dbg!(as_ref);
-    let c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
-                                                            //dbg!(c);
-}
-#[test]
-fn absolute_simplest() {
-    let file_content = include_str!("../../examples/absolute_simplest.oox");
-
-    let tokens = tokens(file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    // //dbg!(as_ref);
-    let c = (program() - end()).parse(&as_ref);
-    // //dbg!(&c);
-    c.unwrap(); // should not panic;
-}
-
-#[test]
-fn parsing_empty_function() {
-    let file_content = "class X { static int fib(int n) {  } }";
-
-    let tokens = tokens(file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    // //dbg!(as_ref);
-    let c = (program() - end()).parse(&as_ref);
-    // //dbg!(&c);
-    c.unwrap(); // should not panic;
-}
-
 fn type_expr<'a>() -> Parser<'a, Token<'a>, TypeExpr> {
     (punct("!").opt() + identifier() + keyword("instanceof") + classtype()).map(
         |(((negative, var), instance_token), rhs)| {
@@ -1463,135 +1282,291 @@ fn type_expr<'a>() -> Parser<'a, Token<'a>, TypeExpr> {
     )
 }
 
-#[test]
-fn parsing_else_if() {
-    let file_content = "if (n == 0) return 0;
-    else if (n == 1) return 1;
-    else {
-        ;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn class_with_constructor() {
+        let file_content = include_str!("../../examples/class_with_constructor.oox");
+
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        //dbg!(as_ref);
+        let _c = program().parse(&as_ref).unwrap(); // should not panic;
+                                                    //dbg!(c);
     }
-    ";
 
-    let tokens = tokens(file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    // //dbg!(as_ref);
-    // let c = (pite() - end()).parse(&as_ref);
-    let c = (statement() - end()).parse(&as_ref);
-    // //dbg!(&c);
-    c.unwrap(); // should not panic;
-}
+    #[test]
+    fn test_statement() {
+        let file_content = "int p; p := 0;";
 
-#[test]
-fn parsing_while() {
-    let file_content = "while (t<n) {
-        int newborn := mature ;
-        mature := total ;
-        total := total ;
-       }";
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        //dbg!(as_ref);
+        let _c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
+                                                                //dbg!(c);
+    }
 
-    let tokens = tokens(file_content, 0).unwrap();
-    //dbg!(&tokens);
-    let as_ref = tokens.as_slice();
-    // //dbg!(as_ref);
-    let c = (statement() - end()).parse(&as_ref);
-    // //dbg!(&c);
-    c.unwrap(); // should not panic;
-}
+    #[test]
+    fn class_with_methods() {
+        let file_content = include_str!("../../examples/class_with_methods.oox");
 
-#[test]
-fn parsing_fib() {
-    let file_content = std::fs::read_to_string("./examples/psv/fib.oox").unwrap();
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        // //dbg!(as_ref);
+        let c = (program() - end()).parse(&as_ref);
+        // //dbg!(&c);
+        c.unwrap(); // should not panic;
 
-    let tokens = tokens(&file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    // //dbg!(as_ref);
-    let c = (program() - end()).parse(&as_ref);
-    // //dbg!(&c);
-    c.unwrap(); // should not panic;
-}
+        // //dbg!(c);
+        // assert!(false);
+    }
 
-#[test]
-fn parse_capital_variable() {
-    let file_content = "int N := 10;";
+    #[test]
+    fn bsort_test() {
+        let file_content = include_str!("../../examples/bsort.oox");
 
-    let tokens = tokens(file_content, 0).unwrap();
-    dbg!(&tokens);
-    let as_ref = tokens.as_slice();
-    // //dbg!(as_ref);
-    let c = (statement() - end()).parse(&as_ref);
-    // //dbg!(&c);
-    c.unwrap(); // should not panic;
-}
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        // //dbg!(as_ref);
+        let c = (program() - end()).parse(&as_ref);
+        // //dbg!(&c);
+        c.unwrap(); // should not panic;
 
-#[test]
-fn parse_while_loop() {
-    let file_content = "
-    while (i<N)
-        i := i+1 ;";
+        // //dbg!(c);
+        // assert!(false);
+    }
 
-    let tokens = tokens(file_content, 0).unwrap();
-    dbg!(&tokens);
-    let as_ref = tokens.as_slice();
-    // //dbg!(as_ref);
-    let c = (statement() - end()).parse(&as_ref);
-    // //dbg!(&c);
-    c.unwrap(); // should not panic;
-}
+    #[test]
+    fn this_dot() {
+        let file_content = "p := this.value;";
 
-#[test]
-fn parsing_linked_list() {
-    let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        //dbg!(as_ref);
+        let _c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
+                                                                //dbg!(c);
+    }
 
-    let tokens = tokens(&file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    // //dbg!(as_ref);
-    let c = (program() - end()).parse(&as_ref);
-    // //dbg!(&c);
-    c.unwrap(); // should not panic;
-}
+    #[test]
+    fn ite_test() {
+        let file_content = "
+        int v := this.value ;
+        if(x==v) { return true; }
+        else {
+            Node n := this.next ;
+            bool b := n.member(x) ;
+            return b ;
+        }";
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        //dbg!(&as_ref);
+        let _c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
+                                                                //dbg!(c);
+    }
 
-#[test]
-fn parsing_exceptions() {
-    let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+    #[test]
+    fn ite_test2() {
+        let file_content = "
+        int v := this.value ;
+        if(x instanceof Foo) { return true; }
+        else {
+            return false;
+        }";
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        dbg!(&as_ref);
+        let _c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
+                                                                // let c = (type_expr() - end()).parse(&as_ref).unwrap(); // should not panic;
+    }
 
-    let tokens = tokens(&file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    dbg!(as_ref);
-    let c = insert_exceptional_clauses(parse(&as_ref).unwrap());
-    dbg!(&c);
-}
+    #[test]
+    fn boolean() {
+        let file_content = "true";
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        //dbg!(as_ref);
+        let _c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
+                                                                 //dbg!(c);
+    }
 
-#[test]
-fn parse_array_elem_assign() {
-    let file_content = "a[0] := 1;";
+    #[test]
+    fn test_statement2() {
+        let file_content = "Node n; n := this.next ;
+        bool b;
+        b := n.member(x) ;
+        return b;";
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        //dbg!(as_ref);
+        let _c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
+                                                                //dbg!(c);
+    }
 
-    let tokens = tokens(file_content, 0).unwrap();
-    dbg!(&tokens);
-    let as_ref = tokens.as_slice();
-    // //dbg!(as_ref);
-    let c = (statement() - end()).parse(&as_ref);
-    // //dbg!(&c);
-    c.unwrap(); // should not panic;
-}
+    #[test]
+    fn forall() {
+        let file_content = "(forall x, i : a : i<k ==> (forall x, i : a : i<k ==> true))";
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        // //dbg!(as_ref);
+        let _c = (expression() - end()).parse(&as_ref).unwrap(); // should not panic;
+                                                                 //dbg!(c);
+    }
+    #[test]
+    fn absolute_simplest() {
+        let file_content = include_str!("../../examples/absolute_simplest.oox");
 
-#[test]
-fn parsing_array1() {
-    let file_content = std::fs::read_to_string("./examples/array/array1.oox").unwrap();
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        // //dbg!(as_ref);
+        let c = (program() - end()).parse(&as_ref);
+        // //dbg!(&c);
+        c.unwrap(); // should not panic;
+    }
 
-    let tokens = tokens(&file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    dbg!(as_ref);
-    let c = insert_exceptional_clauses(parse(&as_ref).unwrap());
-    dbg!(&c);
-}
+    #[test]
+    fn parsing_empty_function() {
+        let file_content = "class X { static int fib(int n) {  } }";
 
-#[test]
-fn parse_cast_assign() {
-    let file_content = "X1 x1 := (X1) x;";
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        // //dbg!(as_ref);
+        let c = (program() - end()).parse(&as_ref);
+        // //dbg!(&c);
+        c.unwrap(); // should not panic;
+    }
 
-    let tokens = tokens(file_content, 0).unwrap();
-    let as_ref = tokens.as_slice();
-    // dbg!(as_ref);
-    let c = (statement() - end()).parse(&as_ref).unwrap();
-    // dbg!(&c);
+    #[test]
+    fn parsing_else_if() {
+        let file_content = "if (n == 0) return 0;
+        else if (n == 1) return 1;
+        else {
+            ;
+        }
+        ";
+
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        // //dbg!(as_ref);
+        // let c = (pite() - end()).parse(&as_ref);
+        let c = (statement() - end()).parse(&as_ref);
+        // //dbg!(&c);
+        c.unwrap(); // should not panic;
+    }
+
+    #[test]
+    fn parsing_while() {
+        let file_content = "while (t<n) {
+            int newborn := mature ;
+            mature := total ;
+            total := total ;
+        }";
+
+        let tokens = tokens(file_content, 0).unwrap();
+        //dbg!(&tokens);
+        let as_ref = tokens.as_slice();
+        // //dbg!(as_ref);
+        let c = (statement() - end()).parse(&as_ref);
+        // //dbg!(&c);
+        c.unwrap(); // should not panic;
+    }
+
+    #[test]
+    fn parsing_fib() {
+        let file_content = std::fs::read_to_string("./examples/psv/fib.oox").unwrap();
+
+        let tokens = tokens(&file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        // //dbg!(as_ref);
+        let c = (program() - end()).parse(&as_ref);
+        // //dbg!(&c);
+        c.unwrap(); // should not panic;
+    }
+
+    #[test]
+    fn parse_capital_variable() {
+        let file_content = "int N := 10;";
+
+        let tokens = tokens(file_content, 0).unwrap();
+        dbg!(&tokens);
+        let as_ref = tokens.as_slice();
+        // //dbg!(as_ref);
+        let c = (statement() - end()).parse(&as_ref);
+        // //dbg!(&c);
+        c.unwrap(); // should not panic;
+    }
+
+    #[test]
+    fn parse_while_loop() {
+        let file_content = "
+        while (i<N)
+            i := i+1 ;";
+
+        let tokens = tokens(file_content, 0).unwrap();
+        dbg!(&tokens);
+        let as_ref = tokens.as_slice();
+        // //dbg!(as_ref);
+        let c = (statement() - end()).parse(&as_ref);
+        // //dbg!(&c);
+        c.unwrap(); // should not panic;
+    }
+
+    #[test]
+    fn parsing_linked_list() {
+        let file_content = std::fs::read_to_string("./examples/intLinkedList.oox").unwrap();
+
+        let tokens = tokens(&file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        // //dbg!(as_ref);
+        let c = (program() - end()).parse(&as_ref);
+        // //dbg!(&c);
+        c.unwrap(); // should not panic;
+    }
+
+    #[test]
+    fn parsing_exceptions() {
+        let file_content = std::fs::read_to_string("./examples/exceptions.oox").unwrap();
+
+        let tokens = tokens(&file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        dbg!(as_ref);
+        let c = insert_exceptional_clauses(parse(&as_ref).unwrap());
+        dbg!(&c);
+    }
+
+    #[test]
+    fn parse_array_elem_assign() {
+        let file_content = "a[0] := 1;";
+
+        let tokens = tokens(file_content, 0).unwrap();
+        dbg!(&tokens);
+        let as_ref = tokens.as_slice();
+        // //dbg!(as_ref);
+        let c = (statement() - end()).parse(&as_ref);
+        // //dbg!(&c);
+        c.unwrap(); // should not panic;
+    }
+
+    #[test]
+    fn parsing_array1() {
+        let file_content = std::fs::read_to_string("./examples/array/array1.oox").unwrap();
+
+        let tokens = tokens(&file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        dbg!(as_ref);
+        let c = insert_exceptional_clauses(parse(&as_ref).unwrap());
+        dbg!(&c);
+    }
+
+    #[test]
+    fn parse_cast_assign() {
+        let file_content = "X1 x1 := (X1) x;";
+
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        // dbg!(as_ref);
+        let _c = (statement() - end()).parse(&as_ref).unwrap();
+        // dbg!(&c);
+    }
 }

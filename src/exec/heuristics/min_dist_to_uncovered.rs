@@ -1,28 +1,18 @@
-use std::{
-    cell::{Ref, RefCell},
-    collections::{HashMap, HashSet},
-    ops::Deref,
-    rc::{Rc, Weak},
-    time::Duration,
-};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use criterion::measurement::Measurement;
-use itertools::Itertools;
 use rand::{
     distributions::{WeightedError, WeightedIndex},
     prelude::Distribution,
     rngs::ThreadRng,
     Rng,
 };
-use slog::{debug, Logger};
+use slog::Logger;
 
 use crate::{
     cfg::{CFGStatement, MethodIdentifier},
-    exec::{heuristics::finish_state_in_path, IdCounter, State, SymResult},
+    exec::{IdCounter, State, SymResult},
     statistics::Statistics,
     symbol_table::SymbolTable,
-    syntax::{Declaration, Invocation, Method, Rhs, Statement},
-    DeclarationMember,
 };
 
 use super::{
@@ -137,7 +127,7 @@ pub(crate) fn sym_exec(
         statistics,
         entry_method,
         MinDist2Uncovered::new(),
-        visualize_heuristic
+        visualize_heuristic,
     )
 }
 

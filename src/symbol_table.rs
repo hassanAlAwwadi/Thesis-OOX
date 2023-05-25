@@ -8,7 +8,7 @@ use crate::{
     syntax::{
         self, Class, CompilationUnit, Declaration, DeclarationMember, Identifier, Interface,
         NonVoidType,
-    }
+    },
 };
 
 pub type Fields = Vec<(Identifier, NonVoidType)>;

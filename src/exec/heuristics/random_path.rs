@@ -1,13 +1,8 @@
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    ops::Deref,
-    rc::{Rc, Weak},
-};
+use std::{cell::RefCell, collections::HashMap, ops::Deref, rc::Rc};
 
 use itertools::Itertools;
 use rand::{rngs::ThreadRng, Rng};
-use slog::{debug, Logger};
+use slog::Logger;
 
 use crate::{
     cfg::{CFGStatement, MethodIdentifier},
@@ -16,9 +11,8 @@ use crate::{
 };
 
 use super::{
-    execute_instruction_for_all_states,
     execution_tree::{sym_exec_execution_tree, ExecutionTree, ExecutionTreeBasedHeuristic},
-    finish_state_in_path, IdCounter, ProgramCounter, State, SymResult,
+    IdCounter, ProgramCounter, State, SymResult,
 };
 
 // We also need to consider that there are a lot of branches that end quickly, like due to if (x == null) { throw exception; } guard insertions.
@@ -75,26 +69,18 @@ type BranchId = u64;
 fn random_path<'a>(
     mut tree: Rc<RefCell<ExecutionTree>>,
     rng: &'a mut impl Rng,
-) -> (Vec<u64>, Rc<RefCell<ExecutionTree>>) {
-    let mut path = Vec::new();
+) -> Rc<RefCell<ExecutionTree>> {
     loop {
         let node = tree.clone();
         match node.borrow().deref() {
-            ExecutionTree::Node {
-                statement,
-                children,
-                ..
-            } => {
-                path.push(*statement);
-
+            ExecutionTree::Node { children, .. } => {
                 // dbg!(children.len());
 
                 let idx = rng.gen_range(0..children.len());
                 tree = children[idx].clone();
             }
-            ExecutionTree::Leaf { statement, .. } => {
-                path.push(*statement);
-                return (path, tree);
+            ExecutionTree::Leaf { .. } => {
+                return tree;
             }
         };
     }
@@ -122,7 +108,7 @@ impl ExecutionTreeBasedHeuristic for RandomPath {
         _entry_method: &MethodIdentifier,
         _coverage: &mut HashMap<ProgramCounter, usize>,
     ) -> Rc<RefCell<ExecutionTree>> {
-        let (path_pcs, states_node) = random_path(root.clone(), &mut self.rng);
+        let states_node = random_path(root.clone(), &mut self.rng);
 
         states_node
     }

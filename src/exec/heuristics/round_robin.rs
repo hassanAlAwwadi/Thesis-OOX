@@ -12,7 +12,8 @@ use crate::{
 use super::{
     execution_tree::{sym_exec_execution_tree, ExecutionTree, ExecutionTreeBasedHeuristic},
     min_dist_to_uncovered::MinDist2Uncovered,
-    random_path::RandomPath, ProgramCounter,
+    random_path::RandomPath,
+    ProgramCounter,
 };
 
 struct RoundRobin {

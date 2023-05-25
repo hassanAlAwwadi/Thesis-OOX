@@ -1,16 +1,13 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use slog::{Logger};
+use slog::Logger;
 
 use crate::{
-    cfg::CFGStatement,
-    statistics::Statistics,
-    symbol_table::SymbolTable, exec::heuristics::execute_instruction_for_all_states,
+    cfg::CFGStatement, exec::heuristics::execute_instruction_for_all_states,
+    statistics::Statistics, symbol_table::SymbolTable,
 };
 
-use super::{
-    action, ActionResult, IdCounter, State, SymResult,
-};
+use super::{IdCounter, State, SymResult};
 
 /// The main function for the symbolic execution, any path splitting due to the control flow graph or array initialization happens here.
 /// Depth first search, without using any other heuristic.
@@ -30,7 +27,16 @@ pub(crate) fn sym_exec(
 
     while let Some(state) = remaining_states.pop() {
         let pc = state.pc;
-        let step = execute_instruction_for_all_states(vec![state], program, flows, k, st, root_logger.clone(), path_counter.clone(), statistics);
+        let step = execute_instruction_for_all_states(
+            vec![state],
+            program,
+            flows,
+            k,
+            st,
+            root_logger.clone(),
+            path_counter.clone(),
+            statistics,
+        );
 
         match step {
             Err(source_pos) => return SymResult::Invalid(source_pos),
@@ -42,7 +48,7 @@ pub(crate) fn sym_exec(
                             remaining_states.extend(values);
                         }
                     }
-                } 
+                }
                 // Could be a method call, add children in random order
                 for (_pc, values) in new_states {
                     remaining_states.extend(values);

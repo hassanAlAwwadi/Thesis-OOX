@@ -111,22 +111,12 @@ fn helper(
             type_: type_.clone(),
             info: *info,
         }),
-        Expression::Forall {
-            elem,
-            range,
-            domain,
-            formula,
-            type_,
-            info,
-        } => todo!(),
-        Expression::Exists {
-            elem,
-            range,
-            domain,
-            formula,
-            type_,
-            info,
-        } => todo!(),
+        Expression::Forall { .. } => {
+            unreachable!("Unexpected forall in concretization expression.")
+        }
+        Expression::Exists { .. } => {
+            unreachable!("Unexpected forall in concretization expression.")
+        }
         Expression::Var { .. }
         | Expression::SymbolicVar { .. }
         | Expression::Lit { .. }

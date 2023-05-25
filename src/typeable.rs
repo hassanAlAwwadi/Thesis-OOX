@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, ops::Deref};
+use std::borrow::Borrow;
 
 use ordered_float::NotNan;
 
@@ -9,7 +9,8 @@ use crate::{
     syntax::{
         DeclarationMember, Expression, Invocation, Lhs, Lit, Method, NonVoidType, Parameter, Rhs,
         RuntimeType, Type,
-    }, TypeExpr,
+    },
+    TypeExpr,
 };
 
 pub trait Typeable {
@@ -42,9 +43,11 @@ pub trait Typeable {
             // Matching ARRAY types
             (ARRAYRuntimeType, ArrayRuntimeType { .. }) => true,
             (ArrayRuntimeType { .. }, ARRAYRuntimeType) => true,
-            (ReferenceRuntimeType { type_: a }, ReferenceRuntimeType { type_: b }) => {
-                st.subtypes.get(&b).unwrap_or_else(|| panic!("Could not get subtypes for type {:?}", b)).contains(&a)
-            }
+            (ReferenceRuntimeType { type_: a }, ReferenceRuntimeType { type_: b }) => st
+                .subtypes
+                .get(&b)
+                .unwrap_or_else(|| panic!("Could not get subtypes for type {:?}", b))
+                .contains(&a),
             (a, b) => a == b,
         }
     }
@@ -62,8 +65,8 @@ pub trait Typeable {
             RuntimeType::BoolRuntimeType => Lit::BoolLit { bool_value: false },
             RuntimeType::StringRuntimeType => Lit::NullLit,
             RuntimeType::CharRuntimeType => Lit::CharLit { char_value: '\0' },
-            RuntimeType::ReferenceRuntimeType { type_ } => Lit::NullLit,
-            RuntimeType::ArrayRuntimeType { inner_type } => Lit::NullLit,
+            RuntimeType::ReferenceRuntimeType { .. } => Lit::NullLit,
+            RuntimeType::ArrayRuntimeType { .. } => Lit::NullLit,
             RuntimeType::ANYRuntimeType => todo!(),
             RuntimeType::NUMRuntimeType => todo!(),
             RuntimeType::REFRuntimeType => todo!(),
@@ -230,8 +233,6 @@ impl Typeable for Invocation {
         match self {
             Invocation::InvokeMethod {
                 resolved: Some(resolved),
-                lhs,
-                rhs,
                 ..
             } => {
                 let (_, (_, method)) = resolved

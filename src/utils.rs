@@ -20,7 +20,6 @@ where
     map
 }
 
-
 pub fn group_by_into_immutable_vec<'a, I, A, B>(v: I) -> HashMap<A, Vector<B>>
 where
     I: Iterator<Item = (A, B)>,

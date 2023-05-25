@@ -1,23 +1,18 @@
 use core::panic;
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     ops::{AddAssign, Deref},
     rc::Rc,
     time::Instant,
 };
 
 use clap::ValueEnum;
-use im_rc::{vector, HashMap as ImHashMap, HashSet as ImHashSet, Vector};
+use im_rc::{vector, HashMap as ImHashMap, HashSet as ImHashSet};
 use itertools::{Either, Itertools};
 use num::One;
 use slog::{debug, error, info, o, Logger};
-use sloggers::{
-    file::FileLoggerBuilder,
-    terminal::{Destination, TerminalLoggerBuilder},
-    types::Severity,
-    Build,
-};
+use sloggers::{file::FileLoggerBuilder, types::Severity, Build};
 use z3::SatResult;
 
 use std::fmt::Debug;
@@ -29,8 +24,8 @@ mod state_split;
 use crate::{
     cfg::{labelled_statements, CFGStatement, MethodIdentifier},
     concretization::{concretizations, find_symbolic_refs},
-    dsl::{equal, ite, negate, or, to_int_expr},
-    eval::{self, evaluate, evaluate_as_int},
+    dsl::{equal, ite, negate, to_int_expr},
+    eval::{evaluate, evaluate_as_int},
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
     insert_exceptional_clauses, language, parse_program,
     positioned::{SourcePos, WithPosition},
@@ -142,7 +137,7 @@ impl AliasEntry {
         }
     }
 
-    fn remove_null(&mut self, var: &str) {
+    fn remove_null(&mut self) {
         self.aliases.retain(|x| match x.as_ref() {
             Expression::Lit {
                 lit: Lit::NullLit, ..
@@ -355,7 +350,6 @@ enum ActionResult {
 fn action(
     state: &mut State,
     program: &HashMap<u64, CFGStatement>,
-    k: u64,
     en: &mut impl Engine,
 ) -> ActionResult {
     let pc = state.pc;
@@ -380,22 +374,18 @@ fn action(
     // );
 
     match action {
-        CFGStatement::Statement(Statement::Declare { type_, var, info }) => {
+        CFGStatement::Statement(Statement::Declare { type_, var, .. }) => {
             state
                 .stack
                 .insert_variable(var.clone(), Rc::new(type_.default()));
 
             ActionResult::Continue
         }
-        CFGStatement::Statement(Statement::Assign { lhs, rhs, info }) => {
+        CFGStatement::Statement(Statement::Assign { lhs, rhs, .. }) => {
             // RhsCall 'x.foo()' has a special case,
             // others are handled in evaluateRhs
             match rhs {
-                Rhs::RhsCall {
-                    invocation,
-                    type_,
-                    info,
-                } => {
+                Rhs::RhsCall { invocation, .. } => {
                     // if rhs contains an invocation.
                     return exec_invocation(state, invocation, &program, pc, Some(lhs.clone()), en);
                 }
@@ -477,18 +467,10 @@ fn action(
 
             ActionResult::Continue
         }
-        CFGStatement::FunctionExit {
-            decl_name,
-            method_name,
-            argument_types,
-        } => {
+        CFGStatement::FunctionExit { .. } => {
             state.exception_handler.decrement_handler();
 
-            let StackFrame {
-                current_member,
-                params,
-                ..
-            } = state.stack.current_stackframe().unwrap();
+            let StackFrame { current_member, .. } = state.stack.current_stackframe().unwrap();
             if let Some((post_condition, type_guard)) = current_member.post_condition() {
                 let expression = prepare_assert_expression(state, post_condition.clone(), en);
                 let is_valid = eval_assertion(state, expression, en);
@@ -531,7 +513,7 @@ fn action(
                 ActionResult::Return(pc)
             }
         }
-        CFGStatement::Statement(Statement::Call { invocation, info }) => {
+        CFGStatement::Statement(Statement::Call { invocation, .. }) => {
             exec_invocation(state, invocation, &program, pc, None, en)
         }
         CFGStatement::Statement(Statement::Throw { message, .. }) => exec_throw(state, en, message),
@@ -722,7 +704,6 @@ fn exec_invocation(
         Invocation::InvokeMethod {
             resolved,
             lhs: invocation_lhs,
-            arguments,
             ..
         } => {
             let potential_methods = resolved.as_ref().unwrap();
@@ -854,9 +835,7 @@ fn exec_invocation(
                 en,
             );
             return ActionResult::FunctionCall(next_entry);
-        }
-        // (_, DeclarationMember::Field { type_, name }) => todo!(),
-        _ => panic!("Incorrect pair of Invocation and DeclarationMember"),
+        } // _ => panic!("Incorrect pair of Invocation and DeclarationMember"),
     }
 }
 
@@ -873,7 +852,7 @@ pub fn find_entry_for_static_invocation(
     // dbg!(invocation);
     let (entry, _) = program
         .iter()
-        .find(|(k, v)| {
+        .find(|(_k, v)| {
             if let CFGStatement::FunctionEntry {
                 decl_name: other_decl_name,
                 method_name: other_method_name,
@@ -1097,7 +1076,7 @@ fn collect_path_constraints(state: &State) -> Expression {
 
 fn read_field_concrete_ref(heap: &mut Heap, ref_: i64, field: &Identifier) -> Rc<Expression> {
     match heap.get_mut(&ref_).unwrap() {
-        HeapValue::ObjectValue { fields, type_ } => fields[field].clone(),
+        HeapValue::ObjectValue { fields, .. } => fields[field].clone(),
         _ => panic!("Expected object, found array heapvalue"),
     }
 }
@@ -1111,6 +1090,7 @@ fn read_field_symbolic_ref(
     match concrete_refs {
         [] => panic!(),
         [r] => {
+            // null is not possible here, will be caught with exceptional state
             if let Expression::Ref { ref_, .. } = **r {
                 read_field_concrete_ref(heap, ref_, field)
             } else {
@@ -1136,9 +1116,7 @@ fn read_field_symbolic_ref(
             } else {
                 panic!()
             }
-        }
-        // null is not possible here, will be caught with exceptional state
-        _ => panic!(),
+        } // _ => panic!(),
     }
 }
 
@@ -1150,7 +1128,7 @@ fn write_field_concrete_ref(
 ) -> () {
     // let x = ;
 
-    if let HeapValue::ObjectValue { fields, type_ } = heap.get_mut(&ref_).unwrap() {
+    if let HeapValue::ObjectValue { fields, .. } = heap.get_mut(&ref_).unwrap() {
         fields.insert(field.clone(), value);
     } else {
         panic!("expected object")
@@ -1175,7 +1153,7 @@ fn write_field_symbolic_ref(
         }
         rs => {
             for r in rs {
-                if let Expression::Ref { ref_, type_, .. } = r.as_ref() {
+                if let Expression::Ref { ref_, .. } = r.as_ref() {
                     let ite = ite(
                         equal(sym_ref.clone(), r.clone()),
                         value.clone(),
@@ -1209,7 +1187,7 @@ pub fn init_symbolic_reference(
         debug!(state.logger, "Lazy initialisation of symbolic reference"; "ref" => #?sym_ref, "type" => #?type_ref);
         match type_ref {
             RuntimeType::ReferenceRuntimeType { type_ } => {
-                init_symbolic_object(type_, state, sym_ref, type_ref, en)
+                init_symbolic_object(type_, state, sym_ref, en)
             }
             RuntimeType::ArrayRuntimeType { .. } => {
                 exec_array_initialisation(state, en, sym_ref.clone(), type_ref.clone())
@@ -1225,7 +1203,6 @@ fn init_symbolic_object(
     decl_name: &Identifier,
     state: &mut State,
     sym_ref: &Identifier,
-    type_ref: &RuntimeType,
     en: &mut impl Engine,
 ) {
     let st = en.symbol_table();
@@ -1320,20 +1297,14 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
         Lhs::LhsVar { var, .. } => {
             state.stack.insert_variable(var.clone(), e);
         }
-        Lhs::LhsField {
-            var,
-            var_type,
-            field,
-            type_,
-            info,
-        } => {
+        Lhs::LhsField { var, field, .. } => {
             let o = state
                 .stack
                 .lookup(var)
                 .unwrap_or_else(|| panic!("infeasible, object does not exit"));
 
             match o.as_ref() {
-                Expression::Ref { ref_, type_, .. } => {
+                Expression::Ref { ref_, .. } => {
                     write_field_concrete_ref(&mut state.heap, *ref_, field, e);
                 }
                 sym_ref @ Expression::SymbolicRef { var, type_, .. } => {
@@ -1371,12 +1342,7 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
                 _ => todo!("{:?}", o.as_ref()),
             }
         }
-        Lhs::LhsElem {
-            var,
-            index,
-            type_,
-            info,
-        } => {
+        Lhs::LhsElem { var, index, .. } => {
             let ref_ = state
                 .stack
                 .lookup(var)
@@ -1385,7 +1351,7 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
             let ref_ = single_alias_elimination(ref_, &state.alias_map);
 
             match ref_.as_ref() {
-                Expression::Ref { ref_, type_, .. } => {
+                Expression::Ref { ref_, .. } => {
                     let index = evaluate_as_int(state, index.clone(), en);
 
                     match index {
@@ -1414,12 +1380,10 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
                 _ => Rc::new(value.clone()), // might have to expand on this when dealing with complex quantifying expressions and array
             }
         }
-        Rhs::RhsField {
-            var, field, type_, ..
-        } => {
+        Rhs::RhsField { var, field, .. } => {
             if let Expression::Var { var, .. } = var {
                 let object = state.stack.lookup(var).unwrap();
-                exec_rhs_field(state, &object, field, type_, en)
+                exec_rhs_field(state, &object, field, en)
             } else {
                 panic!(
                     "Currently only right hand sides of the form <variable>.<field> are allowed."
@@ -1436,9 +1400,7 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
                 panic!("Unexpected uninitialized array");
             }
         }
-        Rhs::RhsCall {
-            invocation, type_, ..
-        } => {
+        Rhs::RhsCall { .. } => {
             unreachable!("unreachable, invocations are handled in function exec_invocation()")
         }
 
@@ -1450,11 +1412,7 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
         } => {
             return exec_array_construction(state, array_type, sizes, type_, en);
         }
-        Rhs::RhsCast {
-            cast_type,
-            var,
-            info,
-        } => {
+        Rhs::RhsCast { cast_type, var, .. } => {
             let object = state.stack.lookup(var).unwrap_or_else(|| {
                 panic!(
                     "Could not find {:?} on the stack {:?}",
@@ -1497,7 +1455,6 @@ fn exec_rhs_field(
     state: &mut State,
     object: &Expression,
     field: &Identifier,
-    type_: &RuntimeType,
     en: &mut impl Engine,
 ) -> Rc<Expression> {
     match object {
@@ -1508,8 +1465,8 @@ fn exec_rhs_field(
             type_,
             info,
         } => {
-            let true_ = exec_rhs_field(state, true_, field, type_, en);
-            let false_ = exec_rhs_field(state, false_, field, type_, en);
+            let true_ = exec_rhs_field(state, true_, field, en);
+            let false_ = exec_rhs_field(state, false_, field, en);
 
             Rc::new(Expression::Conditional {
                 guard: guard.clone(),
@@ -1522,10 +1479,8 @@ fn exec_rhs_field(
         Expression::Lit {
             lit: Lit::NullLit, ..
         } => panic!("infeasible"),
-        Expression::Ref { ref_, type_, info } => {
-            read_field_concrete_ref(&mut state.heap, *ref_, field)
-        }
-        sym_ref @ Expression::SymbolicRef { var, type_, info } => {
+        Expression::Ref { ref_, .. } => read_field_concrete_ref(&mut state.heap, *ref_, field),
+        sym_ref @ Expression::SymbolicRef { var, type_, .. } => {
             init_symbolic_reference(state, var, type_, en);
             remove_symbolic_null(&mut state.alias_map, var);
             let concrete_refs = &state.alias_map[var];
@@ -1581,7 +1536,7 @@ fn false_lit() -> Expression {
 
 fn remove_symbolic_null(alias_map: &mut AliasMap, var: &Identifier) {
     // dbg!(&alias_map, &var);
-    alias_map.get_mut(var).unwrap().remove_null(var)
+    alias_map.get_mut(var).unwrap().remove_null()
 }
 
 fn create_symbolic_var(name: Identifier, type_: impl Typeable, st: &SymbolTable) -> Expression {
@@ -2078,7 +2033,11 @@ pub fn verify(
     if options.visualize_coverage {
         let contents = pretty_print_compilation_unit(
             &|pc: u64| {
-                Some(format!("pc: {}, covered: {}", pc, statistics.coverage.contains(&pc).to_string()))
+                Some(format!(
+                    "pc: {}, covered: {}",
+                    pc,
+                    statistics.coverage.contains(&pc).to_string()
+                ))
             },
             &program,
             &flows,

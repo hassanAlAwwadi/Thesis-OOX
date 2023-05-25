@@ -1,7 +1,10 @@
 use clap::{Parser, Subcommand};
 use itertools::Itertools;
-use lib::{verify, Options, parse_program, type_compilation_unit, SymbolTable, CompilationUnit, FILE_NAMES, insert_exceptional_clauses};
-use pretty::{BoxAllocator};
+use lib::{
+    insert_exceptional_clauses, parse_program, type_compilation_unit, verify, CompilationUnit,
+    Options, SymbolTable, FILE_NAMES,
+};
+use pretty::BoxAllocator;
 
 /// OOX symbolic verification
 #[derive(Parser)]
@@ -47,26 +50,39 @@ enum Commands {
         // Print the program to be evaluated.
         #[arg(short, long, default_value_t = false)]
         print: bool,
-    }
+    },
 }
 
 fn main() -> Result<(), String> {
     let args = Args::parse();
     match args.command {
-        Commands::Verify { source_paths, k, function, quiet, heuristic, visualize_heuristic, visualize_coverage } => {
+        Commands::Verify {
+            source_paths,
+            k,
+            function,
+            quiet,
+            heuristic,
+            visualize_heuristic,
+            visualize_coverage,
+        } => {
             if let Some((class_name, method_name)) = function.split(".").collect_tuple() {
-                let options = Options {k, quiet, with_exceptional_clauses: true, heuristic, visualize_heuristic, visualize_coverage};
-                verify(
-                    source_paths.as_slice(),
-                    class_name,
-                    method_name,
-                    options
-                )?;
+                let options = Options {
+                    k,
+                    quiet,
+                    with_exceptional_clauses: true,
+                    heuristic,
+                    visualize_heuristic,
+                    visualize_coverage,
+                };
+                verify(source_paths.as_slice(), class_name, method_name, options)?;
             } else {
                 println!("Entry point must be of the form 'class.method' and be unambiguous");
             }
-        },
-        Commands::Check { source_paths, print } => {
+        }
+        Commands::Check {
+            source_paths,
+            print,
+        } => {
             let mut c = CompilationUnit::empty();
 
             // Set global file names
@@ -75,14 +91,12 @@ fn main() -> Result<(), String> {
             for (file_number, path) in (0..).zip(source_paths) {
                 let file_content = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
                 let file_c =
-                    parse_program(&file_content, file_number).map_err(
-                        |error| match error {
-                            lib::Error::ParseError(err) => err.to_string(),
-                            lib::Error::LexerError((line, col)) => {
-                                format!("Lexer error at {}:{}:{}", path.to_string(), line, col)
-                            }
-                        },
-                    )?;
+                    parse_program(&file_content, file_number).map_err(|error| match error {
+                        lib::Error::ParseError(err) => err.to_string(),
+                        lib::Error::LexerError((line, col)) => {
+                            format!("Lexer error at {}:{}:{}", path.to_string(), line, col)
+                        }
+                    })?;
                 c = c.merge(file_c);
             }
 
@@ -94,10 +108,8 @@ fn main() -> Result<(), String> {
             let symbol_table = SymbolTable::from_ast(&c)?;
             type_compilation_unit(c, &symbol_table)?;
             println!("Type check OK");
-        },
-    }    
-
-    
+        }
+    }
 
     Ok(())
 }

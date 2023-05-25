@@ -306,7 +306,6 @@ pub fn resolve_super_method(
         .as_ref()
         .ok_or(error::expected_superclass(
             class_name,
-            method_name,
             method_name.get_position(),
         ))?
         .clone();

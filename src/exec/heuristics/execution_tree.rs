@@ -198,7 +198,7 @@ pub(super) fn sym_exec_execution_tree(
                         // } else {
                         //     dbg!("no parent");
                         // }
-                        let is_finished = finish_state_in_path(states_node.clone(), Vec::new());
+                        let is_finished = finish_state_in_path(states_node.clone());
                         if is_finished {
                             // We have explored all states.
                             debug!(root_logger, "all states explored");
@@ -206,7 +206,7 @@ pub(super) fn sym_exec_execution_tree(
                         }
                     }
                     1 => {
-                        let (pc, states) = new_states.into_iter().next().unwrap();
+                        let (_pc, states) = new_states.into_iter().next().unwrap();
                         // debug!(root_logger, "new state {:?}", pc);
 
                         // let mut tree = Rc::new(RefCell::new(N::Leaf(Weak::new(), states)));
@@ -216,7 +216,7 @@ pub(super) fn sym_exec_execution_tree(
 
                         // *states_node.borrow_mut() = N::Leaf { parent: Weak::new(), states };
                     }
-                    n => {
+                    _n => {
                         // Branching, split up states
                         // We replace the leaf with a node at the branching statement, its children are the new paths each in a different direction.
                         debug!(
@@ -245,7 +245,6 @@ pub(super) fn sym_exec_execution_tree(
                             children: states,
                         }
                     }
-                    x => panic!("got {:?}", x),
                 }
             }
             Err(info) => return SymResult::Invalid(info),

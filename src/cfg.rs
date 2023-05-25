@@ -1,5 +1,3 @@
-// use std::intrinsics::unreachable;
-
 use std::rc::Rc;
 
 use derivative::Derivative;
@@ -73,8 +71,6 @@ impl CFGStatement {
         }
     }
 }
-
-
 
 /// Takes the syntax tree of a program, returns a tuple containing the control flow graph and flow of the program.
 /// The control flow graph is a mapping from program counter (aka label) --> Program statement.
@@ -264,7 +260,7 @@ fn statement_cfg(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)>
             guard,
             true_body,
             false_body,
-            info,
+            ..
         } => {
             let mut v = vec![];
             let ite_l = *i;
@@ -276,7 +272,7 @@ fn statement_cfg(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)>
             labelled_statements.push((ite_l, CFGStatement::Ite(guard.clone(), i_true, i_false)));
             labelled_statements.append(&mut v);
         }
-        Statement::While { guard, body, info } => {
+        Statement::While { guard, body, .. } => {
             let ite_l = *i;
             *i += 1;
             let i_body = *i;
@@ -290,7 +286,7 @@ fn statement_cfg(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)>
         Statement::Try {
             try_body,
             catch_body,
-            info,
+            ..
         } => {
             let try_catch_l = *i;
             *i += 1;
@@ -397,7 +393,7 @@ fn fallthrough(
 
             fallthrough_body
                 .into_iter()
-                .filter(|(l, s)| match s {
+                .filter(|(_l, s)| match s {
                     CFGStatement::Statement(Statement::Continue { .. }) => false,
                     CFGStatement::Statement(Statement::Break { .. }) => false,
                     _ => true,
@@ -611,7 +607,11 @@ pub mod utils {
     /// Returns the set of program counters in the body of given while loop pc, that can flow back to the while statement.
     /// Panics if pc is not a CFGStatement::While in program.
     /// Would be nicer to cache this, but won't make much of a difference for now.
-    pub fn while_body_pcs(pc: u64, flow: &HashMap<u64, Vec<u64>>, program: &HashMap<u64, CFGStatement>) -> HashSet<u64> {
+    pub fn while_body_pcs(
+        pc: u64,
+        flow: &HashMap<u64, Vec<u64>>,
+        program: &HashMap<u64, CFGStatement>,
+    ) -> HashSet<u64> {
         if !program[&pc].is_while() {
             panic!("expected pc to be a While")
         }
@@ -644,7 +644,7 @@ pub mod utils {
 
 #[test]
 fn cfg_for_min() {
-    use crate::{language, insert_exceptional_clauses};
+    use crate::{insert_exceptional_clauses, language};
     let file_content = include_str!("../examples/psv/min.oox");
 
     let c = language::parse_program(file_content, 0).unwrap();
@@ -652,7 +652,7 @@ fn cfg_for_min() {
 
     // //dbg!(&c);
 
-    let (result, flw) = labelled_statements(c);
+    let (_result, flw) = labelled_statements(c);
 
     // //dbg!(&result);
 

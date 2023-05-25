@@ -1,10 +1,8 @@
-use std::{ rc::Rc};
+use std::rc::Rc;
 
 use derivative::Derivative;
 
-use super::{
-     AbstractMethod, Identifier, Method, 
-};
+use super::{AbstractMethod, Identifier, Method};
 use std::fmt::Debug;
 
 #[derive(Clone, Derivative)]

@@ -3,8 +3,8 @@
 mod stack;
 
 mod cfg;
-mod reachability;
 mod exec;
+mod reachability;
 
 mod eval;
 mod typeable;
@@ -14,8 +14,8 @@ mod z3_checker;
 
 mod resolver;
 
-mod pretty_print;
 mod language;
+mod pretty_print;
 
 mod utils;
 
@@ -36,7 +36,7 @@ extern crate pest_derive;
 
 use std::sync::Mutex;
 
-pub use exec::{verify, Options, Heuristic, SymResult};
+pub use exec::{verify, Heuristic, Options, SymResult};
 
 pub use positioned::SourcePos;
 
