@@ -35,8 +35,7 @@ pub fn conditional_state_split(
         "Splitting up current path into 2 paths due to conditional state split"
     );
     en.statistics().measure_branches(2);
-    let mut true_state = state.clone();
-    true_state.path_id = en.next_path_id();
+    let mut true_state = en.clone_state_with_new_path_id(state);
     let feasible_path = exec_assume(&mut true_state, Either::Left(guard.clone()), en);
     if feasible_path {
         true_state.stack.insert_variable(lhs_name.clone(), true_lhs);
@@ -81,11 +80,10 @@ pub(super) fn split_states_with_aliases(
         .insert(symbolic_object_ref.clone(), AliasEntry::new(objects));
 
     for alias in aliases {
-        let mut state = state.clone();
+        let mut state = en.clone_state_with_new_path_id(state);
         state
             .alias_map
             .insert(symbolic_object_ref.clone(), AliasEntry::new(alias));
-        state.path_id = en.next_path_id();
         en.add_remaining_state(state);
     }
 }
@@ -114,8 +112,7 @@ pub(super) fn exec_array_initialisation(
     // initialise new states with arrays 1..N
     for array_size in 1..=N {
         let path_id = engine.next_path_id();
-        let mut new_state = state.clone();
-        new_state.path_id = path_id;
+        let mut new_state = engine.clone_state_with_new_path_id(state);
         array_initialisation(
             &mut new_state,
             &array_name,
@@ -130,7 +127,7 @@ pub(super) fn exec_array_initialisation(
     }
 
     // And a state for the case where the array is NULL
-    let mut null_state = state.clone();
+    let mut null_state = engine.clone_state_with_new_path_id(state);
     null_state.alias_map.insert(
         array_name.clone(),
         AliasEntry::new(vec![Expression::NULL.into()]),

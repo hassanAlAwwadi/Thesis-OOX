@@ -261,6 +261,24 @@ pub trait Engine {
     fn statistics(&mut self) -> &mut Statistics;
 
     fn symbol_table(&self) -> &SymbolTable;
+
+
+    /// The root logger, without path id appended to each log.
+    fn root_logger(&self) -> &Logger;
+
+    /// Creates a new logger for the given path id.
+    /// This path id will be appended to each log on that state.
+    fn new_logger(&self, path_id: u64) -> Logger {
+        self.root_logger().new(o!("path_id" => path_id))
+    }
+
+    /// Clones the state, with a new unique path_id
+    fn clone_state_with_new_path_id(&mut self, state: &State) -> State {
+        let mut new_state = state.clone();
+        new_state.path_id = self.next_path_id();
+        new_state.logger = self.new_logger(state.path_id);
+        new_state
+    }
 }
 
 pub struct DFSEngine<'a> {
@@ -268,6 +286,7 @@ pub struct DFSEngine<'a> {
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &'a mut Statistics,
     st: &'a SymbolTable,
+    root_logger: &'a Logger,
 }
 
 impl Engine for DFSEngine<'_> {
@@ -289,6 +308,10 @@ impl Engine for DFSEngine<'_> {
 
     fn symbol_table(&self) -> &SymbolTable {
         self.st
+    }
+
+    fn root_logger(&self) -> &Logger {
+        self.root_logger
     }
 }
 

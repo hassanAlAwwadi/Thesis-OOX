@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, ops::DerefMut, rc::Rc};
 
 use itertools::Itertools;
-use slog::Logger;
+use slog::{Logger, o};
 
 use crate::{
     cfg::CFGStatement,
@@ -73,6 +73,7 @@ fn execute_instruction_for_all_states(
                 path_counter: path_counter.clone(),
                 statistics,
                 st,
+                root_logger: &root_logger,
             },
         );
         match next {
@@ -110,6 +111,7 @@ fn execute_instruction_for_all_states(
                         let mut new_state = state.clone();
                         new_state.path_id = path_id;
                         new_state.pc = *neighbour_pc;
+                        new_state.logger = root_logger.new(o!("path_id" => path_id));
 
                         resulting_states
                             .entry(new_state.pc)

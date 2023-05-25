@@ -35,11 +35,11 @@ enum Commands {
         heuristic: lib::Heuristic,
 
         // After execution it prints a visualization of the coverage for each method.
-        #[arg(short, long, default_value_t = false)]
+        #[arg(long, default_value_t = false)]
         visualize_coverage: bool,
 
         // Will create a file visualize.txt, showing the current program exploration guided by heuristic.
-        #[arg(short, long, default_value_t = false)]
+        #[arg(long, default_value_t = false)]
         visualize_heuristic: bool,
     },
     /// Parse and typecheck an OOX source file
