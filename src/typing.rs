@@ -13,7 +13,7 @@ use queues::{queue, Queue};
 
 use crate::{
     error::{self, unification_error},
-    exec::{retval, this_str},
+    exec::constants::{retval, this_str},
     positioned::WithPosition,
     resolver,
     symbol_table::SymbolTable,

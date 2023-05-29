@@ -3,7 +3,7 @@ use std::rc::Rc;
 use derivative::Derivative;
 use itertools::Either;
 
-use crate::{exec::this_str, positioned::SourcePos, syntax::*, typeable::Typeable};
+use crate::{exec::constants::this_str, positioned::SourcePos, syntax::*, typeable::Typeable};
 
 const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
 

@@ -6,7 +6,6 @@ mod cfg;
 mod exec;
 mod reachability;
 
-mod eval;
 mod typeable;
 
 pub mod dsl;

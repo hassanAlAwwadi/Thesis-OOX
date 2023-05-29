@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    exec::AliasMap,
+    exec::alias_map::AliasMap,
     fold::ExprFoldCollection,
     syntax::{Expression, Identifier, RuntimeType},
 };

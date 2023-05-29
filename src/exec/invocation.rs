@@ -5,16 +5,14 @@ use slog::{debug, info};
 
 use crate::{
     cfg::CFGStatement,
-    eval::evaluate,
-    exec::State,
     syntax::{Declaration, Expression, Identifier, Invocation, Lhs, Method, RuntimeType},
     typeable::Typeable,
     utils,
 };
 
 use super::{
-    exec_method, exec_static_method, find_entry_for_static_invocation, remove_symbolic_null,
-    state_split::{self, split_states_with_aliases},
+    exec_method_entry, exec_static_method_entry, find_entry_for_static_invocation, remove_symbolic_null,
+    state_split::{self, split_states_with_aliases}, eval::evaluate, State,
     ActionResult, Engine,
 };
 
@@ -42,7 +40,7 @@ pub(super) fn single_method_invocation(
             .map(|arg| evaluate(state, arg.clone(), en))
             .collect::<Vec<_>>();
 
-        exec_static_method(
+        exec_static_method_entry(
             state,
             return_point,
             resolved_method.clone(),
@@ -282,7 +280,7 @@ fn non_static_resolved_method_invocation(
         invocation_lhs.to_owned().into(),
     );
 
-    exec_method(
+    exec_method_entry(
         state,
         return_point,
         resolved_method,

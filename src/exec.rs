@@ -20,12 +20,16 @@ use std::fmt::Debug;
 mod heuristics;
 mod invocation;
 mod state_split;
+mod array;
+pub(crate) mod heap;
+pub(crate) mod alias_map;
+pub(crate) mod constants;
 
 use crate::{
     cfg::{labelled_statements, CFGStatement, MethodIdentifier},
     concretization::{concretizations, find_symbolic_refs},
     dsl::{equal, ite, negate, to_int_expr},
-    eval::{evaluate, evaluate_as_int},
+    exec::eval::{evaluate, evaluate_as_int},
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
     insert_exceptional_clauses, language, parse_program,
     positioned::{SourcePos, WithPosition},
@@ -43,109 +47,19 @@ use crate::{
     utils, z3_checker, CompilationUnit, TypeExpr, FILE_NAMES,
 };
 
+use heap::*;
+use alias_map::*;
+use array::*;
+mod eval;
+
+
 use crate::exec::state_split::exec_array_initialisation;
 
-const NULL: Expression = Expression::Lit {
-    lit: Lit::NullLit,
-    type_: RuntimeType::ANYRuntimeType,
-    info: SourcePos::UnknownPosition,
-};
 
-pub fn retval() -> Identifier {
-    Identifier::with_unknown_pos("retval".to_string())
-}
-
-pub fn this_str() -> Identifier {
-    Identifier::with_unknown_pos("this".to_owned())
-}
-
-pub type Heap = ImHashMap<Reference, HeapValue>;
-
-pub fn get_element(index: usize, ref_: Reference, heap: &Heap) -> Rc<Expression> {
-    if let HeapValue::ArrayValue { elements, .. } = &heap[&ref_] {
-        return elements[index].clone();
-    }
-    panic!("Expected an array");
-}
-
-#[derive(Clone, Debug)]
-pub enum HeapValue {
-    ObjectValue {
-        fields: HashMap<Identifier, Rc<Expression>>,
-        type_: RuntimeType,
-    },
-    ArrayValue {
-        elements: Vec<Rc<Expression>>,
-        type_: RuntimeType,
-    },
-}
-
-impl HeapValue {
-    fn empty_object() -> HeapValue {
-        HeapValue::ObjectValue {
-            fields: HashMap::new(),
-            type_: RuntimeType::ANYRuntimeType,
-        }
-    }
-}
 
 type PathConstraints = ImHashSet<Expression>;
 
-pub type AliasMap = ImHashMap<Identifier, AliasEntry>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AliasEntry {
-    /// Expressions can only be Expression::Ref or null literal
-    pub aliases: Vec<Rc<Expression>>,
-    uniform_type: bool, // whether all aliases have the same type, or subclasses appear.
-}
-
-impl AliasEntry {
-    // pub fn aliases(&self) -> impl Iterator<Item=&Rc<Expression>> + Clone {
-    //     self.aliases.iter()
-    // }
-
-    pub fn new(aliases: Vec<Rc<Expression>>) -> AliasEntry {
-        let uniform_type = aliases
-            .iter()
-            .map(AsRef::as_ref)
-            .filter(|e| **e != Expression::NULL)
-            .map(Typeable::type_of)
-            .all_equal();
-
-        AliasEntry {
-            aliases,
-            uniform_type: uniform_type,
-        }
-    }
-
-    pub fn aliases(&self) -> &Vec<Rc<Expression>> {
-        &self.aliases
-    }
-
-    /// Returns Some type if all alias types are equal, otherwise return None.
-    fn uniform_type(&self) -> Option<RuntimeType> {
-        if self.uniform_type {
-            self.aliases
-                .iter()
-                .map(AsRef::as_ref)
-                .filter(|e| **e != Expression::NULL)
-                .next()
-                .map(Typeable::type_of)
-        } else {
-            None
-        }
-    }
-
-    fn remove_null(&mut self) {
-        self.aliases.retain(|x| match x.as_ref() {
-            Expression::Lit {
-                lit: Lit::NullLit, ..
-            } => false,
-            _ => true,
-        });
-    }
-}
 
 enum Output {
     Valid,
@@ -181,8 +95,10 @@ where
     }
 }
 
+/// The state object, of a path 
 #[derive(Clone)]
 pub struct State {
+    /// The current 'program counter' this state is at in the control flow graph
     pc: u64,
     pub stack: Stack,
     pub heap: Heap,
@@ -315,50 +231,6 @@ impl Engine for DFSEngine<'_> {
     }
 }
 
-/// Initialises an array by creating a concrete array of size array_size in the heap, symbolic objects are initialised lazily.
-/// The resulting state has a single concrete array (or null) in its alias map.
-fn array_initialisation(
-    state: &mut State,
-    array_name: &Identifier,
-    array_size: u64,
-    array_type: RuntimeType,
-    inner_type: RuntimeType,
-    st: &SymbolTable,
-) {
-    let r = state.next_reference_id();
-
-    state.alias_map.insert(
-        array_name.clone(),
-        AliasEntry::new(vec![Rc::new(Expression::Ref {
-            ref_: r,
-            type_: array_type.clone(),
-            info: SourcePos::UnknownPosition,
-        })]),
-    );
-
-    let array_elements = (0..array_size)
-        .map(|i| {
-            create_symbolic_var(
-                format!("{}{}", array_name, i).into(),
-                inner_type.clone(),
-                st,
-            )
-            .into()
-        })
-        .collect();
-
-    state.heap.insert(
-        r,
-        HeapValue::ArrayValue {
-            elements: array_elements,
-            type_: array_type.clone(),
-        }
-        .into(),
-    );
-
-    // dbg!("after array initialization", &state.heap, &state.alias_map);
-}
-
 enum ActionResult {
     /// Statement executed, continue
     Continue,
@@ -441,23 +313,21 @@ fn action(
         CFGStatement::Statement(Statement::Return { expression, .. }) => {
             if let Some(expression) = expression {
                 let expression = evaluate(state, Rc::new(expression.clone()), en);
-                state.stack.insert_variable(retval(), expression);
+                state.stack.insert_variable(constants::retval(), expression);
             }
             ActionResult::Continue
         }
         CFGStatement::FunctionEntry { .. } => {
-            // only check preconditions when it's the first method called??
-            // we assume that the previous stackframe is of this method
             let StackFrame { current_member, .. } = state.stack.current_stackframe().unwrap();
             if let Some((requires, type_guard)) = current_member.requires() {
-                // if this is the program entry, assume that require is true, otherwise assert it.
+                // if this is the program entry, assume that `requires(..)` is true, otherwise assert it.
                 if state.path_length == 0 {
                     // First check the normal expression
                     let expression = evaluate(state, requires, en);
-                    if *expression == false_lit() {
+                    if *expression == Expression::FALSE {
                         println!("Constraint is infeasible");
                         return ActionResult::InfeasiblePath;
-                    } else if *expression != true_lit() {
+                    } else if *expression != Expression::TRUE {
                         state.constraints.insert(expression.deref().clone());
                     }
                     // Also check the type guard expression if available.
@@ -523,7 +393,7 @@ fn action(
                 let return_type = current_member.type_of();
                 if return_type != RuntimeType::VoidRuntimeType {
                     if let Some(lhs) = t {
-                        let rv = params.get(&retval()).unwrap();
+                        let rv = params.get(&constants::retval()).unwrap();
                         let return_value = evaluate(state, rv.clone(), en);
 
                         // perhaps also write retval to current stack?
@@ -626,9 +496,9 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl E
     en.statistics().measure_veficiation();
     // println!("expression: {:?}", &expression);
 
-    if *expression == true_lit() {
+    if *expression == Expression::TRUE {
         false
-    } else if *expression == false_lit() {
+    } else if *expression == Expression::FALSE {
         true
     } else {
         let symbolic_refs = find_symbolic_refs(&expression);
@@ -680,11 +550,11 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl E
 
                 for expression in expressions {
                     let expression = evaluate(state, expression, en);
-                    if *expression == true_lit() {
+                    if *expression == Expression::TRUE {
                         // Invalid
                         en.statistics().measure_local_solve();
                         return false;
-                    } else if *expression == false_lit() {
+                    } else if *expression == Expression::FALSE {
                         // valid, continue
                         en.statistics().measure_local_solve();
                     } else {
@@ -783,9 +653,9 @@ fn exec_invocation(
                     identifier: class_name.clone(),
                     info: SourcePos::UnknownPosition,
                 },
-                this_str(),
+                constants::this_str(),
             );
-            exec_constructor(
+            exec_constructor_entry(
                 state,
                 return_point,
                 method.clone(),
@@ -824,7 +694,7 @@ fn exec_invocation(
                     identifier: class_name.clone(),
                     info: SourcePos::UnknownPosition,
                 },
-                this_str(),
+                constants::this_str(),
             );
             exec_super_constructor(
                 state,
@@ -863,7 +733,7 @@ fn exec_invocation(
 }
 
 /// Given a class name and method name, lookup the entry node in the Control Flow Graph
-/// Also checks if the argument types are consistent.
+/// Also checks if the argument types match.
 /// Panics if the method is not found
 pub fn find_entry_for_static_invocation(
     class_name: &str,
@@ -906,7 +776,7 @@ pub fn find_entry_for_static_invocation(
     *entry
 }
 
-fn exec_method(
+fn exec_method_entry(
     state: &mut State,
     return_point: u64,
     method: Rc<Method>,
@@ -917,7 +787,7 @@ fn exec_method(
 ) {
     let this_param = Parameter::new(
         runtime_to_nonvoidtype(this.0.clone()).expect("concrete, nonvoid type"),
-        this_str(),
+        constants::this_str(),
     );
 
     let this_expr = Expression::Var {
@@ -938,7 +808,7 @@ fn exec_method(
     )
 }
 
-fn exec_static_method(
+fn exec_static_method_entry(
     state: &mut State,
     return_point: u64,
     member: Rc<Method>,
@@ -957,7 +827,7 @@ fn exec_static_method(
     )
 }
 
-fn exec_constructor(
+fn exec_constructor_entry(
     state: &mut State,
     return_point: u64,
     method: Rc<Method>,
@@ -1008,7 +878,7 @@ fn exec_super_constructor(
     // instead of allocating a new object, add the new fields to the existing 'this' object.
     let object_ref = state
         .stack
-        .lookup(&this_str())
+        .lookup(&constants::this_str())
         .expect("super() is called in a constructor with a 'this' object on the stack");
     let arguments = std::iter::once(object_ref).chain(arguments.iter().cloned());
 
@@ -1191,14 +1061,6 @@ fn write_field_symbolic_ref(
     }
 }
 
-fn null() -> Expression {
-    Expression::Lit {
-        lit: Lit::NullLit,
-        type_: RuntimeType::ANYRuntimeType,
-        info: SourcePos::UnknownPosition,
-    }
-}
-
 /// Initialise a symbolic object reference.
 pub fn init_symbolic_reference(
     state: &mut State,
@@ -1307,10 +1169,7 @@ fn init_symbolic_object(
 
     state.alias_map.insert(
         sym_ref.clone(),
-        AliasEntry {
-            aliases,
-            uniform_type: has_unique_type,
-        },
+        AliasEntry::new_with_uniform_type(aliases, has_unique_type),
     );
 }
 
@@ -1388,7 +1247,6 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
     }
 }
 
-// fn evaluateRhs(state: &mut State, rhs: &Rhs) -> Expression {
 fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expression> {
     match rhs {
         Rhs::RhsExpression { value, .. } => {
@@ -1541,22 +1399,11 @@ fn exec_rhs_elem(
     }
 }
 
-fn true_lit() -> Expression {
-    Expression::Lit {
-        lit: Lit::BoolLit { bool_value: true },
-        type_: RuntimeType::BoolRuntimeType,
-        info: SourcePos::UnknownPosition,
-    }
-}
 
-fn false_lit() -> Expression {
-    Expression::Lit {
-        lit: Lit::BoolLit { bool_value: false },
-        type_: RuntimeType::BoolRuntimeType,
-        info: SourcePos::UnknownPosition,
-    }
-}
 
+/// Removes Null literals from the aliasmap entry.
+/// This is allowed since we assume to have exceptional checks for null added in OOX parser.
+/// See [`insert_exceptional_clauses`].
 fn remove_symbolic_null(alias_map: &mut AliasMap, var: &Identifier) {
     // dbg!(&alias_map, &var);
     alias_map.get_mut(var).unwrap().remove_null()
@@ -1671,45 +1518,6 @@ fn write_elem_symbolic_index(
     }
 }
 
-/// Constructs an array that was created by an OOX statement like this:
-// / ```
-// / int[] a = new int[10];
-// / ```
-/// in this example, array_type = int, sizes = { 10 }, type_ = int[].
-fn exec_array_construction(
-    state: &mut State,
-    array_type: &NonVoidType,
-    sizes: &Vec<Expression>,
-    type_: &RuntimeType,
-    en: &mut impl Engine,
-) -> Rc<Expression> {
-    let ref_id = state.next_reference_id();
-
-    assert!(sizes.len() == 1, "Support for only 1D arrays");
-    // int[][] a = new int[10][10];
-
-    let size = evaluate_as_int(state, Rc::new(sizes[0].clone()), en)
-        .expect_right("no symbolic array sizes");
-
-    let array = (0..size)
-        .map(|_| Rc::new(array_type.default()))
-        .collect_vec();
-
-    state.heap.insert(
-        ref_id,
-        HeapValue::ArrayValue {
-            elements: array,
-            type_: type_.clone(),
-        },
-    );
-
-    Rc::new(Expression::Ref {
-        ref_: ref_id,
-        type_: type_.clone(),
-        info: SourcePos::UnknownPosition,
-    })
-}
-
 /// Helper function, does not invoke Z3 but tries to evaluate the assumption locally.
 /// Returns whether the assumption was found to be feasible.
 /// Otherwise it inserts the assumption into the constraints.
@@ -1722,9 +1530,9 @@ fn exec_assume(
     match assumption {
         Either::Left(assumption) => {
             let expression = evaluate(state, assumption, en);
-            if *expression == false_lit() {
+            if *expression == Expression::FALSE {
                 return false;
-            } else if *expression != true_lit() {
+            } else if *expression != Expression::TRUE {
                 state.constraints.insert(expression.deref().clone());
             }
         }
@@ -1998,7 +1806,7 @@ pub fn verify(
             current_member: initial_method,
         }]),
         heap: ImHashMap::new(),
-        precondition: true_lit(),
+        precondition: Expression::TRUE,
         constraints: ImHashSet::new(),
         alias_map: ImHashMap::new(),
         ref_counter: IdCounter::new(0),

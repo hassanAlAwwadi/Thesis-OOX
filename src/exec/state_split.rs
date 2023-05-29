@@ -8,7 +8,7 @@ use itertools::Either;
 use slog::{debug, info};
 
 use crate::{
-    exec::{array_initialisation, AliasEntry},
+    exec::{array::array_initialisation, AliasEntry},
     syntax::{Expression, Identifier, RuntimeType},
 };
 
@@ -111,7 +111,6 @@ pub(super) fn exec_array_initialisation(
 
     // initialise new states with arrays 1..N
     for array_size in 1..=N {
-        let path_id = engine.next_path_id();
         let mut new_state = engine.clone_state_with_new_path_id(state);
         array_initialisation(
             &mut new_state,

@@ -7,7 +7,7 @@ use itertools::{Either, Itertools};
 use crate::{
     dsl::{ands, negate, negative, ors, to_int_expr},
     exec::{
-        get_element, init_symbolic_reference, single_alias_elimination, Engine, HeapValue, State,
+        heap, init_symbolic_reference, single_alias_elimination, Engine, State,
     },
     positioned::SourcePos,
     syntax::{BinOp, Expression, Identifier, Lit, RuntimeType, UnOp},
@@ -83,7 +83,7 @@ fn eval_locally(
                     return Expression::int(-1);
                 }
                 Expression::Ref { ref_, .. } => {
-                    if let HeapValue::ArrayValue { elements, .. } = &state.heap[ref_] {
+                    if let heap::HeapValue::ArrayValue { elements, .. } = &state.heap[ref_] {
                         return Expression::int(elements.len() as i64);
                     }
                 }
@@ -397,7 +397,7 @@ where
             lit: Lit::NullLit, ..
         } => Expression::FALSE.into(), // return false?
         Expression::Ref { ref_, .. } => {
-            let len = if let HeapValue::ArrayValue { elements, .. } = state.heap.get(&ref_).unwrap()
+            let len = if let heap::HeapValue::ArrayValue { elements, .. } = state.heap.get(&ref_).unwrap()
             {
                 elements.len()
             } else {
@@ -407,7 +407,7 @@ where
             //
             let formulas = (0..len)
                 .map(|i| {
-                    let element = get_element(i, *ref_, &state.heap);
+                    let element = heap::get_element(i, *ref_, &state.heap);
                     let index = to_int_expr(i as i64);
 
                     state.stack.insert_variable(elem.clone(), element.clone());

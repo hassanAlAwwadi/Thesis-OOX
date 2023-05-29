@@ -39,7 +39,7 @@ pub mod concretization {
 pub mod all_z3 {
     use z3::Sort;
 
-    use crate::exec::AliasMap;
+    use crate::exec::alias_map::AliasMap;
 
     use super::*;
 

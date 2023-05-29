@@ -9,7 +9,7 @@ use std::str::{self, FromStr};
 use std::iter::Extend;
 
 use crate::dsl::{equal, greater_than_equal, less_than, negate, ors, size_of};
-use crate::exec::this_str;
+use crate::exec::constants::this_str;
 use crate::positioned::{SourcePos, WithPosition};
 use crate::syntax::*;
 use crate::typeable::Typeable;
@@ -1100,18 +1100,18 @@ fn create_exceptional_ites(
     )
 }
 
-// Inserts if-then-else statements for OOX statements that may throw nullpointer exceptions.
-//
-// for example:
-// `int x := o.y;`
-//
-// becomes:
-//
-// `if (o == null) {
-//  throw "exception";
-// } else {
-//  int x := o.y;
-// }`
+/// Inserts if-then-else statements for OOX statements that may throw nullpointer exceptions.
+///
+/// for example:
+/// `int x := o.y;`
+///
+/// becomes:
+///
+/// `if (o == null) {
+///  throw "exception";
+/// } else {
+///  int x := o.y;
+/// }`
 pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> CompilationUnit {
     // used to check if an invocation is a static call.
     let decl_names = compilation_unit
