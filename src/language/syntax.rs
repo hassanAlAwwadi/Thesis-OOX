@@ -126,7 +126,7 @@ impl Method {
         self.specification.exceptional.clone()
     }
 
-    pub fn param_types<'a>(&'a self) -> impl Iterator<Item = RuntimeType> + 'a {
+    pub fn param_types(&self) -> impl Iterator<Item = RuntimeType> + '_ {
         self.params.iter().map(|p| p.type_of())
     }
 }
@@ -180,11 +180,7 @@ impl DeclarationMember {
         }
     }
     pub fn is_constructor(&self) -> bool {
-        if let DeclarationMember::Constructor(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, DeclarationMember::Constructor(_))
     }
 
     pub fn try_into_method(&self) -> Option<Rc<Method>> {

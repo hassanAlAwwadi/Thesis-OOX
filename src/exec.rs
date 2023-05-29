@@ -1837,7 +1837,7 @@ pub(crate) fn single_alias_elimination(
 
 pub type Error = String;
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
 pub enum Heuristic {
     DepthFirstSearch,
     RandomPath,

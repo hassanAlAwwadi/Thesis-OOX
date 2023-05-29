@@ -4,13 +4,13 @@ use crate::positioned::{SourcePos, WithPosition};
 
 use std::{
     fmt::{Debug, Display},
-    ops::Deref,
+    ops::Deref, rc::Rc,
 };
 
 #[derive(Clone, Derivative)]
 #[derivative(PartialEq, Hash, Eq)]
 pub struct Identifier {
-    name: String,
+    name: Rc<str>,
 
     #[derivative(PartialEq = "ignore")]
     #[derivative(Hash = "ignore")]
@@ -37,24 +37,24 @@ impl Display for Identifier {
 
 impl PartialEq<&str> for Identifier {
     fn eq(&self, other: &&str) -> bool {
-        self.name == *other
+        self.name.as_ref() == *other
     }
 }
 
 impl PartialEq<Identifier> for &str {
     fn eq(&self, other: &Identifier) -> bool {
-        other.name == *self
+        other.name.as_ref() == *self
     }
 }
 
 impl Identifier {
     pub fn with_pos(name: String, info: SourcePos) -> Identifier {
-        Identifier { name, info }
+        Identifier { name: name.into(), info }
     }
 
     pub fn with_unknown_pos(name: String) -> Identifier {
         Identifier {
-            name,
+            name: name.into(),
             info: SourcePos::UnknownPosition,
         }
     }
@@ -92,6 +92,6 @@ impl From<String> for Identifier {
 
 impl Into<String> for Identifier {
     fn into(self) -> String {
-        self.name
+        self.name.to_string()
     }
 }
