@@ -1,3 +1,5 @@
+//! This module contains functions and types related to function calls in OOX.
+//! 
 use std::{collections::HashMap, rc::Rc};
 
 use itertools::Itertools;
@@ -5,27 +7,38 @@ use slog::{debug, info};
 
 use crate::{
     cfg::CFGStatement,
+    stack::StackFrame,
     syntax::{Declaration, Expression, Identifier, Invocation, Lhs, Method, RuntimeType},
-    typeable::Typeable,
-    utils,
+    typeable::{runtime_to_nonvoidtype, Typeable},
+    utils, Parameter,
 };
 
 use super::{
-    exec_method_entry, exec_static_method_entry, find_entry_for_static_invocation, remove_symbolic_null,
-    state_split::{self, split_states_with_aliases}, eval::evaluate, State,
-    ActionResult, Engine,
+    constants,
+    eval::evaluate,
+    find_entry_for_static_invocation,
+    heap::HeapValue,
+    remove_symbolic_null,
+    state_split::{self, split_states_with_aliases},
+    ActionResult, Engine, State,
 };
+
+/// A struct to pass around context types of invocation more easily.
+#[derive(Clone)]
+pub(super) struct InvocationContext<'a> {
+    pub(super) lhs: Option<Lhs>,
+    pub(super) return_point: u64,
+    pub(super) invocation: &'a Invocation,
+    pub(super) program: &'a HashMap<u64, CFGStatement>,
+}
 
 /// A static method, or a method that is not overriden anywhere (non-polymorphic)
 /// This means that there is only one method that can be called
 /// Returns the next function entry CFG
 pub(super) fn single_method_invocation(
     state: &mut State,
-    invocation: &Invocation,
+    context: InvocationContext,
     resolved: &(Declaration, Rc<Method>),
-    return_point: u64,
-    lhs: Option<Lhs>,
-    program: &HashMap<u64, CFGStatement>,
     en: &mut impl Engine,
 ) -> u64 {
     info!(state.logger, "Single method invocation");
@@ -34,26 +47,22 @@ pub(super) fn single_method_invocation(
 
     if resolved_method.is_static {
         // evaluate arguments
-        let arguments = invocation
-            .arguments()
-            .into_iter()
-            .map(|arg| evaluate(state, arg.clone(), en))
-            .collect::<Vec<_>>();
+        let arguments = evaluated_arguments(context.invocation, state, en);
 
         exec_static_method_entry(
             state,
-            return_point,
+            context.return_point,
             resolved_method.clone(),
-            lhs,
+            context.lhs,
             &arguments,
             &resolved_method.params,
             en,
         );
         let next_entry = find_entry_for_static_invocation(
             class_name,
-            invocation.identifier(),
-            invocation.argument_types(),
-            program,
+            context.invocation.identifier(),
+            context.invocation.argument_types(),
+            context.program,
             en.symbol_table(),
         );
 
@@ -61,12 +70,9 @@ pub(super) fn single_method_invocation(
     } else {
         non_static_resolved_method_invocation(
             state,
-            invocation,
+            context,
             class_name,
             resolved_method.clone(),
-            return_point,
-            lhs,
-            program,
             en,
         )
     }
@@ -79,12 +85,9 @@ pub(super) fn single_method_invocation(
 pub(super) fn multiple_method_invocation(
     state: &mut State,
     invocation_lhs: &Identifier,
-    invocation: &Invocation,
+    context: InvocationContext,
     // For each type, the method implementation it resolves to.
     potential_methods: &HashMap<Identifier, (Declaration, Rc<Method>)>,
-    return_point: u64,
-    lhs: Option<Lhs>,
-    program: &HashMap<u64, CFGStatement>,
     en: &mut impl Engine,
 ) -> ActionResult {
     info!(state.logger, "Multiple method invocation");
@@ -104,12 +107,9 @@ pub(super) fn multiple_method_invocation(
 
             let next_entry = non_static_resolved_method_invocation(
                 state,
-                invocation,
+                context,
                 decl_name,
                 member.clone(),
-                return_point,
-                lhs,
-                program,
                 en,
             );
             return ActionResult::FunctionCall(next_entry);
@@ -129,12 +129,9 @@ pub(super) fn multiple_method_invocation(
 
                 let next_entry = non_static_resolved_method_invocation(
                     state,
-                    invocation,
+                    context,
                     decl_name,
                     member.clone(),
-                    return_point,
-                    lhs,
-                    program,
                     en,
                 );
                 return ActionResult::FunctionCall(next_entry);
@@ -170,12 +167,9 @@ pub(super) fn multiple_method_invocation(
 
                     let next_entry = non_static_resolved_method_invocation(
                         state,
-                        invocation,
+                        context,
                         decl_name,
                         method.clone(),
-                        return_point,
-                        lhs,
-                        program,
                         en,
                     );
                     return ActionResult::FunctionCall(next_entry);
@@ -189,11 +183,8 @@ pub(super) fn multiple_method_invocation(
                 return multiple_method_invocation(
                     state,
                     invocation_lhs,
-                    invocation,
+                    context,
                     potential_methods,
-                    return_point,
-                    lhs,
-                    program,
                     en,
                 );
             }
@@ -216,11 +207,8 @@ pub(super) fn multiple_method_invocation(
             return multiple_method_invocation(
                 state,
                 invocation_lhs,
-                invocation,
+                context,
                 potential_methods,
-                return_point,
-                lhs,
-                program,
                 en,
             );
         }
@@ -246,27 +234,20 @@ fn find_unique_type(aliases: &Vec<Rc<Expression>>) -> Option<RuntimeType> {
     }
 }
 
-/// Helper method for a non-static method invocation with an already resolved method.
+/// Helper function for a non-static method invocation with an already resolved method.
 fn non_static_resolved_method_invocation(
     state: &mut State,
-    invocation: &Invocation,
+    context: InvocationContext,
     class_name: &Identifier,
     resolved_method: Rc<Method>,
-    return_point: u64,
-    lhs: Option<Lhs>,
-    program: &HashMap<u64, CFGStatement>,
     en: &mut impl Engine,
 ) -> u64 {
     info!(state.logger, "non-static method invocation");
 
     // evaluate arguments
-    let arguments = invocation
-        .arguments()
-        .into_iter()
-        .map(|arg| evaluate(state, arg.clone(), en))
-        .collect::<Vec<_>>();
+    let arguments = evaluated_arguments(context.invocation, state, en);
 
-    let invocation_lhs = match invocation {
+    let invocation_lhs = match context.invocation {
         Invocation::InvokeMethod { lhs, .. } => lhs,
         Invocation::InvokeSuperMethod { .. } => "this", // we pass "this" object to superclass methods aswell.
         _ => panic!("expected invoke method or invokeSuperMethod"),
@@ -282,9 +263,9 @@ fn non_static_resolved_method_invocation(
 
     exec_method_entry(
         state,
-        return_point,
+        context.return_point,
         resolved_method,
-        lhs,
+        context.lhs,
         &arguments,
         en,
         this,
@@ -292,11 +273,158 @@ fn non_static_resolved_method_invocation(
 
     let next_entry = find_entry_for_static_invocation(
         class_name,
-        invocation.identifier(),
-        invocation.argument_types(),
-        program,
+        context.invocation.identifier(),
+        context.invocation.argument_types(),
+        context.program,
         en.symbol_table(),
     );
 
     return next_entry;
+}
+
+fn exec_method_entry(
+    state: &mut State,
+    return_point: u64,
+    method: Rc<Method>,
+    lhs: Option<Lhs>,
+    arguments: &[Rc<Expression>],
+    en: &mut impl Engine,
+    this: (RuntimeType, Identifier),
+) {
+    let this_param = Parameter::new(
+        runtime_to_nonvoidtype(this.0.clone()).expect("concrete, nonvoid type"),
+        constants::this_str(),
+    );
+
+    let this_expr = Expression::Var {
+        var: this.1.clone(),
+        type_: this.0,
+        info: method.info,
+    };
+    let parameters = std::iter::once(&this_param).chain(method.params.iter());
+    let arguments = std::iter::once(Rc::new(this_expr)).chain(arguments.iter().cloned());
+
+    push_stack_frame(
+        state,
+        return_point,
+        method.clone(),
+        lhs,
+        parameters.zip(arguments),
+        en,
+    )
+}
+
+fn exec_static_method_entry(
+    state: &mut State,
+    return_point: u64,
+    member: Rc<Method>,
+    lhs: Option<Lhs>,
+    arguments: &[Rc<Expression>],
+    parameters: &[Parameter],
+    en: &mut impl Engine,
+) {
+    push_stack_frame(
+        state,
+        return_point,
+        member,
+        lhs,
+        parameters.iter().zip(arguments.iter().cloned()),
+        en,
+    )
+}
+
+pub(super) fn exec_constructor_entry(
+    state: &mut State,
+    context: InvocationContext,
+    method: Rc<Method>,
+    class_name: &Identifier,
+    en: &mut impl Engine,
+    this_param: Parameter,
+) {
+    let parameters = std::iter::once(&this_param).chain(method.params.iter());
+
+    let fields = en
+        .symbol_table()
+        .get_all_fields(class_name)
+        .iter()
+        .map(|(s, t)| (s.clone(), t.default().into()))
+        .collect();
+    let structure = HeapValue::ObjectValue {
+        fields,
+        type_: method.type_of(),
+    };
+
+    let object_ref = state.allocate_on_heap(structure);
+    let arguments = std::iter::once(object_ref).chain(evaluated_arguments(context.invocation, state, en));
+
+    push_stack_frame(
+        state,
+        context.return_point,
+        method.clone(),
+        context.lhs,
+        parameters.zip(arguments),
+        en,
+    )
+}
+
+pub(super) fn exec_super_constructor(
+    state: &mut State,
+    context: InvocationContext,
+    method: Rc<Method>,
+    parameters: &[Parameter],
+    en: &mut impl Engine,
+    this_param: Parameter,
+) {
+    let parameters = std::iter::once(&this_param).chain(parameters.iter());
+
+    // instead of allocating a new object, add the new fields to the existing 'this' object.
+    let object_ref = state
+        .stack
+        .lookup(&constants::this_str())
+        .expect("super() is called in a constructor with a 'this' object on the stack");
+    let arguments = std::iter::once(object_ref).chain(evaluated_arguments(context.invocation, state, en));
+
+    push_stack_frame(
+        state,
+        context.return_point,
+        method,
+        context.lhs,
+        parameters.zip(arguments),
+        en,
+    )
+}
+
+fn push_stack_frame<'a, P>(
+    state: &mut State,
+    return_point: u64,
+    method: Rc<Method>,
+    lhs: Option<Lhs>,
+    params: P,
+    en: &mut impl Engine,
+) where
+    P: Iterator<Item = (&'a crate::Parameter, Rc<Expression>)>,
+{
+    let params = params
+        .map(|(p, e)| (p.name.clone(), evaluate(state, e, en)))
+        .collect();
+    let stack_frame = StackFrame {
+        pc: return_point,
+        returning_lhs: lhs,
+        params,
+        current_member: method,
+    };
+    state.stack.push(stack_frame);
+}
+
+/// Helper function to get and evaluate arguments from invocation.
+fn evaluated_arguments(
+    invocation: &Invocation,
+    state: &mut State,
+    en: &mut impl Engine,
+) -> Vec<Rc<Expression>> {
+    invocation
+        .arguments()
+        .into_iter()
+        .map(|arg| evaluate(state, arg.clone(), en))
+        .collect::<Vec<_>>()
 }

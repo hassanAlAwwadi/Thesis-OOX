@@ -1,4 +1,4 @@
-//! This module contains functions that split up the state, for reasons other than due to an if/while statement in the code.
+//! This module contains functions that split up the state, for reasons other than due to an if/while (branching) statement in the code.
 //! This includes conditional state splitting, splitting of state due to different typing of an object,
 //! and array initialisation.
 
@@ -95,13 +95,13 @@ pub(super) fn exec_array_initialisation(
     array_name: Identifier,
     array_type: RuntimeType,
 ) {
-    const N: u64 = 3;
-    engine.statistics().measure_branches((N + 1) as u32); // including null, so + 1
+    let max_array_size = engine.options().symbolic_array_size;
+    engine.statistics().measure_branches((max_array_size + 1) as u32); // including null, so + 1
     info!(
         state.logger,
         "Symbolic array initialisation of {} into {} paths",
         array_name,
-        N + 1
+        max_array_size + 1
     );
 
     let inner_type = match array_type.clone() {
@@ -110,7 +110,7 @@ pub(super) fn exec_array_initialisation(
     };
 
     // initialise new states with arrays 1..N
-    for array_size in 1..=N {
+    for array_size in 1..=max_array_size {
         let mut new_state = engine.clone_state_with_new_path_id(state);
         array_initialisation(
             &mut new_state,

@@ -3,13 +3,14 @@ use std::borrow::Borrow;
 use ordered_float::NotNan;
 
 use crate::{
+    exec::heap::HeapValue,
     positioned::SourcePos,
     symbol_table::SymbolTable,
     syntax::{
         DeclarationMember, Expression, Invocation, Lhs, Lit, Method, NonVoidType, Parameter, Rhs,
         RuntimeType, Type,
     },
-    TypeExpr, exec::heap::HeapValue,
+    TypeExpr,
 };
 
 pub trait Typeable {

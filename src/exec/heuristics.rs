@@ -1,14 +1,14 @@
 use std::{cell::RefCell, collections::HashMap, ops::DerefMut, rc::Rc};
 
 use itertools::Itertools;
-use slog::{Logger, o};
+use slog::{o, Logger};
 
 use crate::{
     cfg::CFGStatement,
     exec::{action, ActionResult},
     positioned::SourcePos,
     statistics::Statistics,
-    symbol_table::SymbolTable,
+    symbol_table::SymbolTable, Options,
 };
 
 use execution_tree::ExecutionTree;
@@ -36,11 +36,11 @@ fn execute_instruction_for_all_states(
     states: Vec<State>,
     program: &HashMap<u64, CFGStatement>,
     flows: &HashMap<u64, Vec<u64>>,
-    k: u64,
     st: &SymbolTable,
     root_logger: Logger,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &mut Statistics,
+    options: &Options,
 ) -> Result<HashMap<u64, Vec<State>>, SourcePos> {
     assert!(states.len() > 0);
 
@@ -59,7 +59,7 @@ fn execute_instruction_for_all_states(
         debug_assert!(remaining_states.iter().map(|s| s.pc).all_equal());
 
         // dbg!(&remaining_states.len());
-        if state.path_length >= k {
+        if state.path_length >= options.k {
             // finishing current branch
             statistics.measure_finish();
             continue;
@@ -68,12 +68,13 @@ fn execute_instruction_for_all_states(
         let next = action(
             &mut state,
             program,
-            &mut crate::exec::DFSEngine {
+            &mut crate::exec::EngineContext {
                 remaining_states: &mut remaining_states,
                 path_counter: path_counter.clone(),
                 statistics,
                 st,
                 root_logger: &root_logger,
+                options
             },
         );
         match next {

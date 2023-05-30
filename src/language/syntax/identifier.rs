@@ -4,7 +4,8 @@ use crate::positioned::{SourcePos, WithPosition};
 
 use std::{
     fmt::{Debug, Display},
-    ops::Deref, rc::Rc,
+    ops::Deref,
+    rc::Rc,
 };
 
 #[derive(Clone, Derivative)]
@@ -49,7 +50,10 @@ impl PartialEq<Identifier> for &str {
 
 impl Identifier {
     pub fn with_pos(name: String, info: SourcePos) -> Identifier {
-        Identifier { name: name.into(), info }
+        Identifier {
+            name: name.into(),
+            info,
+        }
     }
 
     pub fn with_unknown_pos(name: String) -> Identifier {

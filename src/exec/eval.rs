@@ -6,9 +6,7 @@ use itertools::{Either, Itertools};
 
 use crate::{
     dsl::{ands, negate, negative, ors, to_int_expr},
-    exec::{
-        heap, init_symbolic_reference, single_alias_elimination, Engine, State,
-    },
+    exec::{heap, init_symbolic_reference, single_alias_elimination, Engine, State},
     positioned::SourcePos,
     syntax::{BinOp, Expression, Identifier, Lit, RuntimeType, UnOp},
 };
@@ -397,7 +395,8 @@ where
             lit: Lit::NullLit, ..
         } => Expression::FALSE.into(), // return false?
         Expression::Ref { ref_, .. } => {
-            let len = if let heap::HeapValue::ArrayValue { elements, .. } = state.heap.get(&ref_).unwrap()
+            let len = if let heap::HeapValue::ArrayValue { elements, .. } =
+                state.heap.get(&ref_).unwrap()
             {
                 elements.len()
             } else {

@@ -4,7 +4,7 @@ use slog::Logger;
 
 use crate::{
     cfg::CFGStatement, exec::heuristics::execute_instruction_for_all_states,
-    statistics::Statistics, symbol_table::SymbolTable,
+    statistics::Statistics, symbol_table::SymbolTable, Options,
 };
 
 use super::{IdCounter, State, SymResult};
@@ -15,13 +15,12 @@ pub(crate) fn sym_exec(
     state: State,
     program: &HashMap<u64, CFGStatement>,
     flows: &HashMap<u64, Vec<u64>>,
-    k: u64,
     st: &SymbolTable,
     root_logger: Logger,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &mut Statistics,
     _entry_method: crate::cfg::MethodIdentifier,
-    _visualize_heuristic: bool,
+    options: &Options,
 ) -> SymResult {
     let mut remaining_states = vec![state];
 
@@ -31,11 +30,11 @@ pub(crate) fn sym_exec(
             vec![state],
             program,
             flows,
-            k,
             st,
             root_logger.clone(),
             path_counter.clone(),
             statistics,
+            options,
         );
 
         match step {

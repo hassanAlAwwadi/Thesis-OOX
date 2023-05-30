@@ -2,14 +2,14 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 
-use crate::{RuntimeType, Lit};
-use crate::{Expression, typeable::Typeable, Identifier};
+use crate::{typeable::Typeable, Expression, Identifier};
+use crate::{Lit, RuntimeType};
 
 use crate::exec::ImHashMap;
 
 pub type AliasMap = ImHashMap<Identifier, AliasEntry>;
 
-/// An entry in the aliasmap. Every initialised symbolic reference should have an entry in the alias map. 
+/// An entry in the aliasmap. Every initialised symbolic reference should have an entry in the alias map.
 /// If it is not in the aliasmap it has not been lazily-initialised and has not been used in the OOX program yet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AliasEntry {
@@ -25,7 +25,10 @@ impl AliasEntry {
 
     /// Assumes that the uniform_type is correct with respect to aliases.
     pub fn new_with_uniform_type(aliases: Vec<Rc<Expression>>, uniform_type: bool) -> AliasEntry {
-        AliasEntry { aliases, uniform_type }
+        AliasEntry {
+            aliases,
+            uniform_type,
+        }
     }
 
     pub fn new(aliases: Vec<Rc<Expression>>) -> AliasEntry {

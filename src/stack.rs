@@ -52,7 +52,8 @@ impl Stack {
 #[derive(Clone, Debug)]
 pub struct StackFrame {
     pub pc: u64,
-    pub t: Option<Lhs>,
+    /// The left hand side operation of the method call; `int x := o.f();`. Needed here to assign the method result to.
+    pub returning_lhs: Option<Lhs>,
     pub params: HashMap<Identifier, Rc<Expression>>,
     pub current_member: Rc<Method>,
 }

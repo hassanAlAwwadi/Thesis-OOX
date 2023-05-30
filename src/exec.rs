@@ -17,20 +17,23 @@ use z3::SatResult;
 
 use std::fmt::Debug;
 
+pub(crate) mod alias_map;
+mod array;
+pub(crate) mod constants;
+pub(crate) mod heap;
 mod heuristics;
 mod invocation;
 mod state_split;
-mod array;
-pub(crate) mod heap;
-pub(crate) mod alias_map;
-pub(crate) mod constants;
 
 use crate::{
     cfg::{labelled_statements, CFGStatement, MethodIdentifier},
     concretization::{concretizations, find_symbolic_refs},
     dsl::{equal, ite, negate, to_int_expr},
-    exec::eval::{evaluate, evaluate_as_int},
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
+    exec::{
+        eval::{evaluate, evaluate_as_int},
+        invocation::InvocationContext,
+    },
     insert_exceptional_clauses, language, parse_program,
     positioned::{SourcePos, WithPosition},
     prettyprint::cfg_pretty::pretty_print_compilation_unit,
@@ -42,24 +45,19 @@ use crate::{
         BinOp, Declaration, Expression, Identifier, Invocation, Lhs, Lit, Method, NonVoidType,
         Parameter, Reference, Rhs, RuntimeType, Statement,
     },
-    typeable::{runtime_to_nonvoidtype, Typeable},
+    typeable::Typeable,
     typing::type_compilation_unit,
     utils, z3_checker, CompilationUnit, TypeExpr, FILE_NAMES,
 };
 
-use heap::*;
 use alias_map::*;
 use array::*;
+use heap::*;
 mod eval;
-
 
 use crate::exec::state_split::exec_array_initialisation;
 
-
-
 type PathConstraints = ImHashSet<Expression>;
-
-
 
 enum Output {
     Valid,
@@ -95,7 +93,7 @@ where
     }
 }
 
-/// The state object, of a path 
+/// The state object, of a path
 #[derive(Clone)]
 pub struct State {
     /// The current 'program counter' this state is at in the control flow graph
@@ -166,6 +164,9 @@ pub enum SymResult {
     Invalid(SourcePos),
 }
 
+/// A trait providing a way to add new states resulting from state splitting to a backlog.
+///
+/// Also serves as a context, providing easy access to other used types.
 pub trait Engine {
     fn add_remaining_state(&mut self, state: State);
 
@@ -177,7 +178,6 @@ pub trait Engine {
     fn statistics(&mut self) -> &mut Statistics;
 
     fn symbol_table(&self) -> &SymbolTable;
-
 
     /// The root logger, without path id appended to each log.
     fn root_logger(&self) -> &Logger;
@@ -195,17 +195,26 @@ pub trait Engine {
         new_state.logger = self.new_logger(state.path_id);
         new_state
     }
+
+    fn options(&self) -> &Options;
 }
 
-pub struct DFSEngine<'a> {
+pub struct EngineContext<'a> {
+    /// Any other states that must be executed in this step.
+    /// In heuristics which steps over multiple states at once this will contain multiple states.
+    /// Any states resulting from state-splitting on the same program point are also added to this list, see [`state_split`]
+    ///
+    /// When it is empty, the step is completed.
     remaining_states: &'a mut Vec<State>,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &'a mut Statistics,
     st: &'a SymbolTable,
     root_logger: &'a Logger,
+    options: &'a Options,
 }
 
-impl Engine for DFSEngine<'_> {
+impl Engine for EngineContext<'_> {
+    /// Add more states to this step, must be at the same program point
     fn add_remaining_state(&mut self, state: State) {
         self.remaining_states.push(state);
     }
@@ -228,6 +237,10 @@ impl Engine for DFSEngine<'_> {
 
     fn root_logger(&self) -> &Logger {
         self.root_logger
+    }
+
+    fn options(&self) -> &Options {
+        self.options
     }
 }
 
@@ -258,16 +271,6 @@ fn action(
      "alias_map" => ?state.alias_map
     );
 
-    // dbg!(
-    //     &state.path_id,
-    //     &action,
-    //     state.stack.last().map(|s| &s.params),
-    //     &state.heap,
-    //     &state.alias_map,
-    //     // &state.pc,
-    //     // &state.path_length,
-    // );
-
     match action {
         CFGStatement::Statement(Statement::Declare { type_, var, .. }) => {
             state
@@ -282,7 +285,7 @@ fn action(
             match rhs {
                 Rhs::RhsCall { invocation, .. } => {
                     // if rhs contains an invocation.
-                    return exec_invocation(state, invocation, &program, pc, Some(lhs.clone()), en);
+                    return exec_invocation(state, InvocationContext { invocation, program, return_point: pc, lhs: Some(lhs.clone()) }, en);
                 }
                 _ => (),
             }
@@ -380,24 +383,18 @@ fn action(
             }
             if state.stack.len() == 1 {
                 ActionResult::Continue
-                // we are pbobably done now
             } else {
-                //dbg!(&state.stack);
-
                 let StackFrame {
                     pc,
-                    t,
+                    returning_lhs,
                     params,
                     current_member,
                 } = state.stack.pop().unwrap();
                 let return_type = current_member.type_of();
                 if return_type != RuntimeType::VoidRuntimeType {
-                    if let Some(lhs) = t {
+                    if let Some(lhs) = returning_lhs {
                         let rv = params.get(&constants::retval()).unwrap();
                         let return_value = evaluate(state, rv.clone(), en);
-
-                        // perhaps also write retval to current stack?
-                        // will need to do this due to this case: `return o.func();`
 
                         execute_assign(state, &lhs, return_value, en);
                     }
@@ -406,9 +403,16 @@ fn action(
                 ActionResult::Return(pc)
             }
         }
-        CFGStatement::Statement(Statement::Call { invocation, .. }) => {
-            exec_invocation(state, invocation, &program, pc, None, en)
-        }
+        CFGStatement::Statement(Statement::Call { invocation, .. }) => exec_invocation(
+            state,
+            InvocationContext {
+                invocation,
+                lhs: None,
+                return_point: pc,
+                program,
+            },
+            en,
+        ),
         CFGStatement::Statement(Statement::Throw { message, .. }) => exec_throw(state, en, message),
         CFGStatement::TryCatch(_, _, catch_entry_pc, _) => {
             state
@@ -461,6 +465,7 @@ fn exec_throw(state: &mut State, en: &mut impl Engine, message: &str) -> ActionR
     }
 }
 
+/// Asserts an `exceptional(..)` OOX statement.
 fn assert_exceptional(
     state: &mut State,
     en: &mut impl Engine,
@@ -573,27 +578,21 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl E
     }
 }
 
+/// Handles an invocation statement in OOX.
+///
+/// This may result in state splitting due to dynamic binding, states are appended to the engine.
 fn exec_invocation(
     state: &mut State,
-    invocation: &Invocation,
-    program: &HashMap<u64, CFGStatement>,
-    return_point: u64,
-    lhs: Option<Lhs>,
+    context: InvocationContext,
     en: &mut impl Engine,
 ) -> ActionResult {
     // dbg!(invocation);
 
-    debug!(state.logger, "Invocation"; "invocation" => %invocation);
+    debug!(state.logger, "Invocation"; "invocation" => %context.invocation);
 
     state.exception_handler.increment_handler();
 
-    let argument_types = invocation
-        .arguments()
-        .iter()
-        .map(AsRef::as_ref)
-        .map(Typeable::type_of);
-
-    match invocation {
+    match context.invocation {
         Invocation::InvokeMethod {
             resolved,
             lhs: invocation_lhs,
@@ -606,15 +605,8 @@ fn exec_invocation(
                 // potentially a static method.
                 let (_, potential_method) = &potential_methods.iter().next().unwrap();
                 // A static method, or a method that is not overriden anywhere (non-polymorphic)
-                let next_entry = invocation::single_method_invocation(
-                    state,
-                    invocation,
-                    potential_method,
-                    return_point,
-                    lhs,
-                    program,
-                    en,
-                );
+                let next_entry =
+                    invocation::single_method_invocation(state, context, potential_method, en);
                 return ActionResult::FunctionCall(next_entry);
             } else {
                 // dbg!(invocation_lhs);
@@ -622,11 +614,8 @@ fn exec_invocation(
                 return invocation::multiple_method_invocation(
                     state,
                     invocation_lhs,
-                    invocation,
+                    context,
                     potential_methods,
-                    return_point,
-                    lhs,
-                    program,
                     en,
                 );
             }
@@ -641,13 +630,7 @@ fn exec_invocation(
                 .map(AsRef::as_ref)
                 .unwrap_or_else(|| panic!("Unresolved constructor for class {}", class_name));
             let class_name = declaration.name();
-            // evaluate arguments
-            let arguments = invocation
-                .arguments()
-                .into_iter()
-                .map(|arg| evaluate(state, arg.clone(), en))
-                .collect::<Vec<_>>();
-
+            
             let this_param = Parameter::new(
                 NonVoidType::ReferenceType {
                     identifier: class_name.clone(),
@@ -655,12 +638,10 @@ fn exec_invocation(
                 },
                 constants::this_str(),
             );
-            exec_constructor_entry(
+            invocation::exec_constructor_entry(
                 state,
-                return_point,
+                context.clone(),
                 method.clone(),
-                lhs,
-                &arguments,
                 class_name,
                 en,
                 this_param,
@@ -669,8 +650,8 @@ fn exec_invocation(
             let next_entry = find_entry_for_static_invocation(
                 &class_name,
                 &method.name,
-                argument_types,
-                program,
+                context.invocation.argument_types(),
+                context.program,
                 en.symbol_table(),
             );
             ActionResult::FunctionCall(next_entry)
@@ -683,12 +664,6 @@ fn exec_invocation(
             let class_name = declaration.name();
 
             // evaluate arguments
-            let arguments = invocation
-                .arguments()
-                .into_iter()
-                .map(|arg| evaluate(state, arg.clone(), en))
-                .collect::<Vec<_>>();
-
             let this_param = Parameter::new(
                 NonVoidType::ReferenceType {
                     identifier: class_name.clone(),
@@ -696,12 +671,10 @@ fn exec_invocation(
                 },
                 constants::this_str(),
             );
-            exec_super_constructor(
+            invocation::exec_super_constructor(
                 state,
-                return_point,
+                context.clone(),
                 method.clone(),
-                lhs,
-                &arguments,
                 &method.params,
                 en,
                 this_param,
@@ -709,8 +682,8 @@ fn exec_invocation(
             let next_entry = find_entry_for_static_invocation(
                 &class_name,
                 &method.name,
-                argument_types,
-                program,
+                context.invocation.argument_types(),
+                context.program,
                 en.symbol_table(),
             );
             ActionResult::FunctionCall(next_entry)
@@ -718,15 +691,8 @@ fn exec_invocation(
         Invocation::InvokeSuperMethod { resolved, .. } => {
             let potential_method = resolved.as_ref().unwrap();
 
-            let next_entry = invocation::single_method_invocation(
-                state,
-                invocation,
-                potential_method,
-                return_point,
-                lhs,
-                program,
-                en,
-            );
+            let next_entry =
+                invocation::single_method_invocation(state, context, potential_method, en);
             return ActionResult::FunctionCall(next_entry);
         } // _ => panic!("Incorrect pair of Invocation and DeclarationMember"),
     }
@@ -774,144 +740,6 @@ pub fn find_entry_for_static_invocation(
         });
 
     *entry
-}
-
-fn exec_method_entry(
-    state: &mut State,
-    return_point: u64,
-    method: Rc<Method>,
-    lhs: Option<Lhs>,
-    arguments: &[Rc<Expression>],
-    en: &mut impl Engine,
-    this: (RuntimeType, Identifier),
-) {
-    let this_param = Parameter::new(
-        runtime_to_nonvoidtype(this.0.clone()).expect("concrete, nonvoid type"),
-        constants::this_str(),
-    );
-
-    let this_expr = Expression::Var {
-        var: this.1.clone(),
-        type_: this.0,
-        info: method.info,
-    };
-    let parameters = std::iter::once(&this_param).chain(method.params.iter());
-    let arguments = std::iter::once(Rc::new(this_expr)).chain(arguments.iter().cloned());
-
-    push_stack_frame(
-        state,
-        return_point,
-        method.clone(),
-        lhs,
-        parameters.zip(arguments),
-        en,
-    )
-}
-
-fn exec_static_method_entry(
-    state: &mut State,
-    return_point: u64,
-    member: Rc<Method>,
-    lhs: Option<Lhs>,
-    arguments: &[Rc<Expression>],
-    parameters: &[Parameter],
-    en: &mut impl Engine,
-) {
-    push_stack_frame(
-        state,
-        return_point,
-        member,
-        lhs,
-        parameters.iter().zip(arguments.iter().cloned()),
-        en,
-    )
-}
-
-fn exec_constructor_entry(
-    state: &mut State,
-    return_point: u64,
-    method: Rc<Method>,
-    lhs: Option<Lhs>,
-    arguments: &[Rc<Expression>],
-    class_name: &Identifier,
-    en: &mut impl Engine,
-    this_param: Parameter,
-) {
-    let parameters = std::iter::once(&this_param).chain(method.params.iter());
-
-    let fields = en
-        .symbol_table()
-        .get_all_fields(class_name)
-        .iter()
-        .map(|(s, t)| (s.clone(), t.default().into()))
-        .collect();
-    let structure = HeapValue::ObjectValue {
-        fields,
-        type_: method.type_of(),
-    };
-
-    let object_ref = state.allocate_on_heap(structure);
-    let arguments = std::iter::once(object_ref).chain(arguments.iter().cloned());
-
-    push_stack_frame(
-        state,
-        return_point,
-        method.clone(),
-        lhs,
-        parameters.zip(arguments),
-        en,
-    )
-}
-
-fn exec_super_constructor(
-    state: &mut State,
-    return_point: u64,
-    method: Rc<Method>,
-    lhs: Option<Lhs>,
-    arguments: &[Rc<Expression>],
-    parameters: &[Parameter],
-    en: &mut impl Engine,
-    this_param: Parameter,
-) {
-    let parameters = std::iter::once(&this_param).chain(parameters.iter());
-
-    // instead of allocating a new object, add the new fields to the existing 'this' object.
-    let object_ref = state
-        .stack
-        .lookup(&constants::this_str())
-        .expect("super() is called in a constructor with a 'this' object on the stack");
-    let arguments = std::iter::once(object_ref).chain(arguments.iter().cloned());
-
-    push_stack_frame(
-        state,
-        return_point,
-        method,
-        lhs,
-        parameters.zip(arguments),
-        en,
-    )
-}
-
-fn push_stack_frame<'a, P>(
-    state: &mut State,
-    return_point: u64,
-    method: Rc<Method>,
-    lhs: Option<Lhs>,
-    params: P,
-    en: &mut impl Engine,
-) where
-    P: Iterator<Item = (&'a Parameter, Rc<Expression>)>,
-{
-    let params = params
-        .map(|(p, e)| (p.name.clone(), evaluate(state, e, en)))
-        .collect();
-    let stack_frame = StackFrame {
-        pc: return_point,
-        t: lhs,
-        params,
-        current_member: method,
-    };
-    state.stack.push(stack_frame);
 }
 
 fn prepare_assert_expression(
@@ -1399,8 +1227,6 @@ fn exec_rhs_elem(
     }
 }
 
-
-
 /// Removes Null literals from the aliasmap entry.
 /// This is allowed since we assume to have exceptional checks for null added in OOX parser.
 /// See [`insert_exceptional_clauses`].
@@ -1661,6 +1487,7 @@ pub struct Options {
     pub heuristic: Heuristic,
     pub visualize_heuristic: bool,
     pub visualize_coverage: bool,
+    pub symbolic_array_size: u64,
 }
 
 impl Options {
@@ -1672,6 +1499,7 @@ impl Options {
             heuristic: Heuristic::DepthFirstSearch,
             visualize_heuristic: false,
             visualize_coverage: false,
+            symbolic_array_size: 3,
         }
     }
 
@@ -1801,7 +1629,7 @@ pub fn verify(
         pc,
         stack: Stack::new(vector![StackFrame {
             pc,
-            t: None,
+            returning_lhs: None,
             params,
             current_member: initial_method,
         }]),
@@ -1830,13 +1658,12 @@ pub fn verify(
         state,
         &program,
         &flows,
-        options.k,
         &symbol_table,
         root_logger,
         path_counter.clone(),
         &mut statistics,
         entry_method.clone(),
-        options.visualize_heuristic,
+        &options,
     );
 
     let duration = start.elapsed();

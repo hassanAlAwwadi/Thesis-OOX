@@ -2,11 +2,12 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 
-use crate::{Identifier, RuntimeType, SymbolTable, Expression, SourcePos, NonVoidType, typeable::Typeable};
+use crate::{
+    typeable::Typeable, Expression, Identifier, NonVoidType, RuntimeType, SourcePos, SymbolTable,
+};
 
-use super::{State, alias_map::AliasEntry, create_symbolic_var, heap::HeapValue, Engine};
+use super::{alias_map::AliasEntry, create_symbolic_var, heap::HeapValue, Engine, State};
 use crate::exec::evaluate_as_int;
-
 
 /// Initialises an array by creating a concrete array of size array_size in the heap, symbolic objects are initialised lazily.
 /// The resulting state has a single concrete array (or null) in its alias map.
@@ -51,7 +52,6 @@ pub(crate) fn array_initialisation(
 
     // dbg!("after array initialization", &state.heap, &state.alias_map);
 }
-
 
 /// Constructs an array that was created by an OOX statement like this:
 // / ```

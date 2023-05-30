@@ -6,7 +6,7 @@ use crate::{
     cfg::CFGStatement,
     exec::{IdCounter, State, SymResult},
     statistics::Statistics,
-    symbol_table::SymbolTable,
+    symbol_table::SymbolTable, Options,
 };
 
 use super::{
@@ -59,26 +59,24 @@ pub(crate) fn sym_exec(
     state: State,
     program: &HashMap<u64, CFGStatement>,
     flows: &HashMap<u64, Vec<u64>>,
-    k: u64,
     st: &SymbolTable,
     root_logger: Logger,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &mut Statistics,
     entry_method: crate::cfg::MethodIdentifier,
-    visualize_heuristic: bool,
+    options: &Options,
 ) -> SymResult {
     let heuristic = RoundRobin::md2u_with_random_path();
     sym_exec_execution_tree(
         state,
         program,
         flows,
-        k,
         st,
         root_logger,
         path_counter,
         statistics,
         entry_method,
         heuristic,
-        visualize_heuristic,
+        options
     )
 }

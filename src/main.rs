@@ -6,7 +6,6 @@ use lib::{
 };
 use pretty::BoxAllocator;
 
-
 /// OOX symbolic verification
 #[derive(Parser)]
 struct Args {
@@ -27,6 +26,11 @@ enum Commands {
         // The OOX function to verify
         #[arg(short, long)]
         function: String,
+
+        // Maximum symbolic array size
+        #[arg(short, long, default_value_t = 3)]
+        symbolic_array_size: u64,
+
         // When quiet is passed, the only output returned is valid, invalid or error.
         #[arg(short, long, default_value_t = false)]
         quiet: bool,
@@ -61,6 +65,7 @@ fn main() -> Result<(), String> {
             source_paths,
             k,
             function,
+            symbolic_array_size,
             quiet,
             heuristic,
             visualize_heuristic,
@@ -74,6 +79,7 @@ fn main() -> Result<(), String> {
                     heuristic,
                     visualize_heuristic,
                     visualize_coverage,
+                    symbolic_array_size,
                 };
                 verify(source_paths.as_slice(), class_name, method_name, options)?;
             } else {

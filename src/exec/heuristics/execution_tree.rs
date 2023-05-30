@@ -12,7 +12,7 @@ use crate::{
     cfg::{CFGStatement, MethodIdentifier},
     exec::{IdCounter, SymResult},
     statistics::Statistics,
-    symbol_table::SymbolTable,
+    symbol_table::SymbolTable, Options,
 };
 
 use super::{execute_instruction_for_all_states, finish_state_in_path, ProgramCounter, State};
@@ -126,14 +126,13 @@ pub(super) fn sym_exec_execution_tree(
     state: State,
     program: &HashMap<u64, CFGStatement>,
     flows: &HashMap<u64, Vec<u64>>,
-    k: u64,
     st: &SymbolTable,
     root_logger: Logger,
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &mut Statistics,
     entry_method: MethodIdentifier,
     mut heuristic: impl ExecutionTreeBasedHeuristic,
-    visualize_heuristic: bool,
+    options: &Options,
 ) -> SymResult {
     // let mut paths = PathTree {root: state.pc, nodes: HashMap::from([(state.pc, TreeNode::Leaf(vec![state]))]) };
     let tree = Rc::new(RefCell::new(ExecutionTree::Leaf {
@@ -158,7 +157,7 @@ pub(super) fn sym_exec_execution_tree(
 
         let states = chosen_state;
 
-        if visualize_heuristic {
+        if options.visualize_heuristic {
             heuristic.visualize(program, flows, st);
         }
 
@@ -166,11 +165,11 @@ pub(super) fn sym_exec_execution_tree(
             states,
             program,
             flows,
-            k,
             st,
             root_logger.clone(),
             path_counter.clone(),
             statistics,
+            options,
         );
 
         match r {
