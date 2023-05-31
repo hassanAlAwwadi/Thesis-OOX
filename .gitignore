@@ -3,3 +3,4 @@ logs.txt
 .z3-trace
 visualize
 coverage_visualized.txt
+/logs/*

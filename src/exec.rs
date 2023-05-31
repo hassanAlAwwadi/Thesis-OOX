@@ -422,7 +422,7 @@ fn action(
         }
         CFGStatement::TryEntry(_) => ActionResult::Continue,
         CFGStatement::TryExit => {
-            // state.exception_handler.remove_last_handler();
+            state.exception_handler.remove_last_handler();
             ActionResult::Continue
         }
         CFGStatement::CatchEntry(_) => ActionResult::Continue,
@@ -1616,7 +1616,9 @@ pub fn verify(
     //     Mutex::new(slog_bunyan::default(std::io::stderr()).filter_level(Level::Debug)).fuse(),
     //     o!(),
     // );
-    let mut builder = FileLoggerBuilder::new("logs.txt");
+    let date = chrono::Local::now();
+    let log_file_name = format!("./logs/{}_{}.{}.txt",date.format("%Y-%m-%d %H:%M:%S"),  class_name, method_name);
+    let mut builder = FileLoggerBuilder::new(log_file_name);
     // let mut builder = TerminalLoggerBuilder::new();
     // builder.destination(Destination::Stdout);
     builder.level(Severity::Trace);

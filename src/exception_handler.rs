@@ -32,9 +32,9 @@ impl ExceptionHandlerStack {
 
 #[derive(Clone)]
 pub struct ExceptionHandlerEntry {
-    // the program counter of the catch statement to return to when an exception is thrown.
+    /// the program counter of the catch statement to return to when an exception is thrown.
     pub catch_pc: u64,
-    // defines the current depth of the call stack relative to when the try block point was entered.
+    /// defines the current depth of the call stack relative to when the try block point was entered.
     pub current_depth: u64,
 }
 

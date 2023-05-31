@@ -27,11 +27,12 @@ sloggers = "2.1.1" # Logging extension for displaying logs in terminal
 num = "0.4.0" # Needed for one function (is that worth it?)
 derivative = "2.2.0"
 queues = "1.1.0"
-clap = { version = "4.1.7", features = ["derive"] }
-criterion = "0.4.0"
-rand = "0.8.5"
-pretty = "0.11.3"
-im-rc = "15.1.0"
+clap = { version = "4.1.7", features = ["derive"] } # CLI library
+criterion = "0.4.0" # benchmark library
+rand = "0.8.5" # random
+pretty = "0.11.3" # pretty printing library
+im-rc = "15.1.0" # immutable maps, arrays to optimize memory usage
+chrono = "0.4.26" # time library
 
 [[bench]]
 name = "oox_benchmark"

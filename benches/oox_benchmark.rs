@@ -11,6 +11,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         heuristic: lib::Heuristic::DepthFirstSearch,
         visualize_heuristic: false,
         visualize_coverage: false,
+        symbolic_array_size: 3,
     };
     group.sample_size(10);
     group.sampling_mode(SamplingMode::Flat);
