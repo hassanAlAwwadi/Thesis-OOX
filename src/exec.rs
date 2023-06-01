@@ -1616,16 +1616,18 @@ pub fn verify(
     //     Mutex::new(slog_bunyan::default(std::io::stderr()).filter_level(Level::Debug)).fuse(),
     //     o!(),
     // );
-    let date = chrono::Local::now();
-    let log_file_name = format!("./logs/{}_{}.{}.txt",date.format("%Y-%m-%d %H:%M:%S"),  class_name, method_name);
+    let log_file_name = format!("./logs/log.txt");
+    
     let mut builder = FileLoggerBuilder::new(log_file_name);
     // let mut builder = TerminalLoggerBuilder::new();
     // builder.destination(Destination::Stdout);
     builder.level(Severity::Trace);
     builder.format(sloggers::types::Format::Full);
     builder.source_location(sloggers::types::SourceLocation::FileAndLine);
+    builder.truncate();
 
     let root_logger = builder.build().unwrap();
+    info!(root_logger, "Starting verification of {}::{}", class_name, method_name);
 
     let state = State {
         pc,
