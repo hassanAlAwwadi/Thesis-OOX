@@ -93,14 +93,13 @@ where
     }
 }
 
-/// The state object, of a path
+/// The state of a path.
 #[derive(Clone)]
 pub struct State {
     /// The current 'program counter' this state is at in the control flow graph
     pc: u64,
     pub stack: Stack,
     pub heap: Heap,
-    precondition: Expression,
 
     constraints: PathConstraints,
     pub alias_map: AliasMap,
@@ -206,6 +205,7 @@ pub struct EngineContext<'a> {
     ///
     /// When it is empty, the step is completed.
     remaining_states: &'a mut Vec<State>,
+
     path_counter: Rc<RefCell<IdCounter<u64>>>,
     statistics: &'a mut Statistics,
     st: &'a SymbolTable,
@@ -1212,6 +1212,7 @@ fn exec_rhs_elem(
     index: Rc<Expression>,
     en: &mut impl Engine,
 ) -> Rc<Expression> {
+    // arrays are always initialised as concretes
     let array = single_alias_elimination(array, &state.alias_map);
     match array.as_ref() {
         Expression::Ref { ref_, .. } => {
@@ -1433,7 +1434,7 @@ fn assert_type_guard(state: &mut State, type_guard: &TypeExpr, en: &mut impl Eng
     }
 }
 
-// Returns whether the path is feasible
+/// Checks if the assumption holds for the type guard, returns whether the path is feasible
 fn assume_type_guard(state: &mut State, type_guard: &TypeExpr, en: &mut impl Engine) -> bool {
     let (var, rhs, not) = match type_guard {
         TypeExpr::InstanceOf { var, rhs, .. } => (var, rhs, false),
@@ -1455,7 +1456,7 @@ fn assume_type_guard(state: &mut State, type_guard: &TypeExpr, en: &mut impl Eng
 }
 
 /// Checks whether there is only one alias for the given symbolic reference, if so return the alias otherwise return the expression.
-/// A single alias occurs for example when an array is initialised, split into multiple paths each with a different array size
+/// A single alias occurs for example when an array is initialised, split into multiple paths each with a different array size.
 pub(crate) fn single_alias_elimination(
     expr: Rc<Expression>,
     alias_map: &AliasMap,
@@ -1638,7 +1639,6 @@ pub fn verify(
             current_member: initial_method,
         }]),
         heap: ImHashMap::new(),
-        precondition: Expression::TRUE,
         constraints: ImHashSet::new(),
         alias_map: ImHashMap::new(),
         ref_counter: IdCounter::new(0),

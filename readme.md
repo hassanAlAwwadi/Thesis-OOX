@@ -5,8 +5,14 @@
 If you want to run in debug mode, remove the --release before the --.
 
 
+# Tests
+`cargo test --release`
+I recommend running the tests with the `--release` flag unless you are debugging, to speed it up.
+
 # Editor tips
-In vscode, you can add settings for file associations. Since OOX is somewhat similar to Java syntax, we can use this to our advantage.
+I recommend to use the visual studio code editor, with the 'rust analyzer' extension.
+
+In vscode, you can add settings for file associations. Since OOX is somewhat similar to Java syntax, we can use this to add syntax highlighting to `.oox` files.
 Lookup 'File associations' in settings and add *.oox : java
 
 # Logging
@@ -22,3 +28,6 @@ https://docs.rs/slog/latest/slog/trait.Value.html
 
 other log macro's exist such as info!(..), warning!(..), etc.
 
+
+Running the project with the `--release` flag will disable any debug or below logs.
+This can be changed with feature flags from slog: https://docs.rs/crate/slog/latest/features
