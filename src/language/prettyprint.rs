@@ -37,7 +37,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a Declaration {
                     if class.implements.len() > 0 {
                         if class.extends.is_some() {
                             format!(
-                                ", implements {}",
+                                " implements {}",
                                 class
                                     .implements
                                     .iter()

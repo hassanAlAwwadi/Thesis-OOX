@@ -7,6 +7,10 @@ use crate::{exec::constants::this_str, positioned::SourcePos, syntax::*, typeabl
 
 const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
 
+
+/// A type to uniquely identify a method in a class, assuming that the class has no duplicate methods (or duplicates with different return types).
+/// 
+/// Note: We may want to also add return type to this?
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Derivative)]
 #[derivative(PartialOrd, Ord)]
 pub struct MethodIdentifier {

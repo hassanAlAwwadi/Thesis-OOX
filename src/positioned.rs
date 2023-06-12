@@ -6,6 +6,8 @@ use itertools::Either;
 use crate::syntax::{Expression, Invocation, Lhs, Method, NonVoidType, Rhs};
 use crate::{TypeExpr, FILE_NAMES};
 
+
+/// A type to describe the position of something in the source code.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum SourcePos {
     UnknownPosition,
@@ -13,6 +15,7 @@ pub enum SourcePos {
         line: usize,
         col: usize,
         /// Ideally this would be a &str, but due to borrowing we would need to add lifetimes everywhere.
+        /// So currently this is an index into the [`FILE_NAMES`] global.
         file_number: usize,
     },
 }

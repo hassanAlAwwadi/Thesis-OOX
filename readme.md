@@ -31,3 +31,8 @@ other log macro's exist such as info!(..), warning!(..), etc.
 
 Running the project with the `--release` flag will disable any debug or below logs.
 This can be changed with feature flags from slog: https://docs.rs/crate/slog/latest/features
+
+# Minor issues
+- Error path does not point to the right file
+    - This can occur when multiple tests are ran after one another due to the way I implemented global files....
+    - When running the test in isolation this will not happen.

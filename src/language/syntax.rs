@@ -305,6 +305,7 @@ pub enum Invocation {
         arguments: Vec<Rc<Expression>>,
 
         #[derivative(PartialEq = "ignore")]
+        /// A mapping from runtime type to declaration, method pair. Also known as the Polymorphic Call Map.
         resolved: Option<HashMap<Identifier, (Declaration, Rc<Method>)>>,
         #[derivative(PartialEq = "ignore")]
         info: SourcePos,
@@ -387,8 +388,6 @@ impl Invocation {
             Invocation::InvokeMethod { resolved, .. } => {
                 // A regular method can resolve to multiple different methods due to dynamic dispatch, depending on the runtime type of the object.
                 // We make here the assumption that any object can be represented and thus consider each resolved method.
-
-                // We also need to lookup the program counter for each method. (CANT WE DO THIS BEFOREHAND?)
 
                 let methods = resolved.as_ref().unwrap();
 

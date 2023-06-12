@@ -188,7 +188,7 @@ fn min_distance_to_uncovered_method_with_visited<'a>(
     (distance, pc_to_distance)
 }
 
-/// Computes the minimal distance to uncovered methods for all program counters in this method
+/// Computes the minimal distance to uncovered methods for all program counters in this method.
 /// Recursively computes the minimal distance for any method calls referenced.
 fn min_distance_to_uncovered_method_helper<'a>(
     method: &MethodIdentifier,
@@ -274,7 +274,9 @@ fn min_distance_to_statement<'a>(
     loop {
         let last = stack.len() == 1;
 
-        // First ensure all other statements following this statement have been done.
+        // First ensure all other statements following this statement are in the stack.
+        // The order of the stack should be last statements at the top, in the order of the cfg.
+        // So we work reversely to ensure that statements after the current statement have been handled.
         let successors_done = {
             let pc = *stack.last().unwrap();
             if pc_to_cost.contains_key(&pc) {
@@ -282,11 +284,20 @@ fn min_distance_to_statement<'a>(
             }
             visited.insert(pc);
             let mut all_there = true;
+
+            if let CFGStatement::TryCatch(_, _, entry_catch_label, _) = &program[&pc] {
+                // Must not forget about the catch body.
+                if !visited.contains(entry_catch_label) {
+                    stack.push(*entry_catch_label);
+                }
+            }
+
             if let Some(next_pcs) = flow.get(&pc) {
                 for next_pc in next_pcs {
                     if !pc_to_cost.contains_key(&next_pc) {
                         if let CFGStatement::While(_, _) = &program[&next_pc] {
                             if visited.contains(next_pc) {
+                                // we don't want to keep inserting while guard, since we can encounter it again when the loop ends.
                                 continue;
                             }
                         }
@@ -446,7 +457,7 @@ fn statement_cost<'a>(
                     );
 
                     if visited.contains(&next_pc) {
-                        // dbg!("oh oh recursion", next_pc);
+                        // Already visited this program point, meaning recursion.
                         CumulativeCost::UnexploredMethodCall(method.method_name.to_string())
                     } else {
                         let (cost, method_pc_to_cost) = min_distance_to_uncovered_method_helper(
