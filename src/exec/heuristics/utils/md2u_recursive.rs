@@ -642,9 +642,9 @@ fn minimize(a: CumulativeCost, b: CumulativeCost) -> CumulativeCost {
         (CumulativeCost::Cost(a), CumulativeCost::Cost(b)) => {
             CumulativeCost::Cost(std::cmp::min(a, b).clone())
         }
-        (CumulativeCost::Cycle(_), CumulativeCost::Cycle(_)) => panic!(),
-        (CumulativeCost::Cycle(_), _) => b.clone(),
-        (_, CumulativeCost::Cycle(_)) => a.clone(),
+        (CumulativeCost::Cycle(_), CumulativeCost::Cycle(_)) => panic!("Unclear, should be unreachable?"),
+        (CumulativeCost::Cycle(_), _) => b,
+        (_, CumulativeCost::Cycle(_)) => a,
         (_, _) => CumulativeCost::Minimal(Box::new(a), Box::new(b)),
     }
 }

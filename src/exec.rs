@@ -285,7 +285,16 @@ fn action(
             match rhs {
                 Rhs::RhsCall { invocation, .. } => {
                     // if rhs contains an invocation.
-                    return exec_invocation(state, InvocationContext { invocation, program, return_point: pc, lhs: Some(lhs.clone()) }, en);
+                    return exec_invocation(
+                        state,
+                        InvocationContext {
+                            invocation,
+                            program,
+                            return_point: pc,
+                            lhs: Some(lhs.clone()),
+                        },
+                        en,
+                    );
                 }
                 _ => (),
             }
@@ -630,7 +639,7 @@ fn exec_invocation(
                 .map(AsRef::as_ref)
                 .unwrap_or_else(|| panic!("Unresolved constructor for class {}", class_name));
             let class_name = declaration.name();
-            
+
             let this_param = Parameter::new(
                 NonVoidType::ReferenceType {
                     identifier: class_name.clone(),
@@ -694,7 +703,7 @@ fn exec_invocation(
             let next_entry =
                 invocation::single_method_invocation(state, context, potential_method, en);
             return ActionResult::FunctionCall(next_entry);
-        } // _ => panic!("Incorrect pair of Invocation and DeclarationMember"),
+        }
     }
 }
 
@@ -798,7 +807,7 @@ fn collect_path_constraints(state: &State) -> Expression {
 fn read_field_concrete_ref(heap: &mut Heap, ref_: i64, field: &Identifier) -> Rc<Expression> {
     match heap.get_mut(&ref_).unwrap() {
         HeapValue::ObjectValue { fields, .. } => fields[field].clone(),
-        _ => panic!("Expected object, found array heapvalue"),
+        x => panic!("Expected object, found {:?}", x),
     }
 }
 
@@ -809,35 +818,31 @@ fn read_field_symbolic_ref(
     field: &Identifier,
 ) -> Rc<Expression> {
     match concrete_refs {
-        [] => panic!(),
+        [] => {
+            panic!("A symbolic object must have at least one concrete reference when initialised")
+        }
         [r] => {
             // null is not possible here, will be caught with exceptional state
-            if let Expression::Ref { ref_, .. } = **r {
-                read_field_concrete_ref(heap, ref_, field)
-            } else {
-                panic!()
-            }
+            let ref_ = r.expect_reference().unwrap();
+            read_field_concrete_ref(heap, ref_, field)
         }
-        // assuming here that concrete refs (perhaps in ITE expression)
+        // A symbolic object only contains references (and null literals that are filtered out by exceptional guard paths)
         [r, rs @ ..] => {
-            if let Expression::Ref { ref_, .. } = **r {
-                Rc::new(Expression::Conditional {
-                    guard: Rc::new(Expression::BinOp {
-                        bin_op: BinOp::Equal,
-                        lhs: sym_ref.clone(),
-                        rhs: r.clone(),
-                        type_: RuntimeType::ANYRuntimeType,
-                        info: SourcePos::UnknownPosition,
-                    }),
-                    true_: (read_field_concrete_ref(heap, ref_, &field)),
-                    false_: (read_field_symbolic_ref(heap, rs, sym_ref, field)),
+            let ref_ = r.expect_reference().unwrap();
+            Rc::new(Expression::Conditional {
+                guard: Rc::new(Expression::BinOp {
+                    bin_op: BinOp::Equal,
+                    lhs: sym_ref.clone(),
+                    rhs: r.clone(),
                     type_: RuntimeType::ANYRuntimeType,
                     info: SourcePos::UnknownPosition,
-                })
-            } else {
-                panic!()
-            }
-        } // _ => panic!(),
+                }),
+                true_: (read_field_concrete_ref(heap, ref_, &field)),
+                false_: (read_field_symbolic_ref(heap, rs, sym_ref, field)),
+                type_: RuntimeType::ANYRuntimeType,
+                info: SourcePos::UnknownPosition,
+            })
+        }
     }
 }
 
@@ -847,8 +852,6 @@ fn write_field_concrete_ref(
     field: &Identifier,
     value: Rc<Expression>,
 ) -> () {
-    // let x = ;
-
     if let HeapValue::ObjectValue { fields, .. } = heap.get_mut(&ref_).unwrap() {
         fields.insert(field.clone(), value);
     } else {
@@ -864,26 +867,23 @@ fn write_field_symbolic_ref(
     value: Rc<Expression>,
 ) -> () {
     match concrete_refs.as_slice() {
-        [] => panic!(),
+        [] => {
+            panic!("Symbolic objects must have at least one concrete reference when initialised.")
+        }
         [r] => {
-            if let Expression::Ref { ref_, .. } = **r {
-                write_field_concrete_ref(heap, ref_, field, value);
-            } else {
-                panic!()
-            }
+            let ref_ = r.expect_reference().unwrap();
+            write_field_concrete_ref(heap, ref_, field, value)
         }
         rs => {
             for r in rs {
-                if let Expression::Ref { ref_, .. } = r.as_ref() {
-                    let ite = ite(
-                        equal(sym_ref.clone(), r.clone()),
-                        value.clone(),
-                        read_field_concrete_ref(heap, *ref_, &field),
-                    );
-                    write_field_concrete_ref(heap, *ref_, field, Rc::new(ite))
-                } else {
-                    panic!("Should only contain refs, {:?}", r.as_ref());
-                }
+                // Should only contain refs
+                let ref_ = r.expect_reference().unwrap();
+                let ite = ite(
+                    equal(sym_ref.clone(), r.clone()),
+                    value.clone(),
+                    read_field_concrete_ref(heap, ref_, &field),
+                );
+                write_field_concrete_ref(heap, ref_, field, Rc::new(ite))
             }
         }
     }
@@ -905,7 +905,10 @@ pub fn init_symbolic_reference(
             RuntimeType::ArrayRuntimeType { .. } => {
                 exec_array_initialisation(state, en, sym_ref.clone(), type_ref.clone())
             }
-            _ => panic!("Cannot initialize type {:?}", type_ref),
+            _ => panic!(
+                "Cannot initialize type {:?}, not a reference or arraytype",
+                type_ref
+            ),
         };
 
         debug!(state.logger, "Updated aliasentry"; "alias_map" => #?state.alias_map);
@@ -967,7 +970,7 @@ fn init_symbolic_object(
                 let ref_type = match type_ {
                     RuntimeType::ReferenceRuntimeType { type_ } => type_,
                     RuntimeType::ArrayRuntimeType { .. } => return None, // arrays cannot have the same type as objects, skip
-                    _ => panic!("expected reference type"),
+                    _ => panic!("Expected reference or array type"),
                 };
 
                 if instance_types.contains(&ref_type) {
@@ -1011,7 +1014,7 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
             let o = state
                 .stack
                 .lookup(var)
-                .unwrap_or_else(|| panic!("infeasible, object does not exit"));
+                .unwrap_or_else(|| panic!("object {:?} was not found on the stack", var));
 
             match o.as_ref() {
                 Expression::Ref { ref_, .. } => {
@@ -1056,20 +1059,16 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
             let ref_ = state
                 .stack
                 .lookup(var)
-                .unwrap_or_else(|| panic!("infeasible, array does not exit"));
+                .unwrap_or_else(|| panic!("array {:?} was not found on the stack", var));
 
-            let ref_ = single_alias_elimination(ref_, &state.alias_map);
+            let ref_ = single_alias_elimination(ref_.clone(), &state.alias_map)
+                .expect_reference()
+                .unwrap_or_else(|| panic!("expected array ref, found expr {:?}", &ref_));
 
-            match ref_.as_ref() {
-                Expression::Ref { ref_, .. } => {
-                    let index = evaluate_as_int(state, index.clone(), en);
-
-                    match index {
-                        Either::Left(index) => write_elem_symbolic_index(state, *ref_, index, e),
-                        Either::Right(i) => write_elem_concrete_index(state, *ref_, i, e),
-                    }
-                }
-                _ => panic!("expected array ref, found expr {:?}", &ref_),
+            let index = evaluate_as_int(state, index.clone(), en);
+            match index {
+                Either::Left(index) => write_elem_symbolic_index(state, ref_, index, e),
+                Either::Right(i) => write_elem_concrete_index(state, ref_, i, e),
             }
         }
     }
@@ -1296,8 +1295,7 @@ fn read_elem_symbolic_index(
             value
         } else {
             // empty array
-
-            todo!("infeasible? or invalid?") // I assume that the added exceptional clauses should prevent this
+            panic!("Empty array, exceptional clauses should prevent this");
         }
     } else {
         panic!("Expected Array object");
@@ -1314,7 +1312,7 @@ fn write_elem_concrete_index(
         if index >= 0 && index < elements.len() as i64 {
             elements[index as usize] = expression;
         } else {
-            panic!("infeasible due to added checked array bounds");
+            panic!("should be infeasible due to added checked array bounds");
         }
     } else {
         panic!("Expected Array object")
@@ -1483,6 +1481,8 @@ pub enum Heuristic {
 #[derive(Copy, Clone)]
 pub struct Options {
     pub k: u64,
+    /// The allowed maximum time of the verification in seconds.
+    pub time_budget: u64,
     pub quiet: bool,
     pub with_exceptional_clauses: bool,
     pub heuristic: Heuristic,
@@ -1501,6 +1501,7 @@ impl Options {
             visualize_heuristic: false,
             visualize_coverage: false,
             symbolic_array_size: 3,
+            time_budget: 900,
         }
     }
 
@@ -1576,7 +1577,6 @@ pub fn verify(
     let flows: HashMap<u64, Vec<u64>> = utils::group_by(flw.into_iter());
 
     // dbg!(&flows);
-    // panic!();
     let argument_types = initial_method
         .params
         .iter()
@@ -1618,7 +1618,7 @@ pub fn verify(
     //     o!(),
     // );
     let log_file_name = format!("./logs/log.txt");
-    
+
     let mut builder = FileLoggerBuilder::new(log_file_name);
     // let mut builder = TerminalLoggerBuilder::new();
     // builder.destination(Destination::Stdout);
@@ -1628,7 +1628,10 @@ pub fn verify(
     builder.truncate();
 
     let root_logger = builder.build().unwrap();
-    info!(root_logger, "Starting verification of {}::{}", class_name, method_name);
+    info!(
+        root_logger,
+        "Starting verification of {}::{}", class_name, method_name
+    );
 
     let state = State {
         pc,
@@ -2120,7 +2123,7 @@ fn sym_exec_inheritance() {
 }
 
 #[test]
-fn sym_exec_inheritance_specifications() {
+fn sym_exec_specifications_inheritance() {
     let paths = vec!["./examples/inheritance/specifications.oox"];
     let k = 150;
     let options = Options::default_with_k(k);

@@ -99,7 +99,7 @@ impl ExecutionTree {
             *statement = new_states[0].pc;
             *states = new_states;
         } else {
-            panic!()
+            panic!("Can only set states at the leafs")
         }
     }
 

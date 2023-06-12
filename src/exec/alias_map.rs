@@ -13,7 +13,7 @@ pub type AliasMap = ImHashMap<Identifier, AliasEntry>;
 /// If it is not in the aliasmap it has not been lazily-initialised and has not been used in the OOX program yet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AliasEntry {
-    /// Expressions can only be `Expression::Ref` or null literal
+    /// Expressions can only be `Expression::Ref` or null literal. Length must be > 0.
     pub aliases: Vec<Rc<Expression>>,
     uniform_type: bool, // whether all aliases have the same type, or subclasses appear.
 }

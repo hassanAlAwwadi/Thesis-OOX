@@ -37,7 +37,7 @@ fn choice<'a>(
     let weights = leafs.iter().map(|n| n.borrow().statement()).map(|pc| {
         let distance = md2u.get(&pc);
         if distance.is_none() {
-            dbg!(&md2u);
+            dbg!(pc, &md2u);
         }
         let distance = distance.unwrap();
         match distance.distance_type {
