@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Instant};
 
 pub struct Statistics {
     pub number_of_branches: u32,
@@ -12,6 +12,7 @@ pub struct Statistics {
     pub reachable_statements: u32,
     pub covered_statements: u32,
     pub coverage: HashSet<u64>,
+    pub start_time: Instant,
 }
 
 impl Default for Statistics {
@@ -27,6 +28,7 @@ impl Default for Statistics {
             reachable_statements: 0,
             covered_statements: 0,
             coverage: HashSet::new(),
+            start_time: Instant::now(),
         }
     }
 }

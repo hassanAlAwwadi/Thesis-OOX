@@ -59,7 +59,7 @@ fn execute_instruction_for_all_states(
         debug_assert!(remaining_states.iter().map(|s| s.pc).all_equal());
 
         // dbg!(&remaining_states.len());
-        if state.path_length >= options.k {
+        if state.path_length >= options.k || statistics.start_time.elapsed().as_secs() >= options.time_budget {
             // finishing current branch
             statistics.measure_finish();
             continue;

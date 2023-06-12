@@ -17,42 +17,45 @@ struct Args {
 enum Commands {
     /// Verify an OOX file using symbolic execution.
     Verify {
-        // The OOX source file to verify
+        /// The OOX source file to verify
         #[arg(num_args(0..))]
         source_paths: Vec<String>,
-        // The maximum program path depth
+        /// The maximum program path depth
         #[arg(short, long, default_value_t = 40)]
         k: u64,
-        // The OOX function to verify
+        /// The allowed time budget of the verification, in seconds.
+        #[arg(short, long, default_value_t = 900)]
+        time_budget: u64,
+        /// The OOX function to verify
         #[arg(short, long)]
         function: String,
 
-        // Maximum symbolic array size
+        /// Maximum symbolic array size
         #[arg(short, long, default_value_t = 3)]
         symbolic_array_size: u64,
 
-        // When quiet is passed, the only output returned is valid, invalid or error.
+        /// When quiet is passed, the only output returned is valid, invalid or error.
         #[arg(short, long, default_value_t = false)]
         quiet: bool,
 
-        // The heuristic used to choose branches
+        /// The heuristic used to choose branches
         #[arg(value_enum, long, default_value_t = lib::Heuristic::DepthFirstSearch)]
         heuristic: lib::Heuristic,
 
-        // After execution it prints a visualization of the coverage for each method.
+        /// After execution it prints a visualization of the coverage for each method.
         #[arg(long, default_value_t = false)]
         visualize_coverage: bool,
 
-        // Will create a file visualize.txt, showing the current program exploration guided by heuristic.
+        /// Will create a file visualize.txt, showing the current program exploration guided by heuristic.
         #[arg(long, default_value_t = false)]
         visualize_heuristic: bool,
     },
     /// Parse and typecheck an OOX source file
     Check {
-        // The OOX source file to type check
+        /// The OOX source file to type check
         #[arg(num_args(0..))]
         source_paths: Vec<String>,
-        // Print the program to be evaluated.
+        /// Print the program to be evaluated.
         #[arg(short, long, default_value_t = false)]
         print: bool,
     },
@@ -70,6 +73,7 @@ fn main() -> Result<(), String> {
             heuristic,
             visualize_heuristic,
             visualize_coverage,
+            time_budget,
         } => {
             if let Some((class_name, method_name)) = function.split(".").collect_tuple() {
                 let options = Options {
@@ -80,6 +84,7 @@ fn main() -> Result<(), String> {
                     visualize_heuristic,
                     visualize_coverage,
                     symbolic_array_size,
+                    time_budget,
                 };
                 verify(source_paths.as_slice(), class_name, method_name, options)?;
             } else {
