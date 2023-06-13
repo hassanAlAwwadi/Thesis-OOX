@@ -15,6 +15,8 @@ I recommend to use the visual studio code editor, with the 'rust analyzer' exten
 In vscode, you can add settings for file associations. Since OOX is somewhat similar to Java syntax, we can use this to add syntax highlighting to `.oox` files.
 Lookup 'File associations' in settings and add *.oox : java
 
+Often in the logs you'll find a reference to a path:line, like:  "src/exec.rs:268". You can quickly navigate to that file and line by using Ctrl + P and pasting it there.
+
 # Logging
 The project uses a library 'slog' for logging purposes.
 There are some macros provided by the library that look similar to existing macros, like debug!() and dbg!(). 
@@ -36,3 +38,5 @@ This can be changed with feature flags from slog: https://docs.rs/crate/slog/lat
 - Error path does not point to the right file
     - This can occur when multiple tests are ran after one another due to the way I implemented global files....
     - When running the test in isolation this will not happen.
+- The resolver does not look at arguments.
+    - This can cause weird behaviour like passing wrong values to functions to be OK, only to go wrong at assertions (where the values are checked).
