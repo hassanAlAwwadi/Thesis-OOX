@@ -334,12 +334,13 @@ fn type_statement(
                     }
                     type_guard => type_guard,
                 };
-                let mut env = env.clone();
+                let mut true_env = env.clone();
+                let mut false_env = env.clone();
                 let true_body = type_statement(
                     *true_body,
                     is_constructor,
                     current_method.clone(),
-                    &mut env,
+                    &mut true_env,
                     &st,
                     declaration,
                 )?;
@@ -347,7 +348,7 @@ fn type_statement(
                     *false_body,
                     is_constructor,
                     current_method.clone(),
-                    &mut env,
+                    &mut false_env,
                     &st,
                     declaration,
                 )?;

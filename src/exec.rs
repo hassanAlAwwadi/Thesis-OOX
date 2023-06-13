@@ -1,11 +1,5 @@
 use core::panic;
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    ops::{AddAssign, Deref},
-    rc::Rc,
-    time::Instant,
-};
+use std::{cell::RefCell, collections::HashMap, ops::AddAssign, rc::Rc, time::Instant};
 
 use clap::ValueEnum;
 use im_rc::{vector, HashMap as ImHashMap, HashSet as ImHashSet};
@@ -57,7 +51,7 @@ mod eval;
 
 use crate::exec::state_split::exec_array_initialisation;
 
-type PathConstraints = ImHashSet<Expression>;
+type PathConstraints = ImHashSet<Rc<Expression>>;
 
 enum Output {
     Valid,
@@ -269,6 +263,7 @@ fn action(
      "stack" => ?state.stack.current_stackframe(),
      "heap" => ?state.heap,
      "alias_map" => ?state.alias_map
+    //  "constraints" => ?state.constraints,
     );
 
     match action {
@@ -340,7 +335,7 @@ fn action(
                         println!("Constraint is infeasible");
                         return ActionResult::InfeasiblePath;
                     } else if *expression != Expression::TRUE {
-                        state.constraints.insert(expression.deref().clone());
+                        state.constraints.insert(expression.clone());
                     }
                     // Also check the type guard expression if available.
                     // Note these are separated from the normal expression
@@ -353,12 +348,13 @@ fn action(
                     }
                 } else {
                     // Assert that requires is true
+                    let requires = evaluate(state, requires.clone(), en);
                     let assertion = prepare_assert_expression(state, requires.clone(), en);
                     let is_valid = eval_assertion(state, assertion.clone(), en);
                     if !is_valid {
                         return ActionResult::InvalidAssertion(requires.get_position());
                     }
-                    state.constraints.insert(requires.deref().clone());
+                    state.constraints.insert(requires);
 
                     // Also assert the type guard expression if available.
                     if let Some(type_guard) = type_guard.as_ref() {
@@ -402,7 +398,9 @@ fn action(
                 let return_type = current_member.type_of();
                 if return_type != RuntimeType::VoidRuntimeType {
                     if let Some(lhs) = returning_lhs {
-                        let rv = params.get(&constants::retval()).unwrap();
+                        let rv = params
+                            .get(&constants::retval())
+                            .expect("Found no return value, missing a return?");
                         let return_value = evaluate(state, rv.clone(), en);
 
                         execute_assign(state, &lhs, return_value, en);
@@ -532,12 +530,16 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl E
 
             // The number of combinations of each symbolic ref, which could be concretized.
             // If this number is too large we leave all the work to Z3 which seems to be faster in practice.
-            let n_combinations = &state
+            // This explodes so hard we need 128 bit integer and it still overflows.
+            let n_combinations: u128 = state
                 .alias_map
                 .iter()
-                .fold(1, |a, (_, refs)| a * refs.aliases().len());
+                .fold(Some(1_u128), |a, (_, refs)| {
+                    a.and_then(|a| a.checked_mul(refs.aliases().len() as u128))
+                })
+                .unwrap_or(u128::MAX); // limit overflow to max u128
 
-            if *n_combinations > 1000 {
+            if n_combinations > 1000 {
                 // Solve through only Z3
                 let result = z3_checker::all_z3::verify(&expression, &state.alias_map);
                 if let SatResult::Unsat = result {
@@ -761,7 +763,7 @@ fn prepare_assert_expression(
 
         negate(Rc::new(Expression::BinOp {
             bin_op: BinOp::Implies,
-            lhs: Rc::new(assumptions),
+            lhs: assumptions,
             rhs: assertion,
             type_: RuntimeType::BoolRuntimeType,
             info: SourcePos::UnknownPosition,
@@ -789,17 +791,20 @@ fn prepare_assert_expression(
 }
 
 /// Collects the path constraints into an expression
-fn collect_path_constraints(state: &State) -> Expression {
+fn collect_path_constraints(state: &State) -> Rc<Expression> {
     state
         .constraints
         .iter()
         .cloned()
-        .reduce(|x, y| Expression::BinOp {
-            bin_op: BinOp::And,
-            lhs: Rc::new(x),
-            rhs: Rc::new(y),
-            type_: RuntimeType::BoolRuntimeType,
-            info: SourcePos::UnknownPosition,
+        .reduce(|x, y| {
+            Expression::BinOp {
+                bin_op: BinOp::And,
+                lhs: x,
+                rhs: y,
+                type_: RuntimeType::BoolRuntimeType,
+                info: SourcePos::UnknownPosition,
+            }
+            .into()
         })
         .unwrap()
 }
@@ -1358,7 +1363,7 @@ fn exec_assume(
             if *expression == Expression::FALSE {
                 return false;
             } else if *expression != Expression::TRUE {
-                state.constraints.insert(expression.deref().clone());
+                state.constraints.insert(expression.clone());
             }
         }
         Either::Right(assumption) => {
