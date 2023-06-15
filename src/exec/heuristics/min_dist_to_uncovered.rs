@@ -12,7 +12,8 @@ use crate::{
     cfg::{CFGStatement, MethodIdentifier},
     exec::{IdCounter, State, SymResult},
     statistics::Statistics,
-    symbol_table::SymbolTable, Options,
+    symbol_table::SymbolTable,
+    Options,
 };
 
 use super::{
@@ -100,6 +101,34 @@ impl ExecutionTreeBasedHeuristic for MinDist2Uncovered {
         let states_node = choice(&leafs, &self.md2u, &mut self.rng);
 
         states_node
+    }
+
+    /// Writes the program to a file 'visualize', with some information for each statement provided by the decorator.
+    fn visualize<'a>(
+        &self,
+        current_pc: u64,
+        program: &HashMap<ProgramCounter, CFGStatement>,
+        flows: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
+        st: &SymbolTable,
+    ) {
+        let s = crate::prettyprint::cfg_pretty::pretty_print_compilation_unit(
+            &|pc| {
+                Some(format!(
+                    "pc: {} distance: [{}] {}",
+                    pc.to_string(),
+                    self.md2u
+                        .get(&pc)
+                        .map(|distance| distance.value.to_string())
+                        .unwrap_or(String::new()),
+                    if current_pc == pc { "<<<" } else { "" }
+                ))
+            },
+            program,
+            &flows,
+            st,
+        );
+        std::fs::write("visualize", &s).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300)); // a sleep to slow down the program, otherwise memory explodes?
     }
 }
 

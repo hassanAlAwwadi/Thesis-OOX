@@ -546,7 +546,7 @@ pub enum Rhs {
     },
 }
 
-#[derive(Clone, Derivative)]
+#[derive(Clone, Derivative, Debug)]
 #[derivative(PartialEq, Hash, Eq)]
 pub enum Expression {
     Forall {
@@ -664,10 +664,14 @@ impl Expression {
     }
 
     pub fn int(v: i64) -> Rc<Expression> {
+        Self::int_with_info(v, SourcePos::UnknownPosition)
+    }
+
+    pub fn int_with_info(v: i64, info: SourcePos) -> Rc<Expression> {
         Rc::new(Expression::Lit {
             lit: Lit::IntLit { int_value: v },
             type_: RuntimeType::IntRuntimeType,
-            info: SourcePos::UnknownPosition,
+            info,
         })
     }
 
@@ -767,9 +771,10 @@ pub enum NonVoidType {
     },
 }
 
-// how is this used during parsing? or is it only used during execution
+/// The type of something at runtime
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RuntimeType {
+    /// This variant is set to types during parsing phase, and is replaced after typing check.
     UnknownRuntimeType,
     VoidRuntimeType,
     UIntRuntimeType,

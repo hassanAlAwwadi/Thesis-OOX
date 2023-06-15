@@ -4,6 +4,9 @@ class Main {
         ensures(forall v, i : retval : forall w, j : retval : i < j ==> v <= w)
         exceptional(false)
     {
+        // if (#array <= 1) {
+        //     return array;
+        // }
         int x := #array;
         int y := x - 1;
         Main.mergesort(array, 0, y);
@@ -11,6 +14,7 @@ class Main {
     }
 
     static void mergesort(int[] array, int left, int right)
+        requires(array != null)
         exceptional(false)
     {
         // if (left >= right) {  // error , should be <
@@ -23,6 +27,7 @@ class Main {
     }
 
     static void merge(int[] array, int left, int middle, int right)
+        requires(array != null)
         exceptional(false)
     {
         int[] temp := new int[right - left + 1];

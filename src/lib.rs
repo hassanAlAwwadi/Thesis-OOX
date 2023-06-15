@@ -14,7 +14,6 @@ mod z3_checker;
 mod resolver;
 
 mod language;
-mod pretty_print;
 
 mod utils;
 

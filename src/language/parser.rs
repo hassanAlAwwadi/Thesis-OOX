@@ -603,18 +603,16 @@ fn expression6<'a>() -> Parser<'a, Token<'a>, Expression> {
     let plus = punct("+").map(|_| BinOp::Plus);
     let minus = punct("-").map(|_| BinOp::Minus);
 
-    (expression7() + ((plus | minus) + call(expression6)).opt()).map(|(lhs, rhs)| {
-        if let Some((bin_op, rhs)) = rhs {
-            Expression::BinOp {
-                info: lhs.get_position(),
+    // Left associative this way
+    (expression7() + ((plus | minus) + call(expression7)).repeat(0..)).map(|(first, next)| {
+        next.into_iter()
+            .fold(first, |a, (bin_op, b)| Expression::BinOp {
+                info: a.get_position(),
                 bin_op,
-                lhs: Rc::new(lhs),
-                rhs: Rc::new(rhs),
+                lhs: Rc::new(a),
+                rhs: Rc::new(b),
                 type_: RuntimeType::UnknownRuntimeType,
-            }
-        } else {
-            lhs
-        }
+            })
     })
 }
 
@@ -1006,11 +1004,7 @@ fn exceptional_expression(expression: &Expression) -> HashSet<Rc<Expression>> {
             // Check for divide or modulo by 0
             HashSet::from([equal(
                 rhs.clone(),
-                Expression::Lit {
-                    lit: Lit::IntLit { int_value: 0 },
-                    type_: RuntimeType::IntRuntimeType,
-                    info: expression.get_position(),
-                },
+                Expression::int_with_info(0, expression.get_position()),
             )])
         }
         Expression::BinOp { lhs, rhs, .. } => {
@@ -1028,7 +1022,14 @@ fn exceptional_expression(expression: &Expression) -> HashSet<Rc<Expression>> {
         ),
         Expression::Forall { .. } => HashSet::new(),
         Expression::Exists { .. } => HashSet::new(),
-        Expression::SizeOf { .. } => todo!(),
+        Expression::SizeOf { var, type_, info } => HashSet::from([equal(
+            Expression::Var {
+                var: var.clone(),
+                type_: type_.clone(),
+                info: *info,
+            },
+            Expression::NULL,
+        )]),
         _ => HashSet::new(),
     }
 }
@@ -1568,5 +1569,16 @@ mod tests {
         // dbg!(as_ref);
         let _c = (statement() - end()).parse(&as_ref).unwrap();
         // dbg!(&c);
+    }
+
+    #[test]
+    fn parse_expression_precedence() {
+        let file_content = "right - left + 1";
+
+        let tokens = tokens(file_content, 0).unwrap();
+        let as_ref = tokens.as_slice();
+        // dbg!(as_ref);
+        let c = (expression() - end()).parse(&as_ref).unwrap();
+        dbg!(&c);
     }
 }

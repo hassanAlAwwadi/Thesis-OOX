@@ -1,7 +1,7 @@
-use std::rc::Rc;
+use std::{fmt::Display, rc::Rc};
 
 use itertools::{Either, Itertools};
-use pretty::{docs, DocAllocator, DocBuilder};
+use pretty::{docs, BoxAllocator, DocAllocator, DocBuilder};
 
 // use super::{BinOp, Expression};
 
@@ -620,8 +620,83 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &RuntimeType {
     }
 }
 
+impl Display for RuntimeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuntimeType::UnknownRuntimeType => write!(f, "unknown"),
+            RuntimeType::VoidRuntimeType => write!(f, "void"),
+            RuntimeType::UIntRuntimeType => write!(f, "unsigned int"),
+            RuntimeType::IntRuntimeType => write!(f, "int"),
+            RuntimeType::FloatRuntimeType => write!(f, "float"),
+            RuntimeType::BoolRuntimeType => write!(f, "bool"),
+            RuntimeType::StringRuntimeType => write!(f, "string"),
+            RuntimeType::CharRuntimeType => write!(f, "char"),
+            RuntimeType::ReferenceRuntimeType { type_ } => write!(f, "{}", type_),
+            RuntimeType::ArrayRuntimeType { inner_type } => {
+                write!(f, "{}[]", inner_type)
+            }
+            RuntimeType::ANYRuntimeType => write!(f, "any"),
+            RuntimeType::NUMRuntimeType => write!(f, "NUM"),
+            RuntimeType::REFRuntimeType => write!(f, "REF"),
+            RuntimeType::ARRAYRuntimeType => write!(f, "ARRAY"),
+        }
+    }
+}
+
+impl Display for Invocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = pretty::Pretty::pretty(self, &BoxAllocator)
+            .1
+            .pretty(50)
+            .to_string();
+        f.write_str(&s)
+    }
+}
+
+
+impl Display for Rhs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = pretty::Pretty::pretty(self, &BoxAllocator)
+            .1
+            .pretty(50)
+            .to_string();
+        f.write_str(&s)
+    }
+}
+
+impl Display for Lhs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = pretty::Pretty::pretty(self, &BoxAllocator)
+            .1
+            .pretty(50)
+            .to_string();
+        f.write_str(&s)
+    }
+}
+
+impl Display for Statement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = pretty::Pretty::pretty(self, &BoxAllocator)
+            .1
+            .pretty(50)
+            .to_string();
+        f.write_str(&s)
+    }
+}
+
+
+impl Display for Expression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = pretty::Pretty::pretty(self, &BoxAllocator)
+            .1
+            .pretty(50)
+            .to_string();
+        f.write_str(&s)
+    }
+}
+
 pub mod cfg_pretty {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, fmt::Display};
 
     use crate::{
         cfg::{CFGStatement, MethodIdentifier},
@@ -897,7 +972,7 @@ pub mod cfg_pretty {
         result
     }
 
-    impl std::fmt::Display for CFGStatement {
+    impl Display for CFGStatement {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let allocator = BoxAllocator;
             let w = 20;

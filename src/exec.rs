@@ -348,13 +348,13 @@ fn action(
                     }
                 } else {
                     // Assert that requires is true
-                    let requires = evaluate(state, requires.clone(), en);
-                    let assertion = prepare_assert_expression(state, requires.clone(), en);
+                    let evaluated_requires = evaluate(state, requires.clone(), en);
+                    let assertion = prepare_assert_expression(state, evaluated_requires.clone(), en);
                     let is_valid = eval_assertion(state, assertion.clone(), en);
                     if !is_valid {
                         return ActionResult::InvalidAssertion(requires.get_position());
                     }
-                    state.constraints.insert(requires);
+                    state.constraints.insert(evaluated_requires);
 
                     // Also assert the type guard expression if available.
                     if let Some(type_guard) = type_guard.as_ref() {
@@ -1453,6 +1453,22 @@ fn assume_type_guard(state: &mut State, type_guard: &TypeExpr, en: &mut impl Eng
                 .retain(|alias| is_of_type_or_not(alias.as_ref(), rhs, not, en.symbol_table()));
 
             alias_entry.aliases.len() > 0
+        },
+        Expression::Conditional { // Must not forget that it can also be a conditional in some cases and we need to split the state.
+            guard,
+            true_,
+            false_,
+            ..
+        } => {
+            state_split::conditional_state_split(
+                state,
+                en,
+                guard.clone(),
+                true_.clone(),
+                false_.clone(),
+                var.clone(),
+            );
+            return assume_type_guard(state, type_guard, en);
         }
         _ => panic!("expected ref or symbolic ref"),
     }
@@ -2207,17 +2223,17 @@ fn sym_exec_polymorphic() {
 
 #[test]
 fn benchmark_col_25() {
-    let k = 15000;
+    let k = 15000; // the program won't be that large 
     let options = Options::default_with_k(k);
     assert_eq!(
         verify(
-            &["./benchmark_programs/defects4j/collections_25.oox"],
+            &["./benchmark_programs/experiment2/defects4j/collections_25.oox"],
             "Test",
             "test",
             options
         )
         .unwrap(),
-        SymResult::Invalid(SourcePos::new(352, 21, 0))
+        SymResult::Invalid(SourcePos::new(359, 21, 0))
     );
 }
 
@@ -2227,13 +2243,13 @@ fn benchmark_col_25_symbolic() {
     let options = Options::default_with_k(k);
     assert_eq!(
         verify(
-            &["./benchmark_programs/defects4j/collections_25.oox"],
+            &["./benchmark_programs/experiment2/defects4j/collections_25.oox"],
             "Test",
             "test_symbolic",
             options
         )
         .unwrap(),
-        SymResult::Invalid(SourcePos::new(395, 21, 0))
+        SymResult::Invalid(SourcePos::new(402, 21, 0))
     );
 }
 
@@ -2243,7 +2259,7 @@ fn benchmark_col_25_test3() {
     let options = Options::default_with_k(k);
     assert_eq!(
         verify(
-            &["./benchmark_programs/defects4j/collections_25.oox"],
+            &["./benchmark_programs/experiment2/defects4j/collections_25.oox"],
             "Test",
             "test3",
             options

@@ -25,7 +25,7 @@ pub(crate) fn sym_exec(
     let mut remaining_states = vec![state];
 
     while let Some(state) = remaining_states.pop() {
-        let pc = state.pc;
+        let current_pc = state.pc;
         let step = execute_instruction_for_all_states(
             vec![state],
             program,
@@ -37,10 +37,31 @@ pub(crate) fn sym_exec(
             options,
         );
 
+        if options.visualize_heuristic {
+            let s = crate::prettyprint::cfg_pretty::pretty_print_compilation_unit(
+                &|pc| {
+                    Some(format!(
+                        "{}, visited: [{}] {}",
+                        pc.to_string(),
+                        statistics
+                            .coverage
+                            .get(&pc)
+                            .map(|_pc| "x")
+                            .unwrap_or(" "),
+                        if current_pc == pc { "<<<" } else { "" }
+                    ))
+                },
+                program,
+                &flows,
+                st,
+            );
+            std::fs::write("visualize", &s).unwrap();
+        }
+
         match step {
             Err(source_pos) => return SymResult::Invalid(source_pos),
             Ok(mut new_states) => {
-                if let Some(children) = flows.get(&pc) {
+                if let Some(children) = flows.get(&current_pc) {
                     // Add the children in DFS order
                     for child in children {
                         if let Some(values) = new_states.remove(&child) {

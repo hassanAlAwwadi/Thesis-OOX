@@ -118,7 +118,7 @@ pub(crate) fn size_of(var: Identifier) -> Expression {
 /// let expressions = [Expression::TRUE, Expression::FALSE, Expression::TRUE];
 ///
 /// assert_eq!(
-///     format!("{:?}", dsl::ors(expressions)),
+///     format!("{}", dsl::ors(expressions)),
 ///     "true || false || true"
 /// )
 /// ```
@@ -142,7 +142,7 @@ where
 /// let expressions = [Expression::TRUE, Expression::FALSE, Expression::TRUE];
 ///
 /// assert_eq!(
-///     format!("{:?}", dsl::ands(expressions)),
+///     format!("{}", dsl::ands(expressions)),
 ///     "true && true && false && true"
 /// )
 /// ```

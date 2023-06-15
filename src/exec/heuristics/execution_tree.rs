@@ -31,18 +31,19 @@ pub(super) trait ExecutionTreeBasedHeuristic {
     /// Writes the program to a file 'visualize', with some information for each statement provided by the decorator.
     fn visualize<'a>(
         &self,
+        current_pc: u64,
         program: &HashMap<ProgramCounter, CFGStatement>,
         flows: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
         st: &SymbolTable,
     ) {
         let s = crate::prettyprint::cfg_pretty::pretty_print_compilation_unit(
-            &|pc| Some(pc.to_string()),
+            &|pc| Some(format!("{} {}", pc.to_string(), if current_pc == pc { "<<<" } else { "" })),
             program,
             &flows,
             st,
         );
         std::fs::write("visualize", &s).unwrap();
-        // std::thread::sleep(std::time::Duration::from_millis(300));
+        std::thread::sleep(std::time::Duration::from_millis(300)); // a sleep to slow down the program, otherwise memory explodes?
     }
 }
 
@@ -158,7 +159,7 @@ pub(super) fn sym_exec_execution_tree(
         let states = chosen_state;
 
         if options.visualize_heuristic {
-            heuristic.visualize(program, flows, st);
+            heuristic.visualize(current_pc, program, flows, st);
         }
 
         let r = execute_instruction_for_all_states(
