@@ -1,3 +1,10 @@
+/// This bug was taken from the Defects4J repository, and is the bug '25' from the 'Collections' project.
+/// The bug is a nullpointer exception because a comparator object has not been set. 
+/// Not a very interesting bug but it shows we can detect bugs in larger programs.
+/// We have isolated the classes and interfaces that are involved in the bug, in hindsight perhaps a bit too much which makes it less realistic of a test.
+/// For example we could have added multipole Comparator implementations, and other iterator implementations from the bug repository 
+/// to make the program size more of a challenge.
+
 interface Iterator {
     bool hasNext();
 

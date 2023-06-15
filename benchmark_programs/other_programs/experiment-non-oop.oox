@@ -1,25 +1,20 @@
 //
 // Linked-list, with several methods.
 //
-interface Value {}
 
-class Integer implements Value {
-    int i;
-}
-
-class Node implements Value {
-    Value value;
+class Node {
+    Node value;
     Node next ;
 
-    Node(Value value) {
+    Node(Node value) {
         this.value := value;
         this.next := null;
     }
 
-    bool member(Value x)
+    bool member(Node x)
         exceptional(false) 
     {
-        Value v := this.value ;
+        Node v := this.value ;
         if(x==v) return true ;
         else {
             Node n := this.next ;
@@ -106,7 +101,7 @@ class Main {
 
 
 
-    static void test4(Node node, Value z) 
+    static void test4(Node node, Node z) 
         requires(node != null)
         exceptional(false)
     {

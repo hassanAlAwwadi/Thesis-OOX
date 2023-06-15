@@ -1,2 +1,0 @@
-A lot of unrelated complex code was removed from this benchmark program, the difference can be seen in the original and modified java code.
-The main reason for this is that converting to OOX is a manual process and doing this for complex code that is not related to the bug is not a good use of time.
