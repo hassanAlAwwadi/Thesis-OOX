@@ -8,7 +8,8 @@ use crate::{
     exec::{action, ActionResult},
     positioned::SourcePos,
     statistics::Statistics,
-    symbol_table::SymbolTable, Options,
+    symbol_table::SymbolTable,
+    Options,
 };
 
 use execution_tree::ExecutionTree;
@@ -42,7 +43,7 @@ fn execute_instruction_for_all_states(
     statistics: &mut Statistics,
     options: &Options,
 ) -> Result<HashMap<u64, Vec<State>>, SourcePos> {
-    assert!(states.len() > 0);
+    assert!(!states.is_empty());
 
     statistics.measure_statement_explored(states[0].pc);
     let mut remaining_states = states;
@@ -59,7 +60,9 @@ fn execute_instruction_for_all_states(
         debug_assert!(remaining_states.iter().map(|s| s.pc).all_equal());
 
         // dbg!(&remaining_states.len());
-        if state.path_length >= options.k || statistics.start_time.elapsed().as_secs() >= options.time_budget {
+        if state.path_length >= options.k
+            || statistics.start_time.elapsed().as_secs() >= options.time_budget
+        {
             // finishing current branch
             statistics.measure_finish();
             continue;
@@ -74,7 +77,7 @@ fn execute_instruction_for_all_states(
                 statistics,
                 st,
                 root_logger: &root_logger,
-                options
+                options,
             },
         );
         match next {
@@ -142,12 +145,12 @@ fn execute_instruction_for_all_states(
         }
     }
 
-    // if resulting_states.len() == 0 {
+    // if resulting_states.is_empty() {
     //     dbg!(&program[&current_pc.unwrap()]);
     // }
 
     // Finished
-    return Ok(resulting_states);
+    Ok(resulting_states)
 }
 
 /// Marks a path as finished in the path tree. (only if there are no valid states left for that path)
@@ -179,7 +182,7 @@ fn finish_state_in_path(mut leaf: Rc<RefCell<ExecutionTree>>) -> bool {
             ExecutionTree::Node { children, .. } => {
                 children.retain(|child| !Rc::ptr_eq(child, &leaf));
 
-                if children.len() == 0 {
+                if children.is_empty() {
                     leaf = parent.clone();
                 } else {
                     return false;

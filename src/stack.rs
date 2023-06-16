@@ -31,12 +31,12 @@ impl Stack {
         stack_frame.params.insert(var, value.into());
     }
     /// Removes identifier with value expression from the top of the stack
-    pub fn remove_variable<'a>(&mut self, identifier: &Identifier) {
+    pub fn remove_variable(&mut self, identifier: &Identifier) {
         let stack_frame = self.0.back_mut().unwrap();
         stack_frame.params.remove(identifier);
     }
 
-    pub fn lookup<'a>(&self, identifier: &Identifier) -> Option<Rc<Expression>> {
+    pub fn lookup(&self, identifier: &Identifier) -> Option<Rc<Expression>> {
         self.current_variables().unwrap().get(identifier).cloned()
     }
 

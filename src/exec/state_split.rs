@@ -42,16 +42,14 @@ pub fn conditional_state_split(
         en.add_remaining_state(true_state);
     }
     // continue with false state
-    let mut false_state = state;
+    let false_state = state;
     let feasible_path = exec_assume(
-        &mut false_state,
+        false_state,
         Either::Left(crate::dsl::negate(guard).into()),
         en,
     );
     if feasible_path {
-        false_state
-            .stack
-            .insert_variable(lhs_name.clone(), false_lhs);
+        false_state.stack.insert_variable(lhs_name, false_lhs);
     }
 }
 
@@ -72,7 +70,7 @@ pub(super) fn split_states_with_aliases(
     );
 
     // Turn it into an iterator over the objects
-    let mut aliases = aliases.into_iter().map(|(_, objects)| objects);
+    let mut aliases = aliases.into_values();
 
     let objects = aliases.next().unwrap();
     state
@@ -96,7 +94,9 @@ pub(super) fn exec_array_initialisation(
     array_type: RuntimeType,
 ) {
     let max_array_size = engine.options().symbolic_array_size;
-    engine.statistics().measure_branches((max_array_size + 1) as u32); // including null, so + 1
+    engine
+        .statistics()
+        .measure_branches((max_array_size + 1) as u32); // including null, so + 1
     info!(
         state.logger,
         "Symbolic array initialisation of {} into {} paths",
@@ -138,8 +138,8 @@ pub(super) fn exec_array_initialisation(
         state,
         &array_name,
         0,
-        array_type.clone(),
-        *inner_type.clone(),
+        array_type,
+        *inner_type,
         engine.symbol_table(),
     );
 }

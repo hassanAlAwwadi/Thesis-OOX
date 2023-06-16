@@ -1,4 +1,3 @@
-use core::panic;
 use std::{cell::RefCell, collections::HashMap, ops::AddAssign, rc::Rc, time::Instant};
 
 use clap::ValueEnum;
@@ -143,11 +142,11 @@ impl State {
         let type_ = structure.type_of();
 
         self.heap.insert(ref_fresh, structure);
-        return Rc::new(Expression::Ref {
+        Rc::new(Expression::Ref {
             ref_: ref_fresh,
             type_,
             info: SourcePos::UnknownPosition,
-        });
+        })
     }
 }
 
@@ -277,23 +276,19 @@ fn action(
         CFGStatement::Statement(Statement::Assign { lhs, rhs, .. }) => {
             // RhsCall 'x.foo()' has a special case,
             // others are handled in evaluateRhs
-            match rhs {
-                Rhs::RhsCall { invocation, .. } => {
-                    // if rhs contains an invocation.
-                    return exec_invocation(
-                        state,
-                        InvocationContext {
-                            invocation,
-                            program,
-                            return_point: pc,
-                            lhs: Some(lhs.clone()),
-                        },
-                        en,
-                    );
-                }
-                _ => (),
+            if let Rhs::RhsCall { invocation, .. } = rhs {
+                // if rhs contains an invocation.
+                return exec_invocation(
+                    state,
+                    InvocationContext {
+                        invocation,
+                        program,
+                        return_point: pc,
+                        lhs: Some(lhs.clone()),
+                    },
+                    en,
+                );
             }
-
             let value = evaluate_rhs(state, rhs, en);
             let e = evaluate(state, value, en);
 
@@ -335,7 +330,7 @@ fn action(
                         println!("Constraint is infeasible");
                         return ActionResult::InfeasiblePath;
                     } else if *expression != Expression::TRUE {
-                        state.constraints.insert(expression.clone());
+                        state.constraints.insert(expression);
                     }
                     // Also check the type guard expression if available.
                     // Note these are separated from the normal expression
@@ -349,8 +344,9 @@ fn action(
                 } else {
                     // Assert that requires is true
                     let evaluated_requires = evaluate(state, requires.clone(), en);
-                    let assertion = prepare_assert_expression(state, evaluated_requires.clone(), en);
-                    let is_valid = eval_assertion(state, assertion.clone(), en);
+                    let assertion =
+                        prepare_assert_expression(state, evaluated_requires.clone(), en);
+                    let is_valid = eval_assertion(state, assertion, en);
                     if !is_valid {
                         return ActionResult::InvalidAssertion(requires.get_position());
                     }
@@ -358,7 +354,7 @@ fn action(
 
                     // Also assert the type guard expression if available.
                     if let Some(type_guard) = type_guard.as_ref() {
-                        let all_of_type = assert_type_guard(state, &type_guard, en);
+                        let all_of_type = assert_type_guard(state, type_guard, en);
                         if !all_of_type {
                             return ActionResult::InvalidAssertion(type_guard.get_position());
                         }
@@ -380,7 +376,7 @@ fn action(
                     return ActionResult::InvalidAssertion(post_condition.get_position());
                 }
                 if let Some(type_guard) = type_guard.as_ref() {
-                    let all_of_type = assert_type_guard(state, &type_guard, en);
+                    let all_of_type = assert_type_guard(state, type_guard, en);
                     if !all_of_type {
                         return ActionResult::InvalidAssertion(type_guard.get_position());
                     }
@@ -480,8 +476,8 @@ fn assert_exceptional(
     type_guard: Option<TypeExpr>,
     message: &str,
 ) -> bool {
-    let assertion = prepare_assert_expression(state, exceptional.clone(), en);
-    let is_valid = eval_assertion(state, assertion.clone(), en);
+    let assertion = prepare_assert_expression(state, exceptional, en);
+    let is_valid = eval_assertion(state, assertion, en);
     if !is_valid {
         error!(state.logger, "Exceptional message: {:?}", message);
         return false;
@@ -489,11 +485,11 @@ fn assert_exceptional(
     if let Some(type_guard) = type_guard.as_ref() {
         let path_constraints = collect_path_constraints(state);
         dbg!(&path_constraints);
-        let path_constraints_sat = !eval_assertion(state, path_constraints.into(), en);
+        let path_constraints_sat = !eval_assertion(state, path_constraints, en);
         dbg!(path_constraints_sat);
         // if the path constraints are satisfiable, we have to check this otherwise the path is unfeasible and we don't.
         if path_constraints_sat {
-            let all_of_type = assert_type_guard(state, &type_guard, en);
+            let all_of_type = assert_type_guard(state, type_guard, en);
             if !all_of_type {
                 return false;
             }
@@ -514,7 +510,7 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl E
         true
     } else {
         let symbolic_refs = find_symbolic_refs(&expression);
-        if symbolic_refs.len() == 0 {
+        if symbolic_refs.is_empty() {
             let result = z3_checker::concretization::verify(&expression);
             if let SatResult::Unsat = result {
             } else {
@@ -618,17 +614,17 @@ fn exec_invocation(
                 // A static method, or a method that is not overriden anywhere (non-polymorphic)
                 let next_entry =
                     invocation::single_method_invocation(state, context, potential_method, en);
-                return ActionResult::FunctionCall(next_entry);
+                ActionResult::FunctionCall(next_entry)
             } else {
                 // dbg!(invocation_lhs);
 
-                return invocation::multiple_method_invocation(
+                invocation::multiple_method_invocation(
                     state,
                     invocation_lhs,
                     context,
                     potential_methods,
                     en,
-                );
+                )
             }
         }
         Invocation::InvokeConstructor {
@@ -659,7 +655,7 @@ fn exec_invocation(
             );
 
             let next_entry = find_entry_for_static_invocation(
-                &class_name,
+                class_name,
                 &method.name,
                 context.invocation.argument_types(),
                 context.program,
@@ -691,7 +687,7 @@ fn exec_invocation(
                 this_param,
             );
             let next_entry = find_entry_for_static_invocation(
-                &class_name,
+                class_name,
                 &method.name,
                 context.invocation.argument_types(),
                 context.program,
@@ -704,7 +700,7 @@ fn exec_invocation(
 
             let next_entry =
                 invocation::single_method_invocation(state, context, potential_method, en);
-            return ActionResult::FunctionCall(next_entry);
+            ActionResult::FunctionCall(next_entry)
         }
     }
 }
@@ -758,7 +754,7 @@ fn prepare_assert_expression(
     assertion: Rc<Expression>,
     en: &mut impl Engine,
 ) -> Rc<Expression> {
-    let expression = if state.constraints.len() >= 1 {
+    let expression = if !state.constraints.is_empty() {
         let assumptions = collect_path_constraints(state);
 
         negate(Rc::new(Expression::BinOp {
@@ -842,7 +838,7 @@ fn read_field_symbolic_ref(
                     type_: RuntimeType::ANYRuntimeType,
                     info: SourcePos::UnknownPosition,
                 }),
-                true_: (read_field_concrete_ref(heap, ref_, &field)),
+                true_: (read_field_concrete_ref(heap, ref_, field)),
                 false_: (read_field_symbolic_ref(heap, rs, sym_ref, field)),
                 type_: RuntimeType::ANYRuntimeType,
                 info: SourcePos::UnknownPosition,
@@ -851,12 +847,7 @@ fn read_field_symbolic_ref(
     }
 }
 
-fn write_field_concrete_ref(
-    heap: &mut Heap,
-    ref_: i64,
-    field: &Identifier,
-    value: Rc<Expression>,
-) -> () {
+fn write_field_concrete_ref(heap: &mut Heap, ref_: i64, field: &Identifier, value: Rc<Expression>) {
     if let HeapValue::ObjectValue { fields, .. } = heap.get_mut(&ref_).unwrap() {
         fields.insert(field.clone(), value);
     } else {
@@ -866,12 +857,12 @@ fn write_field_concrete_ref(
 
 fn write_field_symbolic_ref(
     heap: &mut Heap,
-    concrete_refs: &Vec<Rc<Expression>>,
+    concrete_refs: &[Rc<Expression>],
     field: &Identifier,
     sym_ref: Rc<Expression>,
     value: Rc<Expression>,
-) -> () {
-    match concrete_refs.as_slice() {
+) {
+    match concrete_refs {
         [] => {
             panic!("Symbolic objects must have at least one concrete reference when initialised.")
         }
@@ -886,7 +877,7 @@ fn write_field_symbolic_ref(
                 let ite = ite(
                     equal(sym_ref.clone(), r.clone()),
                     value.clone(),
-                    read_field_concrete_ref(heap, ref_, &field),
+                    read_field_concrete_ref(heap, ref_, field),
                 );
                 write_field_concrete_ref(heap, ref_, field, Rc::new(ite))
             }
@@ -933,13 +924,13 @@ fn init_symbolic_object(
         .iter()
         .map(|class_name| {
             let fields = st
-                .get_all_fields(&class_name)
+                .get_all_fields(class_name)
                 .iter()
                 .map(|(field_name, type_)| {
                     (
                         field_name.clone(),
                         Rc::new(initialize_symbolic_var(
-                            &field_name,
+                            field_name,
                             &type_.type_of(),
                             state.next_reference_id(),
                             st,
@@ -948,17 +939,12 @@ fn init_symbolic_object(
                 })
                 .collect();
 
-            let reference = state.allocate_on_heap(
-                HeapValue::ObjectValue {
-                    fields,
-                    type_: RuntimeType::ReferenceRuntimeType {
-                        type_: class_name.clone(),
-                    },
-                }
-                .into(),
-            );
-
-            reference
+            state.allocate_on_heap(HeapValue::ObjectValue {
+                fields,
+                type_: RuntimeType::ReferenceRuntimeType {
+                    type_: class_name.clone(),
+                },
+            })
         })
         .collect_vec();
 
@@ -1026,10 +1012,10 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
                     write_field_concrete_ref(&mut state.heap, *ref_, field, e);
                 }
                 sym_ref @ Expression::SymbolicRef { var, type_, .. } => {
-                    init_symbolic_reference(state, &var, &type_, en);
+                    init_symbolic_reference(state, var, type_, en);
                     // should also remove null here? --Assignemnt::45
                     // Yes, we have if (x = null) { throw; } guards that ensure it cannot be null
-                    remove_symbolic_null(&mut state.alias_map, &var);
+                    remove_symbolic_null(&mut state.alias_map, var);
                     let concrete_refs = &state.alias_map[var];
                     // dbg!(&var, &concrete_refs);
                     write_field_symbolic_ref(
@@ -1054,7 +1040,7 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
                         false_.clone(),
                         var.clone(),
                     );
-                    return execute_assign(state, lhs, e, en);
+                    execute_assign(state, lhs, e, en)
                 }
 
                 _ => todo!("{:?}", o.as_ref()),
@@ -1122,9 +1108,7 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
             sizes,
             type_,
             ..
-        } => {
-            return exec_array_construction(state, array_type, sizes, type_, en);
-        }
+        } => exec_array_construction(state, array_type, sizes, type_, en),
         Rhs::RhsCast { cast_type, var, .. } => {
             let object = state.stack.lookup(var).unwrap_or_else(|| {
                 panic!(
@@ -1183,8 +1167,8 @@ fn exec_rhs_field(
 
             Rc::new(Expression::Conditional {
                 guard: guard.clone(),
-                true_: true_,
-                false_: false_,
+                true_,
+                false_,
                 type_: type_.clone(),
                 info: *info,
             })
@@ -1292,12 +1276,9 @@ fn read_elem_symbolic_index(
         let mut indexed_elements = elements.iter().zip(indices).rev();
 
         if let Some((last_element, _)) = indexed_elements.next() {
-            let value = indexed_elements
-                .fold(last_element.clone(), |acc, (element, concrete_index)| {
-                    ite(equal(index.clone(), concrete_index), element.clone(), acc).into()
-                })
-                .into();
-            value
+            indexed_elements.fold(last_element.clone(), |acc, (element, concrete_index)| {
+                ite(equal(index.clone(), concrete_index), element.clone(), acc).into()
+            })
         } else {
             // empty array
             panic!("Empty array, exceptional clauses should prevent this");
@@ -1363,7 +1344,7 @@ fn exec_assume(
             if *expression == Expression::FALSE {
                 return false;
             } else if *expression != Expression::TRUE {
-                state.constraints.insert(expression.clone());
+                state.constraints.insert(expression);
             }
         }
         Either::Right(assumption) => {
@@ -1380,12 +1361,12 @@ fn exec_assume(
     true
 }
 
-fn get_expression_for_var<'a>(
-    state: &'a mut State,
+fn get_expression_for_var(
+    state: &mut State,
     var: &Identifier,
     en: &mut impl Engine,
 ) -> Rc<Expression> {
-    let symbolic_ref = state.stack.lookup(&var).unwrap();
+    let symbolic_ref = state.stack.lookup(var).unwrap();
 
     evaluate(state, symbolic_ref, en)
 }
@@ -1395,7 +1376,7 @@ fn get_alias_for_var<'a>(
     var: &Identifier,
     en: &mut impl Engine,
 ) -> &'a mut AliasEntry {
-    let symbolic_ref = state.stack.lookup(&var).unwrap();
+    let symbolic_ref = state.stack.lookup(var).unwrap();
 
     let symbolic_ref = evaluate(state, symbolic_ref, en)
         .expect_symbolic_ref()
@@ -1452,9 +1433,10 @@ fn assume_type_guard(state: &mut State, type_guard: &TypeExpr, en: &mut impl Eng
                 .aliases
                 .retain(|alias| is_of_type_or_not(alias.as_ref(), rhs, not, en.symbol_table()));
 
-            alias_entry.aliases.len() > 0
-        },
-        Expression::Conditional { // Must not forget that it can also be a conditional in some cases and we need to split the state.
+            !alias_entry.aliases.is_empty()
+        }
+        Expression::Conditional {
+            // Must not forget that it can also be a conditional in some cases and we need to split the state.
             guard,
             true_,
             false_,
@@ -1468,7 +1450,7 @@ fn assume_type_guard(state: &mut State, type_guard: &TypeExpr, en: &mut impl Eng
                 false_.clone(),
                 var.clone(),
             );
-            return assume_type_guard(state, type_guard, en);
+            assume_type_guard(state, type_guard, en)
         }
         _ => panic!("expected ref or symbolic ref"),
     }
@@ -1638,7 +1620,7 @@ pub fn verify(
     //     Mutex::new(slog_bunyan::default(std::io::stderr()).filter_level(Level::Debug)).fuse(),
     //     o!(),
     // );
-    let log_file_name = format!("./logs/log.txt");
+    let log_file_name = "../../logs/log.txt".to_string();
 
     let mut builder = FileLoggerBuilder::new(log_file_name);
     // let mut builder = TerminalLoggerBuilder::new();
@@ -1722,7 +1704,7 @@ pub fn verify(
                 Some(format!(
                     "pc: {}, covered: {}",
                     pc,
-                    statistics.coverage.contains(&pc).to_string()
+                    statistics.coverage.contains(&pc)
                 ))
             },
             &program,
@@ -1761,7 +1743,7 @@ pub fn verify(
         )
     }
 
-    return Ok(sym_result);
+    Ok(sym_result)
 }
 
 #[test]
@@ -2223,7 +2205,7 @@ fn sym_exec_polymorphic() {
 
 #[test]
 fn benchmark_col_25() {
-    let k = 15000; // the program won't be that large 
+    let k = 15000; // the program won't be that large
     let options = Options::default_with_k(k);
     assert_eq!(
         verify(

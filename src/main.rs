@@ -75,7 +75,7 @@ fn main() -> Result<(), String> {
             visualize_coverage,
             time_budget,
         } => {
-            if let Some((class_name, method_name)) = function.split(".").collect_tuple() {
+            if let Some((class_name, method_name)) = function.split('.').collect_tuple() {
                 let options = Options {
                     k,
                     quiet,
@@ -106,7 +106,7 @@ fn main() -> Result<(), String> {
                     parse_program(&file_content, file_number).map_err(|error| match error {
                         lib::Error::ParseError(err) => err.to_string(),
                         lib::Error::LexerError((line, col)) => {
-                            format!("Lexer error at {}:{}:{}", path.to_string(), line, col)
+                            format!("Lexer error at {}:{}:{}", path, line, col)
                         }
                     })?;
                 c = c.merge(file_c);

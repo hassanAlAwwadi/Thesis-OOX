@@ -80,7 +80,7 @@ fn helper(
             type_,
             info,
         } => Rc::new(Expression::BinOp {
-            bin_op: bin_op.clone(),
+            bin_op: *bin_op,
             lhs: helper(lhs.clone(), concretization),
             rhs: helper(rhs.clone(), concretization),
             type_: type_.clone(),
@@ -155,7 +155,7 @@ fn helper(
 
 // alias_map.iter().fold(HashMap::new(), |mut a: HashMap<&Identifier, Option<Box<dyn Iterator<Item = &Expression>>>>, x| {
 
-//     if a.len() == 0 {
+//     if a.is_empty() {
 //         a.insert(x.0, Some(Box::new(x.1.iter())));
 //     }
 //     for ref_ in x.1 {
@@ -192,7 +192,7 @@ fn helper(
 // }
 
 // returns the identifiers of all Expression::SymbolicRef in expression.
-pub fn find_symbolic_refs<'a>(expression: &Expression) -> HashSet<&Identifier> {
+pub fn find_symbolic_refs(expression: &Expression) -> HashSet<&Identifier> {
     struct SymbolicRefFold;
     impl<'a> ExprFoldCollection<'a, HashSet<&'a Identifier>> for SymbolicRefFold {
         fn fold_sym_ref(var: &'a Identifier, _: &RuntimeType) -> HashSet<&'a Identifier> {

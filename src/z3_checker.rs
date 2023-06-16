@@ -60,7 +60,7 @@ pub mod all_z3 {
             .filter(|(id, _)| symbolic_refs.contains(id))
         {
             let symbolic_ref =
-                Int::try_from(id_to_z3_node[&NodeEntry::sym_ref(&symbolic_ref_name)].clone())
+                Int::try_from(id_to_z3_node[&NodeEntry::sym_ref(symbolic_ref_name)].clone())
                     .unwrap();
 
             let mut set = z3::ast::Set::empty(&ctx, &int_sort);
@@ -84,7 +84,7 @@ pub mod all_z3 {
     }
 }
 
-enum IOP {
+enum IntOp {
     Add,
     Sub,
     Mul,
@@ -92,13 +92,13 @@ enum IOP {
     Mod,
 }
 
-enum IE {
+enum IntExpr {
     Value(i64),
-    Op(IOP, Box<IE>, Box<IE>),
-    Cond(BE, Box<IE>, Box<IE>),
+    Op(IntOp, Box<IntExpr>, Box<IntExpr>),
+    Cond(BE, Box<IntExpr>, Box<IntExpr>),
 }
 
-enum BOP {
+enum BoolOp {
     And,
     Or,
     Implies,
@@ -106,7 +106,7 @@ enum BOP {
 
 enum BE {
     Value(i64),
-    Op(BOP, Box<IE>, Box<IE>),
+    Op(BoolOp, Box<IntExpr>, Box<IntExpr>),
     Cond(Box<BE>, Box<BE>, Box<BE>),
 }
 
@@ -171,7 +171,7 @@ impl<'ctx> AstNode<'ctx> {
     fn and(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
         let ctx = self.get_ctx();
         Ok(AstNode::Bool(Bool::and(
-            &ctx,
+            ctx,
             &[&Bool::try_from(self)?, &Bool::try_from(other)?],
         )))
     }
@@ -179,7 +179,7 @@ impl<'ctx> AstNode<'ctx> {
     fn or(self, other: AstNode<'ctx>) -> Result<AstNode, ()> {
         let ctx = self.get_ctx();
         Ok(AstNode::Bool(Bool::or(
-            &ctx,
+            ctx,
             &[&Bool::try_from(self)?, &Bool::try_from(other)?],
         )))
     }
@@ -266,7 +266,7 @@ fn expression_to_z3_node<'ctx>(ctx: &'ctx Context, expression: &Expression) -> B
 
     // dbg!(expression);
     let (symbolic_variables, literals, symbolic_refs) = symbolic_variables(expression);
-    assert!(symbolic_refs.len() == 0);
+    assert!(symbolic_refs.is_empty());
     // dbg!(&literals);
     let id_to_z3_node = symbolic_variables
         .into_iter()
@@ -306,8 +306,8 @@ fn expr_to_z3<'ctx>(
 ) -> AstNode<'ctx> {
     match expression {
         Expression::SymbolicVar { var, type_, .. } => match type_ {
-            RuntimeType::BoolRuntimeType => vars.get(&NodeEntry::var(&var)).unwrap().clone(),
-            RuntimeType::IntRuntimeType => vars.get(&NodeEntry::var(&var)).unwrap().clone(),
+            RuntimeType::BoolRuntimeType => vars.get(&NodeEntry::var(var)).unwrap().clone(),
+            RuntimeType::IntRuntimeType => vars.get(&NodeEntry::var(var)).unwrap().clone(),
             _ => todo!(),
         },
         Expression::BinOp {
@@ -340,7 +340,7 @@ fn expr_to_z3<'ctx>(
 
         Expression::UnOp { un_op, value, .. } => match un_op {
             UnOp::Negative => todo!(),
-            UnOp::Negate => AstNode::negate(expr_to_z3(&value, vars)).unwrap(),
+            UnOp::Negate => AstNode::negate(expr_to_z3(value, vars)).unwrap(),
         },
         Expression::Lit { lit, .. } => vars.get(&NodeEntry::Lit(lit.clone())).unwrap().clone(),
         Expression::Ref { ref_, .. } => {
@@ -389,7 +389,7 @@ fn symbolic_variables(
                 helper(variables, literals, symbolic_refs, rhs);
             }
             Expression::UnOp { value, .. } => {
-                helper(variables, literals, symbolic_refs, &value);
+                helper(variables, literals, symbolic_refs, value);
             }
             Expression::Conditional {
                 guard,
@@ -397,9 +397,9 @@ fn symbolic_variables(
                 false_,
                 ..
             } => {
-                helper(variables, literals, symbolic_refs, &guard);
-                helper(variables, literals, symbolic_refs, &true_);
-                helper(variables, literals, symbolic_refs, &false_);
+                helper(variables, literals, symbolic_refs, guard);
+                helper(variables, literals, symbolic_refs, true_);
+                helper(variables, literals, symbolic_refs, false_);
             }
             Expression::SymbolicVar { var, type_, .. } => {
                 variables.insert((var.clone(), type_.clone()));
@@ -438,26 +438,25 @@ fn id_to_z3_node<'a>(
         .map(|(id, type_)| match type_ {
             RuntimeType::BoolRuntimeType => (
                 NodeEntry::Var(Cow::Owned(id.clone().into())),
-                AstNode::Bool(Bool::new_const::<String>(&ctx, id.to_string())),
+                AstNode::Bool(Bool::new_const::<String>(ctx, id.to_string())),
             ),
             RuntimeType::IntRuntimeType => (
                 NodeEntry::Var(Cow::Owned(id.clone().into())),
-                AstNode::Int(Int::new_const::<String>(&ctx, id.to_string())),
+                AstNode::Int(Int::new_const::<String>(ctx, id.to_string())),
             ),
             _ => todo!(),
         })
-        .chain(literals.into_iter().map(|lit| {
+        .chain(literals.iter().map(|lit| {
             let z3_node = match &lit {
-                Lit::BoolLit { bool_value } => AstNode::Bool(Bool::from_bool(&ctx, *bool_value)),
-                Lit::IntLit { int_value } => AstNode::Int(Int::from_i64(&ctx, *int_value)),
-                Lit::NullLit => AstNode::Int(Int::from_i64(&ctx, 0)),
+                Lit::BoolLit { bool_value } => AstNode::Bool(Bool::from_bool(ctx, *bool_value)),
+                Lit::IntLit { int_value } => AstNode::Int(Int::from_i64(ctx, *int_value)),
+                Lit::NullLit => AstNode::Int(Int::from_i64(ctx, 0)),
                 _ => todo!(),
             };
             (NodeEntry::Lit(lit.clone()), z3_node)
         }))
         .chain(symbolic_refs.iter().map(|sym_ref| {
-            let z3_node =
-                AstNode::Int(z3::ast::Int::new_const::<String>(&ctx, sym_ref.to_string()));
+            let z3_node = AstNode::Int(z3::ast::Int::new_const::<String>(ctx, sym_ref.to_string()));
             (
                 NodeEntry::SymbolicRef(Cow::Owned(sym_ref.to_string())),
                 z3_node,

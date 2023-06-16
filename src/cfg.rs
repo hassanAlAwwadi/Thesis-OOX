@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 
 use derivative::Derivative;
 use itertools::Either;
@@ -7,9 +7,8 @@ use crate::{exec::constants::this_str, positioned::SourcePos, syntax::*, typeabl
 
 const EXCEPTIONAL_STATE_LABEL: u64 = u64::MAX;
 
-
 /// A type to uniquely identify a method in a class, assuming that the class has no duplicate methods (or duplicates with different return types).
-/// 
+///
 /// Note: We may want to also add return type to this?
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Derivative)]
 #[derivative(PartialOrd, Ord)]
@@ -49,19 +48,11 @@ pub enum CFGStatement {
 
 impl CFGStatement {
     fn is_while(&self) -> bool {
-        if let CFGStatement::While(_, _) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, CFGStatement::While(_, _))
     }
 
     fn is_return(&self) -> bool {
-        if let CFGStatement::Statement(Statement::Return { .. }) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, CFGStatement::Statement(Statement::Return { .. }))
     }
 
     pub fn is_method_invocation(&self) -> Option<&Invocation> {
@@ -80,7 +71,7 @@ impl CFGStatement {
 /// The control flow graph is a mapping from program counter (aka label) --> Program statement.
 pub fn labelled_statements(
     compilation_unit: CompilationUnit,
-) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
+) -> (HashMap<u64, CFGStatement>, Vec<(u64, u64)>) {
     let mut i = 0;
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
     let mut flow: Vec<(u64, u64)> = vec![];
@@ -90,7 +81,7 @@ pub fn labelled_statements(
             Declaration::Class(class) => {
                 for member in &class.members {
                     let (mut member_statements, mut member_flow) =
-                        member_cfg(class.name.clone(), &member, &mut i);
+                        member_cfg(class.name.clone(), member, &mut i);
                     labelled_statements.append(&mut member_statements);
                     flow.append(&mut member_flow);
                 }
@@ -98,7 +89,7 @@ pub fn labelled_statements(
             Declaration::Interface(interface) => {
                 for member in &interface.members {
                     let (mut member_statements, mut member_flow) =
-                        interface_member_cfg(interface.name.clone(), &member, &mut i);
+                        interface_member_cfg(interface.name.clone(), member, &mut i);
                     labelled_statements.append(&mut member_statements);
                     flow.append(&mut member_flow);
                 }
@@ -106,7 +97,7 @@ pub fn labelled_statements(
         }
     }
 
-    return (labelled_statements, flow);
+    (labelled_statements.into_iter().collect(), flow)
 }
 
 fn member_cfg(
@@ -297,7 +288,7 @@ fn statement_cfg(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)>
             let l1 = *i;
             *i += 1;
             let s1_l = *i;
-            let mut s_1 = statement_cfg(&try_body, i);
+            let mut s_1 = statement_cfg(try_body, i);
             *i += 1;
             let l2 = *i;
             *i += 1;
@@ -305,7 +296,7 @@ fn statement_cfg(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)>
             let l3 = *i;
             *i += 1;
             let s2_l = *i;
-            let mut s_2 = statement_cfg(&catch_body, i);
+            let mut s_2 = statement_cfg(catch_body, i);
             *i += 1;
             let l4 = *i;
             *i += 1;
@@ -363,7 +354,7 @@ fn init((l, stmt): &(u64, CFGStatement)) -> u64 {
 
 fn fallthrough(
     s_l @ (_l, stmt): &(u64, CFGStatement),
-    all_smts: &Vec<(u64, CFGStatement)>,
+    all_smts: &[(u64, CFGStatement)],
 ) -> Vec<(u64, CFGStatement)> {
     // //dbg!(&s_l);
     match stmt {
@@ -414,7 +405,7 @@ fn fallthrough(
     }
 }
 
-fn lookup(i: u64, stmts: &Vec<(u64, CFGStatement)>) -> CFGStatement {
+fn lookup(i: u64, stmts: &[(u64, CFGStatement)]) -> CFGStatement {
     stmts
         .iter()
         .find_map(|(idx, s)| if *idx == i { Some(s.clone()) } else { None })
@@ -488,14 +479,14 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
         CFGStatement::TryCatch(_l1, l2, _l3, l4) => vec![*l2, *l4],
         CFGStatement::TryEntry(sl) => {
             let s_l = &(*sl, lookup(*sl, all_smts));
-            let final_s_l = r#final(s_l, all_smts);
-            final_s_l
+
+            r#final(s_l, all_smts)
         }
         CFGStatement::TryExit => vec![*l],
         CFGStatement::CatchEntry(sl) => {
             let s_l = &(*sl, lookup(*sl, all_smts));
-            let final_s_l = r#final(s_l, all_smts);
-            final_s_l
+
+            r#final(s_l, all_smts)
         }
         CFGStatement::CatchExit => vec![*l],
         CFGStatement::FunctionEntry { .. } => unreachable!(),
@@ -552,13 +543,9 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
                 v.push((l_f, *l));
             }
 
-            for (l_continue, _) in
-                fallthrough(&s_l, all_smts)
-                    .into_iter()
-                    .filter(|(_, s)| match s {
-                        CFGStatement::Statement(Statement::Continue { .. }) => true,
-                        _ => false,
-                    })
+            for (l_continue, _) in fallthrough(&s_l, all_smts)
+                .into_iter()
+                .filter(|(_, s)| matches!(s, CFGStatement::Statement(Statement::Continue { .. })))
             {
                 v.push((l_continue, *l));
             }

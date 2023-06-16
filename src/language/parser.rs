@@ -3,6 +3,7 @@ use ordered_float::NotNan;
 use pom::parser::*;
 
 use std::collections::HashSet;
+use std::ops::Not;
 use std::rc::Rc;
 use std::str::{self, FromStr};
 
@@ -20,7 +21,7 @@ use super::lexer::*;
 mod interface;
 
 /// Main entrypoint for parsing a program,
-pub fn parse<'a>(tokens: &[Token<'a>]) -> Result<CompilationUnit, pom::Error> {
+pub fn parse(tokens: &[Token]) -> Result<CompilationUnit, pom::Error> {
     (program() - end()).parse(tokens)
 }
 
@@ -138,7 +139,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
                     stat1: Box::new(Statement::Declare {
                         info: type_.get_position(),
                         type_,
-                        var: var.clone(),
+                        var,
                     }),
                     stat2: Box::new(stat2),
                 }
@@ -259,7 +260,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
                 },
             };
         }
-        return stmt;
+        stmt
     })
 }
 
@@ -832,24 +833,22 @@ fn literal<'a>() -> Parser<'a, Token<'a>, Expression> {
                 "true" => Lit::BoolLit { bool_value: true },
                 "false" => Lit::BoolLit { bool_value: false },
                 s => {
-                    if s.starts_with("'") && s.ends_with("'") {
+                    if s.starts_with('\'') && s.ends_with('\'') {
                         let char_value = s.chars().nth(1).unwrap();
                         Lit::CharLit { char_value }
-                    } else if s.starts_with("\"") && s.ends_with("\"") {
+                    } else if s.starts_with('\"') && s.ends_with('\"') {
                         let string_value = &s[1..s.len() - 1];
                         Lit::StringLit {
                             string_value: string_value.to_string(),
                         }
-                    } else {
-                        if let Ok(int_value) = i64::from_str(s) {
-                            Lit::IntLit { int_value }
-                        } else if let Ok(float_value) = f64::from_str(s) {
-                            Lit::FloatLit {
-                                float_value: NotNan::new(float_value).unwrap(),
-                            }
-                        } else {
-                            unreachable!()
+                    } else if let Ok(int_value) = i64::from_str(s) {
+                        Lit::IntLit { int_value }
+                    } else if let Ok(float_value) = f64::from_str(s) {
+                        Lit::FloatLit {
+                            float_value: NotNan::new(float_value).unwrap(),
                         }
+                    } else {
+                        unreachable!()
                     }
                 } // _ => unreachable!(),
             },
@@ -881,14 +880,14 @@ fn implements<'a>() -> Parser<'a, Token<'a>, Vec<Identifier>> {
     keyword("implements") * list(identifier(), punct(","))
 }
 
-fn punct<'a>(kw: &'a str) -> Parser<'a, Token<'a>, Token> {
+fn punct(kw: &str) -> Parser<Token, Token> {
     is_a(move |t| match t {
         Token::Punctuator(p, _) => p == kw,
         _ => false,
     })
 }
 
-fn keyword<'a>(kw: &'a str) -> Parser<'a, Token<'a>, Token> {
+fn keyword(kw: &str) -> Parser<Token, Token> {
     is_a(move |t| match t {
         Token::Keyword(p, _) => p == kw,
         _ => false,
@@ -1052,14 +1051,14 @@ fn exceptional_invocation(
 }
 fn exceptional_invoke_method(
     lhs: &Identifier,
-    arguments: &Vec<Rc<Expression>>,
+    arguments: &[Rc<Expression>],
     class_names: &[Identifier],
 ) -> HashSet<Rc<Expression>> {
     if lhs.as_ref() == "this" {
         return HashSet::new();
     }
     let exceptional_args: HashSet<_> = arguments
-        .into_iter()
+        .iter()
         .flat_map(|arg| exceptional_expression(arg).into_iter())
         .collect();
 
@@ -1086,7 +1085,7 @@ fn create_exceptional_ites(
     body: Statement,
     pos: SourcePos,
 ) -> Statement {
-    if conditions.len() == 0 {
+    if conditions.is_empty() {
         return body;
     }
     let cond = ors(conditions);
@@ -1144,7 +1143,7 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
     }
 
     fn insert_exceptional_clauses_class_members(
-        members: &Vec<DeclarationMember>,
+        members: &[DeclarationMember],
         decl_names: &[Identifier],
     ) -> Vec<DeclarationMember> {
         members
@@ -1152,13 +1151,13 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
             .map(|dcl| match dcl.clone() {
                 DeclarationMember::Method(method) => {
                     let new_body =
-                        insert_exceptional_in_body(method.body.borrow().clone(), &decl_names);
+                        insert_exceptional_in_body(method.body.borrow().clone(), decl_names);
                     *method.body.borrow_mut() = new_body;
                     DeclarationMember::Method(method)
                 }
                 DeclarationMember::Constructor(method) => {
                     let new_body =
-                        insert_exceptional_in_body(method.body.borrow().clone(), &decl_names);
+                        insert_exceptional_in_body(method.body.borrow().clone(), decl_names);
                     *method.body.borrow_mut() = new_body;
                     DeclarationMember::Constructor(method)
                 }
@@ -1168,7 +1167,7 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
     }
 
     fn insert_exceptional_clauses_interface_members(
-        members: &Vec<InterfaceMember>,
+        members: &[InterfaceMember],
         decl_names: &[Identifier],
     ) -> Vec<InterfaceMember> {
         members
@@ -1176,7 +1175,7 @@ pub fn insert_exceptional_clauses(mut compilation_unit: CompilationUnit) -> Comp
             .map(|dcl| match dcl {
                 InterfaceMember::DefaultMethod(method) => {
                     let new_body =
-                        insert_exceptional_in_body(method.body.borrow().clone(), &decl_names);
+                        insert_exceptional_in_body(method.body.borrow().clone(), decl_names);
                     *method.body.borrow_mut() = new_body;
                     InterfaceMember::DefaultMethod(method.clone())
                 }

@@ -42,17 +42,13 @@ pub(crate) fn sym_exec(
                 &|pc| {
                     Some(format!(
                         "{}, visited: [{}] {}",
-                        pc.to_string(),
-                        statistics
-                            .coverage
-                            .get(&pc)
-                            .map(|_pc| "x")
-                            .unwrap_or(" "),
+                        pc,
+                        statistics.coverage.get(&pc).map(|_pc| "x").unwrap_or(" "),
                         if current_pc == pc { "<<<" } else { "" }
                     ))
                 },
                 program,
-                &flows,
+                flows,
                 st,
             );
             std::fs::write("visualize", &s).unwrap();
@@ -64,7 +60,7 @@ pub(crate) fn sym_exec(
                 if let Some(children) = flows.get(&current_pc) {
                     // Add the children in DFS order
                     for child in children {
-                        if let Some(values) = new_states.remove(&child) {
+                        if let Some(values) = new_states.remove(child) {
                             remaining_states.extend(values);
                         }
                     }

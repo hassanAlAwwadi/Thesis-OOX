@@ -12,7 +12,8 @@ use crate::{
     cfg::{CFGStatement, MethodIdentifier},
     exec::{IdCounter, SymResult},
     statistics::Statistics,
-    symbol_table::SymbolTable, Options,
+    symbol_table::SymbolTable,
+    Options,
 };
 
 use super::{execute_instruction_for_all_states, finish_state_in_path, ProgramCounter, State};
@@ -29,7 +30,7 @@ pub(super) trait ExecutionTreeBasedHeuristic {
     ) -> Rc<RefCell<ExecutionTree>>;
 
     /// Writes the program to a file 'visualize', with some information for each statement provided by the decorator.
-    fn visualize<'a>(
+    fn visualize(
         &self,
         current_pc: u64,
         program: &HashMap<ProgramCounter, CFGStatement>,
@@ -37,12 +38,18 @@ pub(super) trait ExecutionTreeBasedHeuristic {
         st: &SymbolTable,
     ) {
         let s = crate::prettyprint::cfg_pretty::pretty_print_compilation_unit(
-            &|pc| Some(format!("{} {}", pc.to_string(), if current_pc == pc { "<<<" } else { "" })),
+            &|pc| {
+                Some(format!(
+                    "{} {}",
+                    pc,
+                    if current_pc == pc { "<<<" } else { "" }
+                ))
+            },
             program,
-            &flows,
+            flows,
             st,
         );
-        std::fs::write("visualize", &s).unwrap();
+        std::fs::write("visualize", s).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300)); // a sleep to slow down the program, otherwise memory explodes?
     }
 }
@@ -81,7 +88,7 @@ impl ExecutionTree {
         }
     }
     /// Assume it is a leaf and take out the states.
-    pub(super) fn into_states(&mut self) -> Option<Vec<State>> {
+    pub(super) fn take_states(&mut self) -> Option<Vec<State>> {
         if let ExecutionTree::Leaf { states, .. } = self {
             // Take the state, leaving an empty array
             let states = std::mem::take(states);
@@ -154,7 +161,7 @@ pub(super) fn sym_exec_execution_tree(
         );
         let current_pc = states_node.borrow().statement();
         *coverage.entry(current_pc).or_insert(0) += 1;
-        let chosen_state = states_node.borrow_mut().into_states().unwrap();
+        let chosen_state = states_node.borrow_mut().take_states().unwrap();
 
         let states = chosen_state;
 
@@ -183,9 +190,6 @@ pub(super) fn sym_exec_execution_tree(
                     //     pc,
                     //     states.iter().map(|s| s.pc).collect_vec()
                     // );
-                    if !states.iter().all(|s| s.pc == *pc) {
-                        loop {}
-                    }
                     assert!(states.iter().all(|s| s.pc == *pc));
                 }
 
@@ -222,7 +226,7 @@ pub(super) fn sym_exec_execution_tree(
                         debug!(
                             root_logger,
                             "new states: {:?}",
-                            new_states.iter().map(|(pc, _)| pc).collect_vec()
+                            new_states.keys().collect_vec()
                         );
 
                         let states = new_states
@@ -231,7 +235,7 @@ pub(super) fn sym_exec_execution_tree(
                                 Rc::new(RefCell::new(ExecutionTree::Leaf {
                                     parent: Rc::downgrade(&states_node),
                                     statement: pc,
-                                    states: states,
+                                    states,
                                 }))
                             })
                             .collect();

@@ -30,7 +30,7 @@ fn method_call_helper(
     // Check if class itself contains the method in question
     match decl {
         Declaration::Class(class) => {
-            let method = find_method(&method_name, &class.members);
+            let method = find_method(method_name, &class.members);
 
             let class_contains_method = method.is_some();
 
@@ -43,15 +43,13 @@ fn method_call_helper(
                 if let Some(extends) = st.class_extends(&class.name) {
                     // The method is not overridden by this class, check superclasses for the method
                     let (_super_class_name, super_class_method) =
-                        method_in_superclass(extends.clone(), method_name, st).ok_or_else(
-                            || {
-                                error::at_least_one_superclass_should_have_this_method(
-                                    &class.name,
-                                    method_name,
-                                    method_name.get_position(),
-                                )
-                            },
-                        )?;
+                        method_in_superclass(extends, method_name, st).ok_or_else(|| {
+                            error::at_least_one_superclass_should_have_this_method(
+                                &class.name,
+                                method_name,
+                                method_name.get_position(),
+                            )
+                        })?;
                     // Class found, current class resolves to that superclass method
                     super_class_method
                 } else {
@@ -85,7 +83,7 @@ fn method_call_helper(
                 methods_in_subclasses(class.clone(), method_name, Some(overridable), st)?;
             resolved_so_far.extend(subclass_methods);
 
-            return Ok(resolved_so_far);
+            Ok(resolved_so_far)
         }
         Declaration::Interface(interface) => {
             // IFoo foo;
@@ -114,15 +112,12 @@ fn method_call_helper(
                 })
                 .flatten_ok()
                 .collect::<Result<HashMap<_, _>, _>>()?;
-            return Ok(resolved_so_far);
+            Ok(resolved_so_far)
         }
     }
 }
 
-fn find_declaration(
-    decl_name: &Identifier,
-    declarations: &Vec<Declaration>,
-) -> Option<Declaration> {
+fn find_declaration(decl_name: &Identifier, declarations: &[Declaration]) -> Option<Declaration> {
     declarations
         .iter()
         .filter_map(|declaration| match declaration {
@@ -138,7 +133,7 @@ fn find_declaration(
 }
 
 /// Finds first normal Method, non-constructor, with given name
-fn find_method(method_name: &str, members: &Vec<DeclarationMember>) -> Option<Rc<Method>> {
+fn find_method(method_name: &str, members: &[DeclarationMember]) -> Option<Rc<Method>> {
     members.iter().find_map(|member| {
         if let DeclarationMember::Method(method) = member {
             if method.name == method_name {
@@ -164,9 +159,9 @@ fn method_in_superclass(
         // Stop on the first overriden method in the chain.
         Some((
             superclass.name.clone(),
-            (Declaration::Class(superclass), method.clone()),
+            (Declaration::Class(superclass), method),
         ))
-    } else if let Some(superclass) = st.class_extends(&superclass.name).clone() {
+    } else if let Some(superclass) = st.class_extends(&superclass.name) {
         method_in_superclass(superclass, method_name, st)
     } else {
         None
@@ -189,17 +184,15 @@ fn methods_in_subclasses(
             class.name.clone(),
             (Declaration::Class(class.clone()), method),
         )])
+    } else if let Some(overridable) = overridable.clone() {
+        // this class does not contain the method, assign it to the overridable
+        HashMap::from([(class.name.clone(), overridable)])
     } else {
-        if let Some(overridable) = overridable.clone() {
-            // this class does not contain the method, assign it to the overridable
-            HashMap::from([(class.name.clone(), overridable.clone())]) // MUST class.name NOT BE OF OVERRIDABLE TYPE?
-        } else {
-            return Err(error::could_not_resolve_method(
-                &class.name,
-                method_name,
-                method_name.get_position(),
-            ));
-        }
+        return Err(error::could_not_resolve_method(
+            &class.name,
+            method_name,
+            method_name.get_position(),
+        ));
     };
 
     // set new overridable to the method of this class if available, otherwise take the method from superclass.
@@ -224,7 +217,7 @@ fn methods_in_subclasses(
 /// Either return a Left when the method was found, with a Some(..) if it was a default method, None otherwise.
 /// Return a Right if the method was not found.
 fn method_in_interfaces(
-    interfaces: &Vec<Rc<Interface>>,
+    interfaces: &[Rc<Interface>],
     method_name: &str,
     st: &SymbolTable,
 ) -> Either<Option<(Identifier, (Declaration, Rc<Method>))>, ()> {
@@ -240,7 +233,7 @@ fn method_in_interfaces(
         })
         .collect_vec();
 
-    if method_declarations.len() == 0 {
+    if method_declarations.is_empty() {
         return Either::Right(());
     }
     Either::Left(method_declarations.into_iter().find_map(|x| x))
@@ -258,7 +251,7 @@ fn method_in_interface(
     method_name: &str,
     st: &SymbolTable,
 ) -> Either<Option<(Identifier, (Declaration, Rc<Method>))>, ()> {
-    let member = syntax::find_interface_method(&method_name, &interface.members);
+    let member = syntax::find_interface_method(method_name, &interface.members);
 
     if let Some(member) = member {
         match member {
@@ -271,7 +264,7 @@ fn method_in_interface(
         }
     } else {
         // find first non-default method in superinterfaces, or none.
-        if interface.extends.len() == 0 {
+        if interface.extends.is_empty() {
             return Either::Right(());
         }
         method_in_interfaces(st.interface_extends(&interface.name), method_name, st)
@@ -325,7 +318,7 @@ pub fn resolve_super_method(
 /// whether the method is static and what its return type is.
 pub fn resolve_constructor(
     called_constructor: &Identifier,
-    arguments: &Vec<Rc<Expression>>,
+    arguments: &[Rc<Expression>],
     st: &SymbolTable,
 ) -> Result<Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)>, ResolveError> {
     let class = st.get_class(called_constructor).unwrap();
@@ -357,7 +350,7 @@ pub fn resolve_constructor(
 
 pub fn resolve_super_constructor(
     class_name: &Identifier,
-    arguments: &Vec<Rc<Expression>>,
+    arguments: &[Rc<Expression>],
     st: &SymbolTable,
 ) -> Result<Box<(syntax::Declaration, std::rc::Rc<syntax::Method>)>, ResolveError> {
     let extends = st

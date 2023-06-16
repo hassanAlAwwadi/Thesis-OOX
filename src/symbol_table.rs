@@ -94,7 +94,7 @@ impl SymbolTable {
                 Declaration::Class(class) => {
                     if let Some(extends_name) = &class.extends {
                         let extend_class =
-                            Self::get_class_from_declarations(&declarations, &extends_name)?;
+                            Self::get_class_from_declarations(&declarations, extends_name)?;
 
                         it.class.get_mut(decl_name).unwrap().extends = Some(extend_class);
                         it.class
@@ -106,7 +106,7 @@ impl SymbolTable {
                         it.class.get_mut(decl_name).unwrap().extends = None;
                     }
                     for interface_name in class.implements.iter() {
-                        let interface = Self::get_interface(&declarations, &interface_name)?;
+                        let interface = Self::get_interface(&declarations, interface_name)?;
                         it.interface
                             .get_mut(&interface.name)
                             .unwrap()
@@ -121,7 +121,7 @@ impl SymbolTable {
                 }
                 Declaration::Interface(interface) => {
                     for interface_name in &interface.extends {
-                        let extend_interface = Self::get_interface(&declarations, &interface_name)?;
+                        let extend_interface = Self::get_interface(&declarations, interface_name)?;
                         it.interface
                             .get_mut(decl_name)
                             .unwrap()
@@ -193,7 +193,7 @@ impl SymbolTable {
                 Declaration::Class(class) => class
                     .members
                     .iter()
-                    .filter_map(|m| m.try_into_method().map(|m| (name, m.clone())))
+                    .filter_map(|m| m.try_into_method().map(|m| (name, m)))
                     .collect::<Vec<_>>(),
                 Declaration::Interface(interface) => interface
                     .members
@@ -283,10 +283,7 @@ impl SymbolTable {
 
     /// Get all derived declarations of the declaration
     /// This includes childs of child etc.
-    fn derived_declarations<'a>(
-        declaration: Declaration,
-        it: &InheritanceTable,
-    ) -> Vec<Declaration> {
+    fn derived_declarations(declaration: Declaration, it: &InheritanceTable) -> Vec<Declaration> {
         let derived_classes = match declaration {
             Declaration::Class(class) => class_helper(class, it),
             Declaration::Interface(interface) => interface_helper(interface, it),
@@ -318,8 +315,7 @@ impl SymbolTable {
             let subclasses_from_interfaces = subinterfaces
                 .iter()
                 .cloned()
-                .flat_map(|subinterface| interface_helper(subinterface, it))
-                .into_iter();
+                .flat_map(|subinterface| interface_helper(subinterface, it));
 
             std::iter::once(Declaration::Interface(subinterface.clone()))
                 .chain(subclasses_from_subclasses.chain(subclasses_from_interfaces))
@@ -335,11 +331,8 @@ impl SymbolTable {
         let mut fields = Vec::new();
 
         for declaration_member in &class.members {
-            match declaration_member {
-                DeclarationMember::Field { type_, name, .. } => {
-                    fields.push((name.to_owned(), type_.to_owned()))
-                }
-                _ => (),
+            if let DeclarationMember::Field { type_, name, .. } = declaration_member {
+                fields.push((name.to_owned(), type_.to_owned()))
             };
         }
 

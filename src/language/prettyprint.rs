@@ -34,7 +34,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a Declaration {
                         .extends
                         .clone()
                         .map(|extends| format!("extends {}", extends)),
-                    if class.implements.len() > 0 {
+                    if !class.implements.is_empty() {
                         if class.extends.is_some() {
                             format!(
                                 " implements {}",
@@ -72,7 +72,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a Declaration {
                     "interface ",
                     interface.name.to_string(),
                     " ",
-                    if interface.extends.len() > 0 {
+                    if !interface.extends.is_empty() {
                         format!(
                             "extends {}",
                             interface
@@ -212,7 +212,7 @@ fn specifications<'a, D: DocAllocator<'a>>(
                 "requires",
                 "(",
                 requires.pretty(allocator),
-                type_requires.clone().map(|type_guard| docs![
+                type_requires.map(|type_guard| docs![
                     allocator,
                     ", ",
                     type_expr(&type_guard, allocator)
@@ -228,7 +228,7 @@ fn specifications<'a, D: DocAllocator<'a>>(
                 "ensures",
                 "(",
                 ensures.pretty(allocator),
-                type_ensures.clone().map(|type_guard| docs![
+                type_ensures.map(|type_guard| docs![
                     allocator,
                     ", ",
                     type_expr(&type_guard, allocator)
@@ -244,7 +244,7 @@ fn specifications<'a, D: DocAllocator<'a>>(
                 "exceptional",
                 "(",
                 exceptional.pretty(allocator),
-                type_exceptional.clone().map(|type_guard| docs![
+                type_exceptional.map(|type_guard| docs![
                     allocator,
                     ", ",
                     type_expr(&type_guard, allocator)
@@ -257,7 +257,7 @@ fn specifications<'a, D: DocAllocator<'a>>(
 }
 
 fn pretty_parameters<'a, D: DocAllocator<'a>>(
-    parameters: &'a Vec<Parameter>,
+    parameters: &'a [Parameter],
     allocator: &'a D,
 ) -> DocBuilder<'a, D, ()> {
     use pretty::Pretty;
@@ -593,7 +593,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Invocation {
 }
 
 fn pretty_arguments<'a, D: DocAllocator<'a>>(
-    arguments: &Vec<Rc<Expression>>,
+    arguments: &[Rc<Expression>],
     allocator: &'a D,
 ) -> DocBuilder<'a, D, ()> {
     use pretty::Pretty;
@@ -653,7 +653,6 @@ impl Display for Invocation {
     }
 }
 
-
 impl Display for Rhs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = pretty::Pretty::pretty(self, &BoxAllocator)
@@ -684,7 +683,6 @@ impl Display for Statement {
     }
 }
 
-
 impl Display for Expression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = pretty::Pretty::pretty(self, &BoxAllocator)
@@ -712,8 +710,8 @@ pub mod cfg_pretty {
 
     /// Pretty prints the compilation unit, with optionally a decorator to decorate each statement with a comment with additional information
     /// This can be used to display the program counter for each statement for instance.
-    pub fn pretty_print_compilation_unit<'a, F>(
-        decorator: &'a F,
+    pub fn pretty_print_compilation_unit<F>(
+        decorator: &F,
         program: &HashMap<ProgramCounter, CFGStatement>,
         flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
         st: &SymbolTable,
@@ -734,15 +732,15 @@ pub mod cfg_pretty {
             });
 
         for method in methods {
-            let method = pretty_print_cfg_method(method, decorator, &program, &flow, &st);
+            let method = pretty_print_cfg_method(method, decorator, program, flow, st);
             s = format!("{}\n{}", s, method);
         }
         s
     }
 
-    pub fn pretty_print_cfg_method<'a, F>(
+    pub fn pretty_print_cfg_method<F>(
         function_entry: MethodIdentifier,
-        decorator: &'a F,
+        decorator: &F,
         program: &HashMap<ProgramCounter, CFGStatement>,
         flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
         st: &SymbolTable,
@@ -754,7 +752,7 @@ pub mod cfg_pretty {
             &function_entry.decl_name,
             &function_entry.method_name,
             function_entry.arg_list.iter().cloned(),
-            &program,
+            program,
             st,
         );
 
@@ -763,9 +761,9 @@ pub mod cfg_pretty {
 
     /// A way to print a control flow graph method with additional statistics
     /// such as the CFG node id, coverage, reachability
-    pub fn pretty_print_cfg_method_from_entry<'a, F>(
+    pub fn pretty_print_cfg_method_from_entry<F>(
         function_entry: ProgramCounter,
-        decorator: &'a F,
+        decorator: &F,
         program: &HashMap<ProgramCounter, CFGStatement>,
         flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     ) -> String
@@ -814,7 +812,7 @@ pub mod cfg_pretty {
                 docs![
                     &allocator,
                     allocator.hardline(),
-                    pretty_print_cfg_statement(next, decorator, program, flow, &allocator,)
+                    pretty_print_cfg_statement(next, decorator, program, &allocator,)
                 ]
                 .nest(2),
             );
@@ -832,7 +830,6 @@ pub mod cfg_pretty {
         entry: ProgramCounter,
         decorator: &'a F,
         program: &HashMap<ProgramCounter, CFGStatement>,
-        flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
         allocator: &'a D,
     ) -> DocBuilder<'a, D, ()>
     where
@@ -858,7 +855,7 @@ pub mod cfg_pretty {
                     docs![
                         allocator,
                         allocator.hardline(),
-                        pretty_print_cfg_statement(*t, decorator, program, flow, allocator,),
+                        pretty_print_cfg_statement(*t, decorator, program, allocator,),
                     ]
                     .nest(2),
                     allocator.hardline(),
@@ -866,7 +863,7 @@ pub mod cfg_pretty {
                     docs![
                         allocator,
                         allocator.hardline(),
-                        pretty_print_cfg_statement(*f, decorator, program, flow, allocator),
+                        pretty_print_cfg_statement(*f, decorator, program, allocator),
                     ]
                     .nest(2),
                     allocator.hardline(),
@@ -883,7 +880,7 @@ pub mod cfg_pretty {
                     docs![
                         allocator,
                         allocator.hardline(),
-                        pretty_print_cfg_statement(*b, decorator, program, flow, allocator,),
+                        pretty_print_cfg_statement(*b, decorator, program, allocator,),
                     ]
                     .nest(2),
                     allocator.hardline(),
@@ -891,10 +888,10 @@ pub mod cfg_pretty {
                 ];
             }
             CFGStatement::Seq(a, b) => {
-                result = pretty_print_cfg_statement(*a, decorator, program, flow, allocator);
+                result = pretty_print_cfg_statement(*a, decorator, program, allocator);
                 result = result.append(allocator.hardline());
                 result = result.append(pretty_print_cfg_statement(
-                    *b, decorator, program, flow, allocator,
+                    *b, decorator, program, allocator,
                 ));
             }
             CFGStatement::TryCatch(a, _b, c, _d) => {
@@ -902,13 +899,13 @@ pub mod cfg_pretty {
                     allocator,
                     "try {",
                     decorator(current).map(|decoration| { format!(" // {}", decoration) }),
-                    pretty_print_cfg_statement(*a, decorator, program, flow, allocator),
+                    pretty_print_cfg_statement(*a, decorator, program, allocator),
                     allocator.hardline(),
                     "} catch {",
                     docs![
                         allocator,
                         allocator.hardline(),
-                        pretty_print_cfg_statement(*c, decorator, program, flow, allocator),
+                        pretty_print_cfg_statement(*c, decorator, program, allocator),
                     ]
                     .nest(2),
                     allocator.hardline(),
@@ -919,7 +916,7 @@ pub mod cfg_pretty {
                 result = docs![
                     allocator,
                     allocator.hardline(),
-                    pretty_print_cfg_statement(*a, decorator, program, flow, allocator,),
+                    pretty_print_cfg_statement(*a, decorator, program, allocator,),
                 ]
                 .nest(2)
             }
@@ -928,7 +925,7 @@ pub mod cfg_pretty {
                 result = docs![
                     allocator,
                     allocator.hardline(),
-                    pretty_print_cfg_statement(*a, decorator, program, flow, allocator,),
+                    pretty_print_cfg_statement(*a, decorator, program, allocator,),
                 ]
                 .nest(2)
             }
@@ -937,7 +934,7 @@ pub mod cfg_pretty {
             CFGStatement::FunctionExit { .. } => todo!(),
         };
 
-        return result;
+        result
     }
 
     /// Takes a program and ensures all comments line out for readability

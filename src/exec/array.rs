@@ -45,9 +45,8 @@ pub(crate) fn array_initialisation(
         r,
         HeapValue::ArrayValue {
             elements: array_elements,
-            type_: array_type.clone(),
-        }
-        .into(),
+            type_: array_type,
+        },
     );
 
     // dbg!("after array initialization", &state.heap, &state.alias_map);
@@ -61,7 +60,7 @@ pub(crate) fn array_initialisation(
 pub(crate) fn exec_array_construction(
     state: &mut State,
     array_type: &NonVoidType,
-    sizes: &Vec<Expression>,
+    sizes: &[Expression],
     type_: &RuntimeType,
     en: &mut impl Engine,
 ) -> Rc<Expression> {

@@ -111,10 +111,10 @@ impl CumulativeCost {
 ///  - the distance of this method to the closest uncovered statement, or the end of the method.
 ///  - a mapping for every program counter explored to its distance
 ///  - and mutably updates the cache for methods explored.
-pub(crate) fn min_distance_to_uncovered_method<'a>(
+pub(crate) fn min_distance_to_uncovered_method(
     method: &MethodIdentifier,
     coverage: &HashMap<ProgramCounter, usize>,
-    program: &'a HashMap<ProgramCounter, CFGStatement>,
+    program: &HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     st: &SymbolTable,
     cache: &mut Cache,
@@ -134,10 +134,10 @@ pub(crate) fn min_distance_to_uncovered_method<'a>(
     (distance, pc_to_distance)
 }
 
-fn min_distance_to_uncovered_method_with_visited<'a>(
+fn min_distance_to_uncovered_method_with_visited(
     method: &MethodIdentifier,
     coverage: &HashMap<ProgramCounter, usize>,
-    program: &'a HashMap<ProgramCounter, CFGStatement>,
+    program: &HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     st: &SymbolTable,
     visited: &mut HashSet<ProgramCounter>,
@@ -183,17 +183,17 @@ fn min_distance_to_uncovered_method_with_visited<'a>(
         })
         .collect_vec();
 
-    cache.retain(|k, _v| !to_remove.contains(&k));
+    cache.retain(|k, _v| !to_remove.contains(k));
 
     (distance, pc_to_distance)
 }
 
 /// Computes the minimal distance to uncovered methods for all program counters in this method.
 /// Recursively computes the minimal distance for any method calls referenced.
-fn min_distance_to_uncovered_method_helper<'a>(
+fn min_distance_to_uncovered_method_helper(
     method: &MethodIdentifier,
     coverage: &HashMap<ProgramCounter, usize>,
-    program: &'a HashMap<ProgramCounter, CFGStatement>,
+    program: &HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     st: &SymbolTable,
     visited: &mut HashSet<ProgramCounter>,
@@ -228,7 +228,7 @@ fn min_distance_to_uncovered_method_helper<'a>(
         _ => {
             // if the only unexplored method call is the current function
             // We can reduce it to the minimal cost to end of method.
-            if is_reducable(&method_body_cost, &method) {
+            if is_reducable(&method_body_cost, method) {
                 // dbg!(&method_body_cost);
                 let min_body_cost = reduce(&method_body_cost).unwrap();
 
@@ -258,10 +258,10 @@ fn min_distance_to_uncovered_method_helper<'a>(
 /// Computes the minimal distance to uncovered methods for all program counters in the method of `pc`.
 /// `pc`is usually the entry of a method.
 /// Recursively computes the minimal distance for any method calls referenced.
-fn min_distance_to_statement<'a>(
+fn min_distance_to_statement(
     pc: ProgramCounter,
     coverage: &HashMap<ProgramCounter, usize>,
-    program: &'a HashMap<ProgramCounter, CFGStatement>,
+    program: &HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     st: &SymbolTable,
     pc_to_cost: &mut HashMap<ProgramCounter, CumulativeCost>,
@@ -294,8 +294,8 @@ fn min_distance_to_statement<'a>(
 
             if let Some(next_pcs) = flow.get(&pc) {
                 for next_pc in next_pcs {
-                    if !pc_to_cost.contains_key(&next_pc) {
-                        if let CFGStatement::While(_, _) = &program[&next_pc] {
+                    if !pc_to_cost.contains_key(next_pc) {
+                        if let CFGStatement::While(_, _) = &program[next_pc] {
                             if visited.contains(next_pc) {
                                 // we don't want to keep inserting while guard, since we can encounter it again when the loop ends.
                                 continue;
@@ -322,7 +322,7 @@ fn min_distance_to_statement<'a>(
 
                 multiple => {
                     let mut remaining_costs = multiple.iter().map(|next_pc| {
-                        if let CFGStatement::While(_, _) = &program[&next_pc] {
+                        if let CFGStatement::While(_, _) = &program[next_pc] {
                             if visited.contains(next_pc)
                                 && cfg::utils::while_body_pcs(*next_pc, flow, program).contains(&pc)
                             {
@@ -334,7 +334,7 @@ fn min_distance_to_statement<'a>(
                         (next_pc, pc_to_cost[next_pc].clone())
                     });
 
-                    let next_cost = if let CFGStatement::While(_, _) = &program[&pc] {
+                    if let CFGStatement::While(_, _) = &program[&pc] {
                         // While loop is a special case due to cycles
                         let ((_body_pc, body_cost), (_exit_pc, exit_cost)) =
                             remaining_costs.next_tuple().unwrap();
@@ -345,8 +345,7 @@ fn min_distance_to_statement<'a>(
                             .map(|(_pc, cost)| cost)
                             .reduce(minimize)
                             .expect("multiple pcs")
-                    };
-                    next_cost
+                    }
                 }
             }
         } else {
@@ -414,10 +413,10 @@ fn min_distance_to_statement<'a>(
 
 /// Returns the cost of exploring the statement
 /// Can be either strictly in case of a found uncovered statement, or at least cost otherwise.
-fn statement_cost<'a>(
+fn statement_cost(
     pc: ProgramCounter,
     coverage: &HashMap<ProgramCounter, usize>,
-    program: &'a HashMap<ProgramCounter, CFGStatement>,
+    program: &HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     st: &SymbolTable,
     pc_to_cost: &mut HashMap<ProgramCounter, CumulativeCost>,
@@ -439,7 +438,8 @@ fn statement_cost<'a>(
         let methods_called = invocation.methods_called();
 
         // Of all possible resolved methods, find the minimal cost to uncovered, or minimal cost to traverse.
-        let min_method_cost = methods_called
+
+        methods_called
             .into_iter()
             .map(|method| {
                 // Check cache or compute cost for method
@@ -471,9 +471,7 @@ fn statement_cost<'a>(
                 cost.increased_by_one()
             })
             .reduce(minimize)
-            .expect("at least one resolved method");
-
-        min_method_cost
+            .expect("at least one resolved method")
     } else {
         // A normal statement has at least cost 1, to be added to remainder
         CumulativeCost::Cost(Distance {
@@ -483,9 +481,9 @@ fn statement_cost<'a>(
     }
 }
 
-fn cleanup_pc_to_cost<'a>(
+fn cleanup_pc_to_cost(
     method_name: &str,
-    pc_to_cost: &'a mut HashMap<ProgramCounter, CumulativeCost>,
+    pc_to_cost: &mut HashMap<ProgramCounter, CumulativeCost>,
     resulting_cost: Distance,
 ) {
     let mut temp = HashMap::new();
@@ -494,7 +492,7 @@ fn cleanup_pc_to_cost<'a>(
     *pc_to_cost = temp
         .into_iter()
         .map(|(key, value)| {
-            let cost = replace_method_call_in_costs(method_name, value.clone(), resulting_cost);
+            let cost = replace_method_call_in_costs(method_name, value, resulting_cost);
             // for some pc it might not be possible to reduce to a distance cost yet, due to unexplored method
             if let Some(distance) = reduce(&cost) {
                 (key, CumulativeCost::Cost(distance))
@@ -527,8 +525,8 @@ fn reduce(c: &CumulativeCost) -> Option<Distance> {
     match c {
         CumulativeCost::Cost(d) => Some(*d),
         CumulativeCost::Plus(c1, c2) => {
-            let d1 = reduce(&c1);
-            let d2 = reduce(&c2);
+            let d1 = reduce(c1);
+            let d2 = reduce(c2);
             match (d1, d2) {
                 (Some(d1), Some(d2)) => Some(Distance {
                     distance_type: std::cmp::min(d1.distance_type, d2.distance_type),
@@ -539,8 +537,8 @@ fn reduce(c: &CumulativeCost) -> Option<Distance> {
         }
         CumulativeCost::UnexploredMethodCall(_) => None,
         CumulativeCost::Minimal(c1, c2) => {
-            let d1 = reduce(&c1);
-            let d2 = reduce(&c2);
+            let d1 = reduce(c1);
+            let d2 = reduce(c2);
             match (d1, d2) {
                 (Some(d1), Some(d2)) => Some(std::cmp::min(d1, d2)),
                 (Some(d1), None) => Some(d1),
@@ -553,7 +551,7 @@ fn reduce(c: &CumulativeCost) -> Option<Distance> {
     }
 }
 
-fn replace_method_call_in_costs<'a>(
+fn replace_method_call_in_costs(
     method_name: &str,
     cost: CumulativeCost,
     resulting_cost: Distance,
@@ -572,7 +570,7 @@ fn replace_method_call_in_costs<'a>(
                 _ => cost,
             }
         }
-        CumulativeCost::UnexploredMethodCall(method) if method_name == &method => {
+        CumulativeCost::UnexploredMethodCall(method) if method_name == method => {
             CumulativeCost::Cost(resulting_cost)
         }
         CumulativeCost::Minimal(c1, c2) => {
@@ -640,9 +638,11 @@ fn minimize_while(exit_cost: CumulativeCost, body_cost: CumulativeCost) -> Cumul
 fn minimize(a: CumulativeCost, b: CumulativeCost) -> CumulativeCost {
     match (&a, &b) {
         (CumulativeCost::Cost(a), CumulativeCost::Cost(b)) => {
-            CumulativeCost::Cost(std::cmp::min(a, b).clone())
+            CumulativeCost::Cost(*std::cmp::min(a, b))
         }
-        (CumulativeCost::Cycle(_), CumulativeCost::Cycle(_)) => panic!("Unclear, should be unreachable?"),
+        (CumulativeCost::Cycle(_), CumulativeCost::Cycle(_)) => {
+            panic!("Unclear, should be unreachable?")
+        }
         (CumulativeCost::Cycle(_), _) => b,
         (_, CumulativeCost::Cycle(_)) => a,
         (_, _) => CumulativeCost::Minimal(Box::new(a), Box::new(b)),
@@ -697,9 +697,7 @@ mod tests {
         let symbol_table = SymbolTable::from_ast(&c).unwrap();
         let c = type_compilation_unit(c, &symbol_table).unwrap();
 
-        let (result, flw) = labelled_statements(c);
-
-        let program: HashMap<u64, CFGStatement> = result.into_iter().collect();
+        let (program, flw) = labelled_statements(c);
 
         // Simulate that the method has been explored.
         coverage.extend(program.keys().map(|k| (*k, 1usize)));

@@ -6,7 +6,8 @@ use crate::{
     cfg::CFGStatement,
     exec::{IdCounter, State, SymResult},
     statistics::Statistics,
-    symbol_table::SymbolTable, Options,
+    symbol_table::SymbolTable,
+    Options,
 };
 
 use super::{
@@ -77,6 +78,6 @@ pub(crate) fn sym_exec(
         statistics,
         entry_method,
         heuristic,
-        options
+        options,
     )
 }

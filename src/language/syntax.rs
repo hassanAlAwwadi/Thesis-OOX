@@ -383,7 +383,7 @@ impl Invocation {
     }
 
     /// Returns a list of methods that could be called at runtime depending on the runtimetype, by this invocation.
-    pub fn methods_called<'a>(&'a self) -> Vec<MethodIdentifier> {
+    pub fn methods_called(&self) -> Vec<MethodIdentifier> {
         match self {
             Invocation::InvokeMethod { resolved, .. } => {
                 // A regular method can resolve to multiple different methods due to dynamic dispatch, depending on the runtime type of the object.
@@ -783,8 +783,12 @@ pub enum RuntimeType {
     BoolRuntimeType,
     StringRuntimeType,
     CharRuntimeType,
-    ReferenceRuntimeType { type_: Identifier },
-    ArrayRuntimeType { inner_type: Box<RuntimeType> },
+    ReferenceRuntimeType {
+        type_: Identifier,
+    },
+    ArrayRuntimeType {
+        inner_type: Box<RuntimeType>,
+    },
     ANYRuntimeType,
     NUMRuntimeType,
     REFRuntimeType, // is this symbolic or something? why not use ReferenceRuntimeType
@@ -831,8 +835,10 @@ pub enum TypeExpr {
     },
 }
 
-impl TypeExpr {
-    pub fn not(self) -> TypeExpr {
+impl std::ops::Not for TypeExpr {
+    type Output = TypeExpr;
+
+    fn not(self) -> Self::Output {
         match self {
             TypeExpr::InstanceOf { var, rhs, info } => TypeExpr::NotInstanceOf { var, rhs, info },
             TypeExpr::NotInstanceOf { var, rhs, info } => TypeExpr::InstanceOf { var, rhs, info },

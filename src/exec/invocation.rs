@@ -1,5 +1,5 @@
 //! This module contains functions and types related to function calls in OOX.
-//! 
+//!
 use std::{collections::HashMap, rc::Rc};
 
 use itertools::Itertools;
@@ -66,7 +66,7 @@ pub(super) fn single_method_invocation(
             en.symbol_table(),
         );
 
-        return next_entry;
+        next_entry
     } else {
         non_static_resolved_method_invocation(
             state,
@@ -112,7 +112,7 @@ pub(super) fn multiple_method_invocation(
                 member.clone(),
                 en,
             );
-            return ActionResult::FunctionCall(next_entry);
+            ActionResult::FunctionCall(next_entry)
         }
         Expression::SymbolicRef { var, .. } => {
             remove_symbolic_null(&mut state.alias_map, var);
@@ -134,7 +134,7 @@ pub(super) fn multiple_method_invocation(
                     member.clone(),
                     en,
                 );
-                return ActionResult::FunctionCall(next_entry);
+                ActionResult::FunctionCall(next_entry)
             } else {
                 // Not all aliases have the same type, so it can happen that different types resolve to different methods.
                 // First we check to which methods they resolve:
@@ -180,13 +180,7 @@ pub(super) fn multiple_method_invocation(
                 let symbolic_object_ref = var.clone();
                 split_states_with_aliases(en, state, symbolic_object_ref, resulting_alias);
                 // Try again with updated states.
-                return multiple_method_invocation(
-                    state,
-                    invocation_lhs,
-                    context,
-                    potential_methods,
-                    en,
-                );
+                multiple_method_invocation(state, invocation_lhs, context, potential_methods, en)
             }
         }
         Expression::Conditional {
@@ -204,22 +198,16 @@ pub(super) fn multiple_method_invocation(
                 invocation_lhs.clone(),
             );
             // Try again with split states.
-            return multiple_method_invocation(
-                state,
-                invocation_lhs,
-                context,
-                potential_methods,
-                en,
-            );
+            multiple_method_invocation(state, invocation_lhs, context, potential_methods, en)
         }
         _ => unreachable!("Expected Ref or SymbolicRef, found {:?}", object),
-    };
+    }
 }
 
 /// Checks the aliases whether their type is unique, if so return that type
 /// otherwise return None
 fn find_unique_type(aliases: &Vec<Rc<Expression>>) -> Option<RuntimeType> {
-    assert!(aliases.len() > 0);
+    assert!(!aliases.is_empty());
 
     let all_have_same_type = aliases
         .iter()
@@ -279,7 +267,7 @@ fn non_static_resolved_method_invocation(
         en.symbol_table(),
     );
 
-    return next_entry;
+    next_entry
 }
 
 fn exec_method_entry(
@@ -355,7 +343,8 @@ pub(super) fn exec_constructor_entry(
     };
 
     let object_ref = state.allocate_on_heap(structure);
-    let arguments = std::iter::once(object_ref).chain(evaluated_arguments(context.invocation, state, en));
+    let arguments =
+        std::iter::once(object_ref).chain(evaluated_arguments(context.invocation, state, en));
 
     push_stack_frame(
         state,
@@ -382,7 +371,8 @@ pub(super) fn exec_super_constructor(
         .stack
         .lookup(&constants::this_str())
         .expect("super() is called in a constructor with a 'this' object on the stack");
-    let arguments = std::iter::once(object_ref).chain(evaluated_arguments(context.invocation, state, en));
+    let arguments =
+        std::iter::once(object_ref).chain(evaluated_arguments(context.invocation, state, en));
 
     push_stack_frame(
         state,
@@ -424,7 +414,7 @@ fn evaluated_arguments(
 ) -> Vec<Rc<Expression>> {
     invocation
         .arguments()
-        .into_iter()
+        .iter()
         .map(|arg| evaluate(state, arg.clone(), en))
         .collect::<Vec<_>>()
 }

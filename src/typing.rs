@@ -118,7 +118,7 @@ fn type_member_class(
     use DeclarationMember as DM;
     match declaration_member.clone() {
         DM::Field { .. } => Ok(()),
-        DM::Constructor(method) | DM::Method(method) if method.is_static == false => {
+        DM::Constructor(method) | DM::Method(method) if !method.is_static => {
             let mut env = env.clone();
             env.declare_var(
                 this_str(),
@@ -130,7 +130,7 @@ fn type_member_class(
                 env.declare_param(param)?;
             }
             type_specification(
-                &declaration_member,
+                declaration_member,
                 method.specification.clone(),
                 &mut env,
                 st,
@@ -311,7 +311,7 @@ fn type_statement(
                     is_constructor,
                     current_method.clone(),
                     &mut env,
-                    &st,
+                    st,
                     declaration,
                 )?;
                 statements.push(Statement::While {
@@ -341,7 +341,7 @@ fn type_statement(
                     is_constructor,
                     current_method.clone(),
                     &mut true_env,
-                    &st,
+                    st,
                     declaration,
                 )?;
                 let false_body = type_statement(
@@ -349,7 +349,7 @@ fn type_statement(
                     is_constructor,
                     current_method.clone(),
                     &mut false_env,
-                    &st,
+                    st,
                     declaration,
                 )?;
 
@@ -478,7 +478,7 @@ fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Lhs
                 Ok(Lhs::LhsField {
                     var,
                     var_type,
-                    field: field,
+                    field,
                     type_: field_type.type_of(),
                     info,
                 })
@@ -628,7 +628,7 @@ fn type_invocation(
         } => {
             let arguments = arguments
                 .into_iter()
-                .map(|arg| type_expression(arg.into(), env, st).map(Rc::new))
+                .map(|arg| type_expression(arg, env, st).map(Rc::new))
                 .collect::<Result<Vec<_>, _>>()?;
             // if lhs is not found as a variable, assume this is a static invocation.
             let lhs_type = env.get_var_type(&lhs).ok();
@@ -648,8 +648,8 @@ fn type_invocation(
 
             let resolved = resolver::resolve_method(class_name, &rhs, st)?;
 
-            if resolved.len() == 0 {
-                return Err(error::could_not_resolve_method(&class_name, &rhs, info));
+            if resolved.is_empty() {
+                return Err(error::could_not_resolve_method(class_name, &rhs, info));
             }
 
             Ok(Invocation::InvokeMethod {
@@ -702,7 +702,7 @@ fn type_invocation(
                 .map(|arg| type_expression(arg, env, st).map(Rc::new))
                 .collect::<Result<Vec<_>, _>>()?;
             let class_name = declaration.name();
-            let resolved = resolver::resolve_super_constructor(&class_name, &arguments, st)?;
+            let resolved = resolver::resolve_super_constructor(class_name, &arguments, st)?;
             Ok(Invocation::InvokeSuperConstructor {
                 arguments,
                 resolved: Some(resolved),

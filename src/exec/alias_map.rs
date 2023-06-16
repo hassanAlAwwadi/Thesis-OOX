@@ -3,7 +3,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 
 use crate::{typeable::Typeable, Expression, Identifier};
-use crate::{Lit, RuntimeType};
+use crate::{RuntimeType};
 
 use crate::exec::ImHashMap;
 
@@ -41,7 +41,7 @@ impl AliasEntry {
 
         AliasEntry {
             aliases,
-            uniform_type: uniform_type,
+            uniform_type,
         }
     }
 
@@ -55,8 +55,7 @@ impl AliasEntry {
             self.aliases
                 .iter()
                 .map(AsRef::as_ref)
-                .filter(|e| **e != Expression::NULL)
-                .next()
+                .find(|e| **e != Expression::NULL)
                 .map(Typeable::type_of)
         } else {
             None
@@ -64,11 +63,8 @@ impl AliasEntry {
     }
 
     pub fn remove_null(&mut self) {
-        self.aliases.retain(|x| match x.as_ref() {
-            Expression::Lit {
-                lit: Lit::NullLit, ..
-            } => false,
-            _ => true,
+        self.aliases.retain(|x| {
+            *x.as_ref() != Expression::NULL
         });
     }
 }

@@ -7,7 +7,8 @@ use slog::Logger;
 use crate::{
     cfg::{CFGStatement, MethodIdentifier},
     statistics::Statistics,
-    symbol_table::SymbolTable, Options,
+    symbol_table::SymbolTable,
+    Options,
 };
 
 use super::{
@@ -51,7 +52,7 @@ enum TreeNode {
 
 impl TreeNode {
     /// Assume it is a leaf and take out the states.
-    fn into_states(&mut self) -> Option<Vec<State>> {
+    fn take_states(&mut self) -> Option<Vec<State>> {
         if let TreeNode::Leaf(states) = self {
             // Take the state, leaving an empty array
             let states = std::mem::take(states);
@@ -66,9 +67,9 @@ impl TreeNode {
 /// We use this Identifier for this.
 type BranchId = u64;
 
-fn random_path<'a>(
+fn random_path(
     mut tree: Rc<RefCell<ExecutionTree>>,
-    rng: &'a mut impl Rng,
+    rng: &mut impl Rng,
 ) -> Rc<RefCell<ExecutionTree>> {
     loop {
         let node = tree.clone();
@@ -108,9 +109,7 @@ impl ExecutionTreeBasedHeuristic for RandomPath {
         _entry_method: &MethodIdentifier,
         _coverage: &mut HashMap<ProgramCounter, usize>,
     ) -> Rc<RefCell<ExecutionTree>> {
-        let states_node = random_path(root.clone(), &mut self.rng);
-
-        states_node
+        random_path(root, &mut self.rng)
     }
 }
 
@@ -140,6 +139,6 @@ pub(crate) fn sym_exec(
     )
 }
 
-fn assert_all_aliasmaps_are_equivalent(states: &Vec<State>) -> bool {
+fn assert_all_aliasmaps_are_equivalent(states: &[State]) -> bool {
     states.iter().map(|s| &s.alias_map).all_equal()
 }

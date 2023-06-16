@@ -25,13 +25,13 @@ use super::{
 /// Make a weighted stochastic choice, where the weight is calculated based on the distance to a newly uncovered branch.
 /// Choose between all leafs (states on different program points)
 /// If all weights are zero, that means that all statements have been covered and it falls back on random state choice.
-fn choice<'a>(
-    leafs: &Vec<Rc<RefCell<ExecutionTree>>>,
+fn choice(
+    leafs: &[Rc<RefCell<ExecutionTree>>],
     md2u: &HashMap<ProgramCounter, md2u_recursive::Distance>,
-    rng: &'a mut impl Rng,
+    rng: &mut impl Rng,
 ) -> Rc<RefCell<ExecutionTree>> {
     // Find for each leaf the md2u, construct a WeightedIndex and sample one leaf.
-    if md2u.len() == 0 {
+    if md2u.is_empty() {
         let idx = rng.gen_range(0..leafs.len());
         return leafs[idx].clone();
     }
@@ -49,11 +49,11 @@ fn choice<'a>(
     match WeightedIndex::new(weights) {
         Ok(wi) => {
             let idx = wi.sample(rng);
-            return leafs[idx].clone();
+            leafs[idx].clone()
         }
         Err(WeightedError::AllWeightsZero) => {
             let idx = rng.gen_range(0..leafs.len());
-            return leafs[idx].clone();
+            leafs[idx].clone()
         }
         Err(err) => panic!("{}", err),
     }
@@ -85,11 +85,11 @@ impl ExecutionTreeBasedHeuristic for MinDist2Uncovered {
         entry_method: &MethodIdentifier,
         coverage: &mut HashMap<ProgramCounter, usize>,
     ) -> Rc<RefCell<ExecutionTree>> {
-        let leafs = ExecutionTree::leafs(root.clone());
+        let leafs = ExecutionTree::leafs(root);
 
         let new_md2u = md2u_recursive::min_distance_to_uncovered_method(
             entry_method,
-            &coverage,
+            coverage,
             program,
             flows,
             st,
@@ -98,9 +98,7 @@ impl ExecutionTreeBasedHeuristic for MinDist2Uncovered {
         .1;
         self.md2u.extend(new_md2u);
 
-        let states_node = choice(&leafs, &self.md2u, &mut self.rng);
-
-        states_node
+        choice(&leafs, &self.md2u, &mut self.rng)
     }
 
     /// Writes the program to a file 'visualize', with some information for each statement provided by the decorator.
@@ -115,7 +113,7 @@ impl ExecutionTreeBasedHeuristic for MinDist2Uncovered {
             &|pc| {
                 Some(format!(
                     "pc: {} distance: [{}] {}",
-                    pc.to_string(),
+                    pc,
                     self.md2u
                         .get(&pc)
                         .map(|distance| distance.value.to_string())
@@ -124,10 +122,10 @@ impl ExecutionTreeBasedHeuristic for MinDist2Uncovered {
                 ))
             },
             program,
-            &flows,
+            flows,
             st,
         );
-        std::fs::write("visualize", &s).unwrap();
+        std::fs::write("visualize", s).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300)); // a sleep to slow down the program, otherwise memory explodes?
     }
 }

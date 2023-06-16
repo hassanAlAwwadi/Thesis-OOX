@@ -36,9 +36,9 @@ pub fn evaluate(
     en: &mut impl Engine,
 ) -> Rc<Expression> {
     // dbg!(expression)
-    let expression = eval_locally(state, expression, en);
+
     // dbg!(&expression);
-    return expression;
+    eval_locally(state, expression, en)
 }
 
 fn eval_locally(
@@ -52,7 +52,7 @@ fn eval_locally(
         } => {
             let lhs = eval_locally(state, lhs.clone(), en);
             let rhs = eval_locally(state, rhs.clone(), en);
-            evaluate_binop(bin_op.clone(), &lhs, &rhs)
+            evaluate_binop(*bin_op, &lhs, &rhs)
         }
         Expression::UnOp { un_op, value, .. } => {
             let value = eval_locally(state, value.clone(), en);
@@ -64,9 +64,7 @@ fn eval_locally(
                 .lookup(var)
                 .unwrap_or_else(|| panic!("infeasible, object does not exist: {:?}", var));
 
-            let exp = eval_locally(state, o.clone(), en);
-
-            exp.clone()
+            eval_locally(state, o, en)
         }
         Expression::SymbolicVar { .. } => expression,
         Expression::Lit { .. } => expression,
@@ -92,7 +90,7 @@ fn eval_locally(
         }
         Expression::Ref { .. } => expression,
         Expression::SymbolicRef { var, type_, info } => {
-            init_symbolic_reference(state, &var, &type_, en);
+            init_symbolic_reference(state, var, type_, en);
 
             Rc::new(Expression::SymbolicRef {
                 var: var.clone(),
@@ -122,9 +120,9 @@ fn eval_locally(
                     ..
                 } => false_,
                 _ => Rc::new(Expression::Conditional {
-                    guard: guard,
-                    true_: true_,
-                    false_: false_,
+                    guard,
+                    true_,
+                    false_,
                     type_: type_.clone(),
                     info: *info,
                 }),
@@ -396,7 +394,7 @@ where
         } => Expression::FALSE.into(), // return false?
         Expression::Ref { ref_, .. } => {
             let len = if let heap::HeapValue::ArrayValue { elements, .. } =
-                state.heap.get(&ref_).unwrap()
+                state.heap.get(ref_).unwrap()
             {
                 elements.len()
             } else {
@@ -409,13 +407,13 @@ where
                     let element = heap::get_element(i, *ref_, &state.heap);
                     let index = to_int_expr(i as i64);
 
-                    state.stack.insert_variable(elem.clone(), element.clone());
+                    state.stack.insert_variable(elem.clone(), element);
                     state.stack.insert_variable(range.clone(), index);
                     let value = evaluate(state, formula.clone().into(), en);
                     state.stack.remove_variable(elem);
                     state.stack.remove_variable(range);
 
-                    value.clone()
+                    value
                 })
                 .collect_vec();
 

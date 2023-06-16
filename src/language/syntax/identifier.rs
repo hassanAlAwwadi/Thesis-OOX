@@ -1,6 +1,5 @@
-use derivative::Derivative;
-
 use crate::positioned::{SourcePos, WithPosition};
+use derivative::Derivative;
 
 use std::{
     fmt::{Debug, Display},
@@ -93,9 +92,8 @@ impl From<String> for Identifier {
         Identifier::with_unknown_pos(other)
     }
 }
-
-impl Into<String> for Identifier {
-    fn into(self) -> String {
-        self.name.to_string()
+impl From<Identifier> for String {
+    fn from(value: Identifier) -> Self {
+        value.name.to_string()
     }
 }

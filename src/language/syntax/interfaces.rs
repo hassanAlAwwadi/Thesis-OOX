@@ -33,9 +33,9 @@ impl InterfaceMember {
 /// Searches for interface methods, with the name method_name.
 /// Suboptimal return of InterfaceMethods -- wrap in Rc
 /// Does it search for default or abstract?
-pub fn find_interface_method<'a>(
-    method_name: &'a str,
-    members: &'a Vec<InterfaceMember>,
+pub fn find_interface_method(
+    method_name: &str,
+    members: &[InterfaceMember],
 ) -> Option<InterfaceMember> {
     members.iter().find_map(|member| match member {
         InterfaceMember::DefaultMethod(method) if method.name == method_name => {

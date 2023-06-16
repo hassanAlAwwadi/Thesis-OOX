@@ -4,7 +4,7 @@ use std::hash::Hash;
 use im_rc::Vector;
 use itertools::Itertools;
 
-pub fn group_by<'a, I, A, B>(v: I) -> HashMap<A, Vec<B>>
+pub fn group_by<I, A, B>(v: I) -> HashMap<A, Vec<B>>
 where
     I: Iterator<Item = (A, B)>,
     A: PartialEq + Eq + Hash + Clone,
@@ -20,7 +20,7 @@ where
     map
 }
 
-pub fn group_by_into_immutable_vec<'a, I, A, B>(v: I) -> HashMap<A, Vector<B>>
+pub fn group_by_into_immutable_vec<I, A, B>(v: I) -> HashMap<A, Vector<B>>
 where
     I: Iterator<Item = (A, B)>,
     A: PartialEq + Eq + Hash + Clone,

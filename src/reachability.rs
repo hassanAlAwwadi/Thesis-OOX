@@ -13,9 +13,9 @@ type ProgramCounter = u64;
 
 /// Computes the set of program points reachable from method.
 /// Does not check whether paths are unreachable logically.
-pub fn reachability<'a>(
+pub fn reachability(
     method: MethodIdentifier,
-    program: &'a HashMap<ProgramCounter, CFGStatement>,
+    program: &HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
     st: &SymbolTable,
 ) -> HashSet<u64> {
@@ -25,7 +25,7 @@ pub fn reachability<'a>(
         &method.decl_name,
         &method.method_name,
         method.arg_list.into_iter(),
-        &program,
+        program,
         st,
     );
 
@@ -41,7 +41,7 @@ pub fn reachability<'a>(
                 &method.decl_name,
                 &method.method_name,
                 method.arg_list.clone().into_iter(),
-                &program,
+                program,
                 st,
             );
             unchecked_methods.extend(methods_called(pc, program, flow));
@@ -54,7 +54,7 @@ pub fn reachability<'a>(
             &method.decl_name,
             &method.method_name,
             method.arg_list.into_iter(),
-            &program,
+            program,
             st,
         );
         reachability.extend(reachable_pc(pc, flow));
@@ -63,9 +63,9 @@ pub fn reachability<'a>(
     reachability
 }
 
-fn methods_called<'a>(
+fn methods_called(
     entry: u64,
-    program: &'a HashMap<ProgramCounter, CFGStatement>,
+    program: &HashMap<ProgramCounter, CFGStatement>,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
 ) -> Vec<MethodIdentifier> {
     let mut methods_called = Vec::new();
@@ -88,10 +88,10 @@ fn methods_called<'a>(
         stack.extend(flow.get(&pc).unwrap_or(&Vec::new()));
     }
 
-    return methods_called;
+    methods_called
 }
 
-fn reachable_pc<'a>(
+fn reachable_pc(
     entry: u64,
     flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
 ) -> HashSet<u64> {
@@ -108,5 +108,5 @@ fn reachable_pc<'a>(
         stack.extend(flow.get(&pc).unwrap_or(&Vec::new()));
     }
 
-    return visited;
+    visited
 }
