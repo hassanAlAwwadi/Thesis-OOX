@@ -1,8 +1,17 @@
+# Running for the first time
+Make sure you have Rust installed <https://www.rust-lang.org/tools/install>.
+We can run and build the project in debug mode with `cargo run`, `cargo build` and in release mode with by passing the `--release` flag.
+Building the project for the first time can take 5-10 minutes because it has to build a version of Z3.
+
+## Passing arguments
+Arguments to OOX can be passed after a `--`.
+You can find the arguments required by passing `--help` like this:
+`cargo run -- --help` or  `cargo run -- verify --help`
+
 
 # How to run (in release):
-
+Running in release is 5-30 times faster depending on the program, but will not log any debug logs to the log file.
 `cargo run --release -- "./examples/intLinkedList.oox" --heuristic depth-first-search --function Node.test2 --k 50`
-If you want to run in debug mode, remove the --release before the --.
 
 
 # Tests
@@ -34,7 +43,7 @@ other log macro's exist such as info!(..), warning!(..), etc.
 Running the project with the `--release` flag will disable any debug or below logs.
 This can be changed with feature flags from slog: <https://docs.rs/crate/slog/latest/features>
 
-# Minor issues
+# Known minor issues
 - Error path does not point to the right file
     - This can occur when multiple tests are ran after one another due to the way I implemented global files....
     - When running the test in isolation this will not happen.

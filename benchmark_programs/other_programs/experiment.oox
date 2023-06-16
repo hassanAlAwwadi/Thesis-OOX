@@ -1,25 +1,17 @@
 //
 // Linked-list, with several methods.
 //
-interface Value {}
-
-class Integer implements Value {
-    int i;
-}
-
-class Node implements Value {
-    Value value;
+class Node {
+    int value ;
     Node next ;
 
-    Node(Value value) {
-        this.value := value;
-        this.next := null;
-    }
+    Node() {}
 
-    bool member(Value x)
+    bool member(int x)
         exceptional(false) 
     {
-        Value v := this.value ;
+        assume (this != null);
+        int v := this.value ;
         if(x==v) return true ;
         else {
             Node n := this.next ;
@@ -41,39 +33,150 @@ class Node implements Value {
         }
     }
 
-    void insert(Node value)
-        requires(value != null)
+    // void insert(Node value)
+    //     requires(value != null)
+    // {
+    //     Node next := this.next;
+    //     if (next == null) {
+    //         this.next := new Node(value);
+    //     } else {
+    //         next.insert(value);
+    //     }
+    // }
+
+    Node min()
+       // ensures(min != null)
     {
-        Node next := this.next;
-        if (next == null) {
-            this.next := new Node(value);
-        } else {
-            next.insert(value);
+       Node p := this ;
+       Node min := p ;
+       int minval := min.value ;
+       while ( p != null) {
+          int value := p.value ;
+          if ( value < minval) {
+               min := p ;
+               minval := value ;
+          }
+          p := p.next;
+       }
+       return min ;
+    }
+
+    Node reversed()
+    {
+        Node newFirst;
+
+        Node p;
+        Node n;
+        Node n1;
+        Node n2;
+
+        p := null;
+        n := this;
+
+        n1 := n.next;
+        n2 := n1.next;
+        n.next := p;
+        n1.next := n;
+        p := n1;
+        n := n2; 
+
+        while (true) {
+            if (n == null) {
+                return p;
+            }
+            n1 := n.next;
+            n.next := p;
+            if (n1 == null) {
+                return n;
+            }
+            n2 := n1.next;
+            n1.next := n;
+            p := n1;
+            n := n2; 
         }
     }
 
-    bool nonCyclicOk() {
-        Node visitedNodesList := new Node(this);
 
-        Node n := this.next;
-        while (n != null) {
-            bool hasBeenVisited := visitedNodesList.member(n);
-            if (hasBeenVisited) {
-                return false;
-            } else {
-                visitedNodesList.insert(n);
-                n := n.next;
+    Node reversed2()
+    {
+        Node p;
+        Node n;
+        Node n1;
+
+        p := null;
+        n := this;
+
+        while (true) {
+            n1 := n.next;
+            n.next := p;
+            if (n1 == null) {
+                return n;
             }
+            p := n;
+            n := n1;
+        }
+    }
+
+    Node cloned() {
+        int value := this.value;
+        Node n := new Node();
+        n.value := this.value;
+        Node thisNext := this.next;
+        if (thisNext == null) {
+            return n;
+        }
+        n.next := thisNext.cloned();
+        return n;
+    }
+
+
+    bool equals(Node other) {
+        Node a := this;
+        Node b := other;
+
+        while (!(a==null && b == null)) {
+            if (a == null || b == null) {
+                return false;
+            }
+            int aValue := a.value;
+            int bValue := b.value;
+            bool aEqualsB := aValue == bValue;
+            if (!aEqualsB) {
+                return false;
+            }
+            a := a.next;
+            b := b.next;
         }
         return true;
     }
 }
 
-
-
 class Main {
 
-    
+    static void test(Node node) {
+        int length := node.length();
+        if (length > 1) {
+            bool equalsItself := node.equals(node);
+            assert false;
+            assert equalsItself;
+        }
+    }
+
+    static void test2(Node node) {
+        Node nodeCloned := node.cloned();
+        bool equalsCloned := node.equals(nodeCloned);
+        assert equalsCloned;
+    }
+
+    static void test3(Node node)
+        requires(node != null) {
+        Node nodeCloned := node.cloned();
+        Node reversed := nodeCloned.reversed2();
+        Node reversedTwice := reversed.reversed2();
+        bool reversedTwiceIsEqualToOriginal := node.equals(reversedTwice);
+        
+        assert reversedTwiceIsEqualToOriginal;
+    }
 
     // static void program(Node a, Node b)
     //     requires(node != null)
@@ -88,25 +191,17 @@ class Main {
     //     }
     // }
 
-    static void test(Node n) {
-        bool nonCyclic := n.nonCyclicOk();
-        if (nonCyclic) {
-            bool memberOfItself := n.member(n);
-            assert !memberOfItself;
-        } else {
-            bool memberOfItself := n.member(n);
-            // This should not necessarily be true? if a different member of the nodes n is itself?
-            assert memberOfItself;
-        }
-    }
+    // static void test(Node n) {
+    //     bool nonCyclic := n.nonCyclicOk();
+    //     if (nonCyclic) {
+    //         bool memberOfItself := n.member(n);
+    //         assert !memberOfItself;
+    //     } else {
+    //         bool memberOfItself := n.member(n);
+    //         // This should not necessarily be true? if a different member of the nodes n is itself?
+    //         assert memberOfItself;
+    //     }
+    // }
 
 
-
-    static void test4(Node node, Value z) 
-        requires(node != null)
-        exceptional(false)
-    {
-        assume node != null;
-        bool ok := node.member(z);
-    }
 }

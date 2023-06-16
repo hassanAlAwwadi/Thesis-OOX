@@ -1,0 +1,133 @@
+//
+// Linked-list, with several methods.
+//
+class Node implements Value {
+    Value value;
+    Node next ;
+
+    Node(Value value) {
+        this.value := value;
+        this.next := null;
+    }
+
+    bool member(Value x)
+        exceptional(false) 
+    {
+        Value v := this.value ;
+        if(x==v) return true ;
+        else {
+            Node n := this.next ;
+            if (n == null) { 
+                return false; 
+            } else {
+                bool b := n.member(x) ;
+                return b ;
+            }
+        }
+    }
+
+    int length() {
+        Node n := this.next ;
+        if (n==null) return 1 ;
+        else {
+            int k := n.length() ;
+            return k+1 ;
+        }
+    }
+
+    void insert(Node node)
+        requires(node != null)
+    {
+        Node next := this.next;
+        if (next == null) {
+            this.next := node;
+        } else {
+            next.insert(node);
+        }
+    }
+
+    bool nonCyclicOk() {
+        Node visitedNodesList := new Node(this);
+
+        Node n := this.next;
+        while (n != null) {
+            bool hasBeenVisited := visitedNodesList.member(n);
+            if (hasBeenVisited) {
+                return false;
+            } else {
+                visitedNodesList.insert(n);
+                n := n.next;
+            }
+        }
+        return true;
+    }
+
+
+    bool nonCyclicOkv2() {
+        // up to 100, we won't reach that 
+        int capacity := 100;
+        Node[] visitedNodes := new Node[capacity];
+        int l := 1;
+        visitedNodes[0] := this;
+
+        Node n := this.next;
+        while (n != null) {
+            int i := 0;
+            while (i < l) {
+                Node visitedNode := visitedNodes[i];
+                if (n == visitedNode) {
+                    return false;
+                }
+                i := i + 1;
+            }
+            
+            visitedNodes[l] := n;
+            l := l + 1;
+            n := n.next;
+
+            if (l == 100) {
+                assert false; // increase capacity of visitedNodes.
+            }
+        }
+        return true;
+    }
+}
+
+
+
+class Main {
+
+    static void test(Node n) {
+        bool nonCyclic := n.nonCyclicOk();
+        if (nonCyclic) {
+            bool memberOfItself := n.member(n);
+            assert !memberOfItself;
+        } else {
+            bool memberOfItself := n.member(n);
+            // This should not necessarily be true? if a different member of the nodes n is cyclic with itself?
+            assert memberOfItself;
+        }
+    }
+
+
+    static void test1(Node n) {
+        bool nonCyclic := n.nonCyclicOkv2();
+        if (nonCyclic) {
+            bool memberOfItself := n.member(n);
+            assert !memberOfItself;
+        } else {
+            bool memberOfItself := n.member(n);
+            // This should not necessarily be true? if a different member of the nodes n is cyclic with itself?
+            assert memberOfItself;
+        }
+    }
+
+
+    static void test4(Node node, Value z) 
+        requires(node != null)
+        exceptional(false)
+    {
+        assume node != null;
+        bool ok := node.member(z);
+    }
+}
