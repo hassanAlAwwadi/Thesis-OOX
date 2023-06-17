@@ -52,7 +52,7 @@ fn eval_locally(
         } => {
             let lhs = eval_locally(state, lhs.clone(), en);
             let rhs = eval_locally(state, rhs.clone(), en);
-            evaluate_binop(*bin_op, &lhs, &rhs)
+            evaluate_binop(*bin_op, lhs, rhs)
         }
         Expression::UnOp { un_op, value, .. } => {
             let value = eval_locally(state, value.clone(), en);
@@ -145,14 +145,14 @@ fn eval_locally(
     }
 }
 
-fn evaluate_binop(bin_op: BinOp, lhs: &Expression, rhs: &Expression) -> Rc<Expression> {
+fn evaluate_binop(bin_op: BinOp, lhs: Rc<Expression>, rhs: Rc<Expression>) -> Rc<Expression> {
     use crate::syntax::BinOp::*;
     use crate::syntax::Lit::*;
     use Expression::*;
 
     // dbg!(&bin_op, lhs, rhs);
 
-    match (bin_op, lhs, rhs) {
+    match (bin_op, lhs.as_ref(), rhs.as_ref()) {
         // Boolean evaluation
         (
             bin_op,
@@ -178,18 +178,18 @@ fn evaluate_binop(bin_op: BinOp, lhs: &Expression, rhs: &Expression) -> Rc<Expre
                 lit: BoolLit { bool_value: a },
                 ..
             },
-            exp2,
+            _rhs,
         ) => match bin_op {
             Implies => {
                 if *a {
-                    Rc::new(rhs.clone())
+                    rhs
                 } else {
                     Rc::new(Expression::TRUE)
                 }
             }
             And => {
                 if *a {
-                    Rc::new(rhs.clone())
+                    rhs
                 } else {
                     Rc::new(Expression::FALSE)
                 }
@@ -198,20 +198,20 @@ fn evaluate_binop(bin_op: BinOp, lhs: &Expression, rhs: &Expression) -> Rc<Expre
                 if *a {
                     Rc::new(Expression::TRUE)
                 } else {
-                    Rc::new(exp2.clone())
+                    rhs
                 }
             }
             _ => Rc::new(Expression::BinOp {
                 bin_op,
-                lhs: Rc::new(lhs.clone()),
-                rhs: Rc::new(rhs.clone()),
+                lhs,
+                rhs,
                 type_: RuntimeType::BoolRuntimeType,
                 info: SourcePos::UnknownPosition,
             }),
         },
         (
             bin_op,
-            exp1,
+            _lhs,
             Lit {
                 lit: BoolLit { bool_value: b },
                 ..
@@ -221,12 +221,12 @@ fn evaluate_binop(bin_op: BinOp, lhs: &Expression, rhs: &Expression) -> Rc<Expre
                 if *b {
                     Rc::new(Expression::TRUE)
                 } else {
-                    Rc::new(negate(Rc::new(exp1.clone())))
+                    negate(lhs).into()
                 }
             }
             And => {
                 if *b {
-                    Rc::new(exp1.clone())
+                    lhs
                 } else {
                     Rc::new(Expression::FALSE)
                 }
@@ -235,13 +235,13 @@ fn evaluate_binop(bin_op: BinOp, lhs: &Expression, rhs: &Expression) -> Rc<Expre
                 if *b {
                     Rc::new(Expression::TRUE)
                 } else {
-                    Rc::new(lhs.clone())
+                    lhs
                 }
             }
             _ => Rc::new(Expression::BinOp {
                 bin_op,
-                lhs: Rc::new(lhs.clone()),
-                rhs: Rc::new(rhs.clone()),
+                lhs,
+                rhs,
                 type_: RuntimeType::BoolRuntimeType,
                 info: SourcePos::UnknownPosition,
             }),
@@ -309,8 +309,8 @@ fn evaluate_binop(bin_op: BinOp, lhs: &Expression, rhs: &Expression) -> Rc<Expre
             } else {
                 Rc::new(Expression::BinOp {
                     bin_op,
-                    lhs: Rc::new(lhs.clone()),
-                    rhs: Rc::new(rhs.clone()),
+                    lhs,
+                    rhs,
                     type_: RuntimeType::BoolRuntimeType,
                     info: SourcePos::UnknownPosition,
                 })
@@ -318,8 +318,8 @@ fn evaluate_binop(bin_op: BinOp, lhs: &Expression, rhs: &Expression) -> Rc<Expre
         }
         (bin_op, _, _) => Rc::new(Expression::BinOp {
             bin_op,
-            lhs: Rc::new(lhs.clone()),
-            rhs: Rc::new(rhs.clone()),
+            lhs,
+            rhs,
             type_: RuntimeType::BoolRuntimeType,
             info: SourcePos::UnknownPosition,
         }), // room for optimization
@@ -341,6 +341,15 @@ fn evaluate_unop(unop: UnOp, expression: Rc<Expression>) -> Rc<Expression> {
             type_: RuntimeType::IntRuntimeType,
             info: SourcePos::UnknownPosition,
         }),
+        (
+            UnOp::Negative,
+            Expression::BinOp {
+                bin_op: BinOp::Equal,
+                lhs,
+                rhs,
+                ..
+            },
+        ) => evaluate_binop(BinOp::NotEqual, lhs.clone(), rhs.clone()).into(),
         (UnOp::Negative, _) => Rc::new(negative(expression)),
         (
             UnOp::Negate,
