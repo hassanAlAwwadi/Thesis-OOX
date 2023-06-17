@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 
+use crate::RuntimeType;
 use crate::{typeable::Typeable, Expression, Identifier};
-use crate::{RuntimeType};
 
 use crate::exec::ImHashMap;
 
@@ -63,8 +63,6 @@ impl AliasEntry {
     }
 
     pub fn remove_null(&mut self) {
-        self.aliases.retain(|x| {
-            *x.as_ref() != Expression::NULL
-        });
+        self.aliases.retain(|x| *x.as_ref() != Expression::NULL);
     }
 }

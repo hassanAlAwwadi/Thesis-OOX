@@ -91,10 +91,7 @@ fn methods_called(
     methods_called
 }
 
-fn reachable_pc(
-    entry: u64,
-    flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>,
-) -> HashSet<u64> {
+fn reachable_pc(entry: u64, flow: &HashMap<ProgramCounter, Vec<ProgramCounter>>) -> HashSet<u64> {
     let mut stack = vec![entry];
     let mut visited = HashSet::new();
 
