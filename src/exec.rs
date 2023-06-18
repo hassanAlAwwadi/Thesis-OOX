@@ -21,7 +21,7 @@ mod state_split;
 use crate::{
     cfg::{labelled_statements, CFGStatement, MethodIdentifier},
     concretization::{concretizations, find_symbolic_refs},
-    dsl::{equal, ite, negate, to_int_expr},
+    dsl::{equal, ite, negate, to_int_expr, and},
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
     exec::{
         eval::{evaluate, evaluate_as_int},
@@ -469,6 +469,7 @@ fn exec_throw(state: &mut State, en: &mut impl Engine, message: &str) -> ActionR
 }
 
 /// Asserts an `exceptional(..)` OOX statement.
+/// Returns false if the exception is invalid.
 fn assert_exceptional(
     state: &mut State,
     en: &mut impl Engine,
@@ -525,18 +526,25 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl E
                 symbolic_refs.len()
             );
 
-            // The number of combinations of each symbolic ref, which could be concretized.
-            // If this number is too large we leave all the work to Z3 which seems to be faster in practice.
-            // This explodes so hard we need 128 bit integer and it still overflows.
-            let n_combinations: u128 = state
-                .alias_map
-                .iter()
-                .fold(Some(1_u128), |a, (_, refs)| {
-                    a.and_then(|a| a.checked_mul(refs.aliases().len() as u128))
-                })
-                .unwrap_or(u128::MAX); // limit overflow to max u128
+            let solve_with_z3_only = if let Some(local_solving_threshold) = en.options().local_solving_threshold {
+                // The number of combinations of each symbolic ref, which could be concretized.
+                // If this number is too large we leave all the work to Z3 which seems to be faster in practice.
+                // This explodes so hard we need 128 bit integer and it still overflows.
+                let n_combinations: u128 = state
+                    .alias_map
+                    .iter()
+                    .fold(Some(1_u128), |a, (_, refs)| {
+                        a.and_then(|a| a.checked_mul(refs.aliases().len() as u128))
+                    })
+                    .unwrap_or(u128::MAX); // limit overflow to max u128
 
-            if n_combinations > 1000 {
+                n_combinations > local_solving_threshold
+            } else {
+                false
+            };
+
+
+            if solve_with_z3_only {
                 // Solve through only Z3
                 let result = z3_checker::all_z3::verify(&expression, &state.alias_map);
                 if let SatResult::Unsat = result {
@@ -1339,14 +1347,39 @@ fn exec_assume(
     en: &mut impl Engine,
 ) -> bool {
     // special case for instanceof, since we don't add them to the path constraints but their assumption is made by ensuring it in the alias map.
+    let options = en.options();
     match assumption {
         Either::Left(assumption) => {
-            let expression = evaluate(state, assumption, en);
-            if *expression == Expression::FALSE {
-                return false;
-            } else if *expression != Expression::TRUE {
-                state.constraints.insert(expression);
+            if !options.prune_path_z3 {
+                // We prune as much as we can with the frontend evaluator, but any path with containing symbolic variables will likely go through.
+                // Those paths would be infeasible eventually when an assert is encountered.
+                let expression = evaluate(state, assumption, en);
+                if *expression == Expression::FALSE {
+                    return false;
+                } else if *expression != Expression::TRUE {
+                    state.constraints.insert(expression);
+                }
+            } else {
+                let constraints = collect_path_constraints(state);
+                let assumption = evaluate(state, assumption, en);
+                // dbg!(&assumption);
+                let expression = evaluate(state, and(constraints, assumption.clone()), en);
+                // dbg!(&expression);
+                if *expression == Expression::FALSE {
+                    return false;
+                } else {
+                    let result = z3_checker::all_z3::verify(&expression, &state.alias_map);
+                    // eval_assertion(state, expression, en)
+                    if result == SatResult::Sat {
+                        if *expression != Expression::TRUE {
+                            state.constraints.insert(assumption);
+                        }
+                    } else {
+                        return false;
+                    }
+                }
             }
+
         }
         Either::Right(assumption) => {
             let type_guard_feasible = assume_type_guard(state, &assumption, en);
@@ -1495,6 +1528,8 @@ pub struct Options<'a> {
     pub symbolic_array_size: u64,
     pub log_path: &'a str,
     pub discard_logs: bool,
+    pub prune_path_z3: bool,
+    pub local_solving_threshold: Option<u128>,
 }
 
 impl Default for Options<'_> {
@@ -1510,6 +1545,8 @@ impl Default for Options<'_> {
             time_budget: 900,
             log_path: "./logs/log.txt",
             discard_logs: false,
+            prune_path_z3: false,
+            local_solving_threshold: Some(100),
         }
     }
 }
