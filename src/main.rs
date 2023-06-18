@@ -49,6 +49,11 @@ enum Commands {
         /// Will create a file visualize.txt, showing the current program exploration guided by heuristic.
         #[arg(long, default_value_t = false)]
         visualize_heuristic: bool,
+
+        /// The path where the log file should be written.
+        #[arg(long, default_value = "./logs/log.txt")]
+        log_path: String,
+
     },
     /// Parse and typecheck an OOX source file
     Check {
@@ -74,6 +79,7 @@ fn main() -> Result<(), String> {
             visualize_heuristic,
             visualize_coverage,
             time_budget,
+            log_path,
         } => {
             if let Some((class_name, method_name)) = function.split('.').collect_tuple() {
                 let options = Options {
@@ -85,6 +91,8 @@ fn main() -> Result<(), String> {
                     visualize_coverage,
                     symbolic_array_size,
                     time_budget,
+                    log_path: &log_path,
+                    discard_logs: false,
                 };
                 verify(source_paths.as_slice(), class_name, method_name, options)?;
             } else {

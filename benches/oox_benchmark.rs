@@ -13,6 +13,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         visualize_coverage: false,
         symbolic_array_size: 3,
         time_budget: 900,
+        log_path: "./logs/log.txt",
+        discard_logs: true,
     };
     group.sample_size(10);
     group.sampling_mode(SamplingMode::Flat);

@@ -203,7 +203,7 @@ pub struct EngineContext<'a> {
     statistics: &'a mut Statistics,
     st: &'a SymbolTable,
     root_logger: &'a Logger,
-    options: &'a Options,
+    options: &'a Options<'a>,
 }
 
 impl Engine for EngineContext<'_> {
@@ -781,9 +781,9 @@ fn prepare_assert_expression(
     //         type_: RuntimeType::BoolRuntimeType,
     //     },
     // );
-    debug!(state.logger, "Expression to evaluate: {:?}", expression);
+    debug!(state.logger, "Expression to evaluate: {}", expression);
     let z = evaluate(state, Rc::new(expression), en);
-    debug!(state.logger, "Evaluated expression: {:?}", z);
+    debug!(state.logger, "Evaluated expression: {}", z);
     z
 }
 
@@ -1483,7 +1483,7 @@ pub enum Heuristic {
 }
 
 #[derive(Copy, Clone)]
-pub struct Options {
+pub struct Options<'a> {
     pub k: u64,
     /// The allowed maximum time of the verification in seconds.
     pub time_budget: u64,
@@ -1493,12 +1493,14 @@ pub struct Options {
     pub visualize_heuristic: bool,
     pub visualize_coverage: bool,
     pub symbolic_array_size: u64,
+    pub log_path: &'a str,
+    pub discard_logs: bool,
 }
 
-impl Options {
-    pub fn default_with_k(k: u64) -> Options {
-        Options {
-            k,
+impl Default for Options<'_> {
+    fn default() -> Self {
+        Self {
+            k: 40,
             quiet: false,
             with_exceptional_clauses: true,
             heuristic: Heuristic::DepthFirstSearch,
@@ -1506,10 +1508,21 @@ impl Options {
             visualize_coverage: false,
             symbolic_array_size: 3,
             time_budget: 900,
+            log_path: "./logs/log.txt",
+            discard_logs: false,
+        }
+    }
+}
+
+impl Options<'_> {
+    pub fn default_with_k(k: u64) -> Options<'static> {
+        Options {
+            k,
+            ..Default::default()
         }
     }
 
-    pub fn default_with_k_and_heuristic(k: u64, heuristic: Heuristic) -> Options {
+    pub fn default_with_k_and_heuristic(k: u64, heuristic: Heuristic) -> Options<'static> {
         Options {
             heuristic,
             ..Self::default_with_k(k)
@@ -1621,17 +1634,21 @@ pub fn verify(
     //     Mutex::new(slog_bunyan::default(std::io::stderr()).filter_level(Level::Debug)).fuse(),
     //     o!(),
     // );
-    let log_file_name = "../../logs/log.txt".to_string();
 
-    let mut builder = FileLoggerBuilder::new(log_file_name);
-    // let mut builder = TerminalLoggerBuilder::new();
-    // builder.destination(Destination::Stdout);
-    builder.level(Severity::Trace);
-    builder.format(sloggers::types::Format::Full);
-    builder.source_location(sloggers::types::SourceLocation::FileAndLine);
-    builder.truncate();
+    let root_logger = if options.discard_logs {
+        slog::Logger::root(slog::Discard, o!())
+    } else {
+        let mut builder = FileLoggerBuilder::new(options.log_path);
+        // let mut builder = TerminalLoggerBuilder::new();
+        // builder.destination(Destination::Stdout);
+        builder.level(Severity::Trace);
+        builder.format(sloggers::types::Format::Full);
+        builder.source_location(sloggers::types::SourceLocation::FileAndLine);
+        builder.truncate();
 
-    let root_logger = builder.build().unwrap();
+        builder.build().unwrap()
+    };
+    
     info!(
         root_logger,
         "Starting verification of {}::{}", class_name, method_name
