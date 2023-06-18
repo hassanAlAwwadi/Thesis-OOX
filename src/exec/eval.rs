@@ -134,14 +134,14 @@ fn eval_locally(
             domain,
             formula,
             ..
-        } => evaluate_quantifier(ands, elem, range, domain, formula, state, en),
+        } => evaluate_quantifier(ands, elem, range, domain, formula.clone(), state, en),
         Expression::Exists {
             elem,
             range,
             domain,
             formula,
             ..
-        } => evaluate_quantifier(ors, elem, range, domain, formula, state, en),
+        } => evaluate_quantifier(ors, elem, range, domain, formula.clone(), state, en),
     }
 }
 
@@ -322,7 +322,7 @@ fn evaluate_binop(bin_op: BinOp, lhs: Rc<Expression>, rhs: Rc<Expression>) -> Rc
             rhs,
             type_: RuntimeType::BoolRuntimeType,
             info: SourcePos::UnknownPosition,
-        }), // room for optimization
+        }),
     }
 }
 
@@ -385,7 +385,7 @@ fn evaluate_quantifier<'a, F>(
     elem: &'a Identifier,
     range: &'a Identifier,
     domain: &'a Identifier,
-    formula: &'a Expression,
+    formula: Rc<Expression>,
     state: &'a mut State,
     en: &mut impl Engine,
 ) -> Rc<Expression>
@@ -418,7 +418,7 @@ where
 
                     state.stack.insert_variable(elem.clone(), element);
                     state.stack.insert_variable(range.clone(), index);
-                    let value = evaluate(state, formula.clone().into(), en);
+                    let value = evaluate(state, formula.clone(), en);
                     state.stack.remove_variable(elem);
                     state.stack.remove_variable(range);
 

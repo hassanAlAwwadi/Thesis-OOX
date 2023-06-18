@@ -46,7 +46,7 @@ impl Statistics {
         self.number_of_complete_paths += 1;
     }
 
-    pub fn measure_veficiation(&mut self) {
+    pub fn measure_verification(&mut self) {
         self.number_of_verifications += 1;
     }
 

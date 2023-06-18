@@ -167,7 +167,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         invocation,
     });
     let skip = punct(";").map(|_| Statement::Skip);
-    let assert = (keyword("assert") + verification_expression() - punct(";")).map(
+    let assert = (keyword("assert") + verification_expression().map(Rc::new) - punct(";")).map(
         |(assert_token, assertion)| Statement::Assert {
             assertion,
             info: assert_token.get_position(),
@@ -182,7 +182,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
 
     let while_ = (keyword("while") * punct("(") * expression() - punct(")")
         + ((punct("{") * call(statement).opt() - punct("}")) | call(statement).map(Some)))
-    .map(|(guard, body)| create_while(guard, body));
+    .map(|(guard, body)| create_while(Rc::new(guard), body));
 
     let continue_ = (keyword("continue") - punct(";")).map(|t| Statement::Continue {
         info: t.get_position(),
@@ -191,7 +191,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         info: t.get_position(),
     });
     let return_ =
-        (keyword("return") + expression().opt() - punct(";")).map(|(return_token, expression)| {
+        (keyword("return") + expression().map(Rc::new).opt() - punct(";")).map(|(return_token, expression)| {
             Statement::Return {
                 expression,
                 info: return_token.get_position(),
@@ -330,7 +330,7 @@ fn create_ite(
     }
 }
 
-fn create_while(guard: Expression, body: Option<Statement>) -> Statement {
+fn create_while(guard: Rc<Expression>, body: Option<Statement>) -> Statement {
     if let Some(body) = body {
         Statement::Seq {
             stat1: Box::new(Statement::While {
@@ -369,7 +369,7 @@ fn verification_expression<'a>() -> Parser<'a, Token<'a>, Expression> {
             elem,
             range,
             domain,
-            formula: Box::new(formula),
+            formula: Rc::new(formula),
             type_: RuntimeType::UnknownRuntimeType,
         },
     );
@@ -383,7 +383,7 @@ fn verification_expression<'a>() -> Parser<'a, Token<'a>, Expression> {
             elem,
             range,
             domain,
-            formula: Box::new(formula),
+            formula: Rc::new(formula),
             type_: RuntimeType::UnknownRuntimeType,
         },
     );
@@ -702,13 +702,13 @@ fn lhs<'a>() -> Parser<'a, Token<'a>, Lhs> {
 fn rhs<'a>() -> Parser<'a, Token<'a>, Rhs> {
     let rhs_expression = expression().map(|value| Rhs::RhsExpression {
         info: value.get_position(),
-        value,
+        value: Rc::new(value),
         type_: RuntimeType::UnknownRuntimeType,
     });
 
     let rhs_field = (expression() - punct(".") + identifier()).map(|(var, field)| Rhs::RhsField {
         info: var.get_position(),
-        var,
+        var: Rc::new(var),
         field,
         type_: RuntimeType::UnknownRuntimeType,
     });
@@ -720,12 +720,12 @@ fn rhs<'a>() -> Parser<'a, Token<'a>, Rhs> {
     let rhs_elem =
         (expression() - punct("[") + expression() - punct("]")).map(|(var, index)| Rhs::RhsElem {
             info: var.get_position(),
-            var,
-            index,
+            var: Rc::new(var),
+            index: Rc::new(index),
             type_: RuntimeType::UnknownRuntimeType,
         });
     let rhs_array = (keyword("new") * (classtype() | primitivetype())
-        + (punct("[") * (integer() | expression()) - punct("]")).repeat(1..))
+        + (punct("[") * (integer() | expression()).map(Rc::new) - punct("]")).repeat(1..))
     .map(|(array_type, sizes)| Rhs::RhsArray {
         info: array_type.get_position(),
         array_type,
@@ -827,8 +827,8 @@ fn literal<'a>() -> Parser<'a, Token<'a>, Expression> {
             }
             Err(())
         })
-        .map(|(value, pos)| Expression::Lit {
-            lit: match value {
+        .map(|(value, pos)| {
+            let lit = match value {
                 "null" => Lit::NullLit,
                 "true" => Lit::BoolLit { bool_value: true },
                 "false" => Lit::BoolLit { bool_value: false },
@@ -850,10 +850,13 @@ fn literal<'a>() -> Parser<'a, Token<'a>, Expression> {
                     } else {
                         unreachable!()
                     }
-                } // _ => unreachable!(),
-            },
-            type_: RuntimeType::ANYRuntimeType,
-            info: pos,
+                }
+            };
+            Expression::Lit {
+                type_: lit.type_of(),
+                lit,
+                info: pos,
+            }
         })
 }
 
@@ -951,7 +954,7 @@ fn exceptional_rhs(rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Rc<Expressi
                 var: var_name,
                 type_: _,
                 ..
-            } = var
+            } = var.as_ref()
             {
                 var_name
             } else {
@@ -968,7 +971,7 @@ fn exceptional_rhs(rhs: &Rhs, class_names: &[Identifier]) -> HashSet<Rc<Expressi
                 var: var_name,
                 type_: _,
                 ..
-            } = var
+            } = var.as_ref()
             {
                 var_name
             } else {

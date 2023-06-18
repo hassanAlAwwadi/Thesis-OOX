@@ -303,9 +303,13 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Expression {
                     UnOp::Negative => "-",
                     UnOp::Negate => "!",
                 };
-                allocator.text(un_op_str).append(value.pretty(allocator))
+                allocator
+                    .text(un_op_str)
+                    .append(value.pretty(allocator).parens())
             }
-            Expression::SymbolicVar { var, .. } => allocator.text(var.to_string()),
+            Expression::SymbolicVar { var, .. } => {
+                allocator.text("$").append(allocator.text(var.to_string()))
+            }
             Expression::Lit { lit, .. } => match lit {
                 Lit::NullLit => allocator.text("null"),
                 Lit::BoolLit { bool_value } => allocator.text(bool_value.to_string()),
@@ -328,9 +332,13 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Expression {
             } => docs![
                 allocator,
                 "ite",
-                guard.pretty(allocator).append(comma()),
-                true_.pretty(allocator).append(comma()),
-                false_.pretty(allocator)
+                "(",
+                guard.as_ref(),
+                comma(),
+                true_.as_ref(),
+                comma(),
+                false_.as_ref(),
+                ")"
             ]
             .parens(),
             Expression::Forall {
@@ -348,7 +356,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Expression {
                 ": ",
                 domain.to_string(),
                 ": ",
-                formula.pretty(allocator)
+                formula.as_ref()
             ],
 
             Expression::Exists {
@@ -366,7 +374,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Expression {
                 ": ",
                 domain.to_string(),
                 ": ",
-                formula.pretty(allocator)
+                formula.as_ref()
             ],
 
             Expression::SymbolicRef { var, .. } => allocator.text(var.to_string()),
@@ -531,7 +539,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Rhs {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
         match self {
             Rhs::RhsExpression { value, .. } => value.pretty(allocator),
-            Rhs::RhsField { var, field, .. } => docs![allocator, var, ".", field.to_string()],
+            Rhs::RhsField { var, field, .. } => docs![allocator, var.as_ref(), ".", field.to_string()],
             Rhs::RhsElem { var, index, .. } => var
                 .pretty(allocator)
                 .append(index.pretty(allocator).brackets()),
@@ -690,6 +698,30 @@ impl Display for Expression {
             .pretty(50)
             .to_string();
         f.write_str(&s)
+    }
+}
+
+impl std::fmt::Debug for Expression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = pretty::Pretty::pretty(self, &BoxAllocator)
+            .1
+            .pretty(50)
+            .to_string();
+
+        f.write_str(&s)?;
+        // If we are a (symbolic) ref or var of some sort also print the type.
+        if matches!(
+            self,
+            Expression::Ref { .. }
+                | Expression::SymbolicRef { .. }
+                | Expression::SymbolicVar { .. }
+                | Expression::Var { .. }
+        ) {
+            f.write_str("::")?;
+            f.write_str(&self.type_of().to_string())?
+        }
+
+        Ok(())
     }
 }
 
@@ -874,7 +906,7 @@ pub mod cfg_pretty {
                 result = docs![
                     allocator,
                     "while (",
-                    e,
+                    e.as_ref(),
                     ") {",
                     decorator(current).map(|decoration| { format!(" // {}", decoration) }),
                     docs![
@@ -984,7 +1016,7 @@ pub mod cfg_pretty {
                 }
                 CFGStatement::While(e, _) => {
                     write!(f, "while (")?;
-                    pretty::Pretty::pretty(e, &allocator).1.render_fmt(w, f)?;
+                    pretty::Pretty::pretty(e.as_ref(), &allocator).1.render_fmt(w, f)?;
                     write!(f, ") {{ .. }} else {{ .. }}")
                 }
                 CFGStatement::TryCatch(_, _, _, _) => write!(f, "try {{ .. }} catch {{ .. }}"),

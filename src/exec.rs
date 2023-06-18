@@ -297,7 +297,7 @@ fn action(
             ActionResult::Continue
         }
         CFGStatement::Statement(Statement::Assert { assertion, .. }) => {
-            let expression = prepare_assert_expression(state, Rc::new(assertion.clone()), en);
+            let expression = prepare_assert_expression(state, assertion.clone(), en);
 
             let is_valid = eval_assertion(state, expression, en);
             if !is_valid {
@@ -314,7 +314,7 @@ fn action(
         }
         CFGStatement::Statement(Statement::Return { expression, .. }) => {
             if let Some(expression) = expression {
-                let expression = evaluate(state, Rc::new(expression.clone()), en);
+                let expression = evaluate(state, expression.clone(), en);
                 state.stack.insert_variable(constants::retval(), expression);
             }
             ActionResult::Continue
@@ -386,10 +386,10 @@ fn action(
                 ActionResult::Continue
             } else {
                 let StackFrame {
-                    pc,
                     returning_lhs,
                     params,
                     current_member,
+                    return_pc,
                 } = state.stack.pop().unwrap();
                 let return_type = current_member.type_of();
                 if return_type != RuntimeType::VoidRuntimeType {
@@ -403,7 +403,7 @@ fn action(
                     }
                 }
 
-                ActionResult::Return(pc)
+                ActionResult::Return(return_pc)
             }
         }
         CFGStatement::Statement(Statement::Call { invocation, .. }) => exec_invocation(
@@ -498,10 +498,11 @@ fn assert_exceptional(
     true
 }
 
+// Evaluates the expression with Z3
 fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl Engine) -> bool {
     info!(state.logger, "invoke Z3");
     // dbg!(&alias_map);
-    en.statistics().measure_veficiation();
+    en.statistics().measure_verification();
     // println!("expression: {:?}", &expression);
 
     if *expression == Expression::TRUE {
@@ -835,12 +836,12 @@ fn read_field_symbolic_ref(
                     bin_op: BinOp::Equal,
                     lhs: sym_ref.clone(),
                     rhs: r.clone(),
-                    type_: RuntimeType::ANYRuntimeType,
+                    type_: RuntimeType::BoolRuntimeType,
                     info: SourcePos::UnknownPosition,
                 }),
                 true_: (read_field_concrete_ref(heap, ref_, field)),
                 false_: (read_field_symbolic_ref(heap, rs, sym_ref, field)),
-                type_: RuntimeType::ANYRuntimeType,
+                type_: RuntimeType::BoolRuntimeType,
                 info: SourcePos::UnknownPosition,
             })
         }
@@ -1011,7 +1012,7 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
                 Expression::Ref { ref_, .. } => {
                     write_field_concrete_ref(&mut state.heap, *ref_, field, e);
                 }
-                sym_ref @ Expression::SymbolicRef { var, type_, .. } => {
+                Expression::SymbolicRef { var, type_, .. } => {
                     init_symbolic_reference(state, var, type_, en);
                     // should also remove null here? --Assignemnt::45
                     // Yes, we have if (x = null) { throw; } guards that ensure it cannot be null
@@ -1022,7 +1023,7 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
                         &mut state.heap,
                         &concrete_refs.aliases,
                         field,
-                        Rc::new(sym_ref.clone()),
+                        o,
                         e,
                     );
                 }
@@ -1068,7 +1069,7 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
 fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expression> {
     match rhs {
         Rhs::RhsExpression { value, .. } => {
-            match value {
+            match value.as_ref() {
                 Expression::Var { var, .. } => state.stack.lookup(var).unwrap_or_else(|| {
                     panic!(
                         "Could not find {:?} on the stack {:?}",
@@ -1076,13 +1077,13 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
                         &state.stack.current_variables()
                     )
                 }),
-                _ => Rc::new(value.clone()), // might have to expand on this when dealing with complex quantifying expressions and array
+                _ => value.clone(), // might have to expand on this when dealing with complex quantifying expressions and array
             }
         }
         Rhs::RhsField { var, field, .. } => {
-            if let Expression::Var { var, .. } = var {
+            if let Expression::Var { var, .. } = var.as_ref() {
                 let object = state.stack.lookup(var).unwrap();
-                exec_rhs_field(state, &object, field, en)
+                exec_rhs_field(state, object, field, en)
             } else {
                 panic!(
                     "Currently only right hand sides of the form <variable>.<field> are allowed."
@@ -1092,7 +1093,7 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
         // We expect that this symbolic reference has been initialised into multiple states,
         // where in each state the aliasmap is left with one concrete array.
         Rhs::RhsElem { var, index, .. } => {
-            if let Expression::Var { var, .. } = var {
+            if let Expression::Var { var, .. } = var.as_ref() {
                 let array = state.stack.lookup(var).unwrap();
                 exec_rhs_elem(state, array, index.to_owned().into(), en)
             } else {
@@ -1150,11 +1151,11 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
 
 fn exec_rhs_field(
     state: &mut State,
-    object: &Expression,
+    object: Rc<Expression>,
     field: &Identifier,
     en: &mut impl Engine,
 ) -> Rc<Expression> {
-    match object {
+    match object.as_ref() {
         Expression::Conditional {
             guard,
             true_,
@@ -1162,8 +1163,8 @@ fn exec_rhs_field(
             type_,
             info,
         } => {
-            let true_ = exec_rhs_field(state, true_, field, en);
-            let false_ = exec_rhs_field(state, false_, field, en);
+            let true_ = exec_rhs_field(state, true_.clone(), field, en);
+            let false_ = exec_rhs_field(state, false_.clone(), field, en);
 
             Rc::new(Expression::Conditional {
                 guard: guard.clone(),
@@ -1177,7 +1178,7 @@ fn exec_rhs_field(
             lit: Lit::NullLit, ..
         } => panic!("infeasible"),
         Expression::Ref { ref_, .. } => read_field_concrete_ref(&mut state.heap, *ref_, field),
-        sym_ref @ Expression::SymbolicRef { var, type_, .. } => {
+        Expression::SymbolicRef { var, type_, .. } => {
             init_symbolic_reference(state, var, type_, en);
             remove_symbolic_null(&mut state.alias_map, var);
             let concrete_refs = &state.alias_map[var];
@@ -1186,7 +1187,7 @@ fn exec_rhs_field(
             read_field_symbolic_ref(
                 &mut state.heap,
                 &concrete_refs.aliases,
-                Rc::new(sym_ref.clone()),
+                object,
                 field,
             )
         }
@@ -1636,16 +1637,19 @@ pub fn verify(
         "Starting verification of {}::{}", class_name, method_name
     );
 
+    let mut constraints = ImHashSet::new();
+    constraints.insert(Rc::new(Expression::TRUE));
+
     let state = State {
         pc,
         stack: Stack::new(vector![StackFrame {
-            pc,
+            return_pc: pc,
             returning_lhs: None,
             params,
             current_member: initial_method,
         }]),
         heap: ImHashMap::new(),
-        constraints: ImHashSet::new(),
+        constraints,
         alias_map: ImHashMap::new(),
         ref_counter: IdCounter::new(0),
         exception_handler: Default::default(),

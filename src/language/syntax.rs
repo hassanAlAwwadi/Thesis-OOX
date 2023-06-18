@@ -240,7 +240,7 @@ pub enum Statement {
     },
     Skip,
     Assert {
-        assertion: Expression,
+        assertion: Rc<Expression>,
         #[derivative(PartialEq = "ignore")]
         info: SourcePos,
     },
@@ -250,7 +250,7 @@ pub enum Statement {
         info: SourcePos,
     },
     While {
-        guard: Expression,
+        guard: Rc<Expression>,
         body: Box<Statement>,
         #[derivative(PartialEq = "ignore")]
         info: SourcePos,
@@ -271,7 +271,7 @@ pub enum Statement {
         info: SourcePos,
     },
     Return {
-        expression: Option<Expression>,
+        expression: Option<Rc<Expression>>,
         #[derivative(PartialEq = "ignore")]
         info: SourcePos,
     },
@@ -500,14 +500,14 @@ pub enum Lhs {
 #[derivative(PartialEq, Eq)]
 pub enum Rhs {
     RhsExpression {
-        value: Expression,
+        value: Rc<Expression>,
         type_: RuntimeType,
 
         #[derivative(PartialEq = "ignore")]
         info: SourcePos,
     },
     RhsField {
-        var: Expression,
+        var: Rc<Expression>,
         field: Identifier,
         type_: RuntimeType,
 
@@ -515,8 +515,8 @@ pub enum Rhs {
         info: SourcePos,
     },
     RhsElem {
-        var: Expression,
-        index: Expression,
+        var: Rc<Expression>,
+        index: Rc<Expression>,
         type_: RuntimeType,
 
         #[derivative(PartialEq = "ignore")]
@@ -531,7 +531,7 @@ pub enum Rhs {
     },
     RhsArray {
         array_type: NonVoidType,
-        sizes: Vec<Expression>,
+        sizes: Vec<Rc<Expression>>,
         type_: RuntimeType,
 
         #[derivative(PartialEq = "ignore")]
@@ -546,14 +546,14 @@ pub enum Rhs {
     },
 }
 
-#[derive(Clone, Derivative, Debug)]
+#[derive(Clone, Derivative)]
 #[derivative(PartialEq, Hash, Eq)]
 pub enum Expression {
     Forall {
         elem: Identifier,
         range: Identifier,
         domain: Identifier,
-        formula: Box<Expression>,
+        formula: Rc<Expression>,
         type_: RuntimeType,
 
         #[derivative(PartialEq = "ignore", Hash = "ignore")]
@@ -563,7 +563,7 @@ pub enum Expression {
         elem: Identifier,
         range: Identifier,
         domain: Identifier,
-        formula: Box<Expression>,
+        formula: Rc<Expression>,
         type_: RuntimeType,
         #[derivative(PartialEq = "ignore", Hash = "ignore")]
         info: SourcePos,

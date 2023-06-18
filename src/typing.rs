@@ -1,3 +1,4 @@
+use std::rc::Rc;
 /// Type analysis of an OOX abstract syntax tree
 ///
 /// The input is an abstract syntax tree (CompilationUnit) with (most) of its types set to UnknownType.
@@ -5,7 +6,7 @@
 /// If type incorrect, a TypeError is returned instead.
 ///
 /// Also any method invocations in the bodies of the methods are resolved, by assigning a reference to the invoked method(s).
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap};
 
 use itertools::Either;
 use queues::IsQueue;
@@ -210,11 +211,11 @@ fn type_specification(
 ) -> Result<Specification, TypeError> {
     if let Some((requires, type_guard)) = specification.requires.clone() {
         let requires = type_expression(requires, env, st)?;
-        matches_type(&requires, RuntimeType::BoolRuntimeType, st)?;
+        matches_type(requires.as_ref(), RuntimeType::BoolRuntimeType, st)?;
         if let Some(type_guard) = type_guard.as_ref() {
             matches_type(type_guard, RuntimeType::BoolRuntimeType, st)?;
         }
-        specification.requires = Some((Rc::new(requires), type_guard));
+        specification.requires = Some((requires, type_guard));
     }
 
     if let Some((ensures, type_guard)) = specification.ensures.clone() {
@@ -224,22 +225,22 @@ fn type_specification(
 
             env.declare_var(retval(), method_type)?;
             let ensures = type_expression(ensures, &mut env, st)?;
-            matches_type(&ensures, RuntimeType::BoolRuntimeType, st)?;
+            matches_type(ensures.as_ref(), RuntimeType::BoolRuntimeType, st)?;
             if let Some(type_guard) = type_guard.as_ref() {
                 matches_type(type_guard, RuntimeType::BoolRuntimeType, st)?;
             }
-            specification.ensures = Some((Rc::new(ensures), type_guard));
+            specification.ensures = Some((ensures, type_guard));
         }
     }
 
     if let Some((exceptional, type_guard)) = specification.exceptional.clone() {
         let exceptional = type_expression(exceptional, env, st)?;
-        matches_type(&exceptional, RuntimeType::BoolRuntimeType, st)?;
+        matches_type(exceptional.as_ref(), RuntimeType::BoolRuntimeType, st)?;
 
         if let Some(type_guard) = type_guard.as_ref() {
             matches_type(type_guard, RuntimeType::BoolRuntimeType, st)?;
         }
-        specification.exceptional = Some((Rc::new(exceptional), type_guard));
+        specification.exceptional = Some((exceptional, type_guard));
     }
 
     Ok(specification)
@@ -251,7 +252,7 @@ fn optional_type_expression(
     st: &SymbolTable,
 ) -> Result<Option<Rc<Expression>>, TypeError> {
     if let Some(expr) = expression {
-        type_expression(expr, env, st).map(Rc::new).map(Some)
+        type_expression(expr, env, st).map(Some)
     } else {
         Ok(None)
     }
@@ -292,19 +293,19 @@ fn type_statement(
             Statement::Skip => statements.push(Statement::Skip),
             Statement::Assert { assertion, info } => {
                 let assertion = type_expression(assertion.into(), env, st)?;
-                matches_type(&assertion, RuntimeType::BoolRuntimeType, st)?;
+                matches_type(assertion.as_ref(), RuntimeType::BoolRuntimeType, st)?;
                 statements.push(Statement::Assert { assertion, info });
             }
             Statement::Assume { assumption, info } => {
                 if let Either::Left(assumption) = &assumption {
                     let assumption = type_expression(assumption.clone(), env, st)?;
-                    matches_type(&assumption, RuntimeType::BoolRuntimeType, st)?;
+                    matches_type(assumption.as_ref(), RuntimeType::BoolRuntimeType, st)?;
                 }
                 statements.push(Statement::Assume { assumption, info });
             }
             Statement::While { guard, body, info } => {
                 let guard = type_expression(guard.into(), env, st)?;
-                matches_type(&guard, RuntimeType::BoolRuntimeType, st)?;
+                matches_type(guard.as_ref(), RuntimeType::BoolRuntimeType, st)?;
                 let mut env = env.clone();
                 let body = type_statement(
                     *body,
@@ -329,8 +330,8 @@ fn type_statement(
                 let guard = match guard {
                     Either::Left(guard) => {
                         let guard = type_expression(guard.clone(), env, st)?;
-                        matches_type(&guard, RuntimeType::BoolRuntimeType, st)?;
-                        Either::Left(Rc::new(guard))
+                        matches_type(guard.as_ref(), RuntimeType::BoolRuntimeType, st)?;
+                        Either::Left(guard)
                     }
                     type_guard => type_guard,
                 };
@@ -375,13 +376,13 @@ fn type_statement(
                         info: current_method.get_position(),
                     };
                     statements.push(Statement::Return {
-                        expression: Some(this_var),
+                        expression: Some(Rc::new(this_var)),
                         info,
                     })
                 }
                 (false, Some(return_value)) => {
                     let return_value = type_expression(return_value.into(), env, st)?;
-                    matches_type(&return_value, current_method.type_of(), st)?;
+                    matches_type(return_value.as_ref(), current_method.type_of(), st)?;
                     statements.push(Statement::Return {
                         expression: Some(return_value),
                         info,
@@ -494,7 +495,7 @@ fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Lhs
                 error::unification_error(RuntimeType::ARRAYRuntimeType, type_.clone(), info)
             })?;
             let index = type_expression(index, env, st)?;
-            matches_type(&index, RuntimeType::IntRuntimeType, st)?;
+            matches_type(index.as_ref(), RuntimeType::IntRuntimeType, st)?;
             Ok(Lhs::LhsElem {
                 var,
                 index: index.into(),
@@ -549,7 +550,7 @@ fn type_rhs(
                 error::unification_error(RuntimeType::ARRAYRuntimeType, var_type.clone(), info)
             })?;
             let index = type_expression(index.into(), env, st)?;
-            matches_type(&index, RuntimeType::IntRuntimeType, st)?;
+            matches_type(index.as_ref(), RuntimeType::IntRuntimeType, st)?;
             Ok(Rhs::RhsElem {
                 var,
                 index,
@@ -576,11 +577,11 @@ fn type_rhs(
         } => {
             let sizes = sizes
                 .into_iter()
-                .map(|size_expr| type_expression(size_expr.into(), env, st))
+                .map(|size_expr| type_expression(size_expr, env, st))
                 .collect::<Result<Vec<_>, _>>()?;
 
             for size in sizes.iter() {
-                matches_type(size, RuntimeType::IntRuntimeType, st)?;
+                matches_type(size.as_ref(), RuntimeType::IntRuntimeType, st)?;
             }
             let type_ =
                 sizes
@@ -628,7 +629,7 @@ fn type_invocation(
         } => {
             let arguments = arguments
                 .into_iter()
-                .map(|arg| type_expression(arg, env, st).map(Rc::new))
+                .map(|arg| type_expression(arg, env, st))
                 .collect::<Result<Vec<_>, _>>()?;
             // if lhs is not found as a variable, assume this is a static invocation.
             let lhs_type = env.get_var_type(&lhs).ok();
@@ -684,7 +685,7 @@ fn type_invocation(
         } => {
             let arguments = arguments
                 .into_iter()
-                .map(|arg| type_expression(arg, env, st).map(Rc::new))
+                .map(|arg| type_expression(arg, env, st))
                 .collect::<Result<Vec<_>, _>>()?;
             let resolved = resolver::resolve_constructor(&class_name, &arguments, st)?;
             Ok(Invocation::InvokeConstructor {
@@ -699,10 +700,10 @@ fn type_invocation(
         } => {
             let arguments = arguments
                 .into_iter()
-                .map(|arg| type_expression(arg, env, st).map(Rc::new))
+                .map(|arg| type_expression(arg, env, st))
                 .collect::<Result<Vec<_>, _>>()?;
             let class_name = declaration.name();
-            let resolved = resolver::resolve_super_constructor(class_name, &arguments, st)?;
+            let resolved = resolver::resolve_super_constructor(class_name, arguments.as_ref(), st)?;
             Ok(Invocation::InvokeSuperConstructor {
                 arguments,
                 resolved: Some(resolved),
@@ -718,7 +719,7 @@ fn type_expression(
     expression: Rc<Expression>,
     env: &mut TypeEnvironment,
     st: &SymbolTable,
-) -> Result<Expression, TypeError> {
+) -> Result<Rc<Expression>, TypeError> {
     let expr = match expression.as_ref().clone() {
         Expression::Forall {
             elem,
@@ -739,14 +740,14 @@ fn type_expression(
             env.declare_var(elem.clone(), inner_type)?;
             env.declare_var(range.clone(), RuntimeType::IntRuntimeType)?;
             let formula = type_expression(formula.into(), &mut env, st)?;
-            matches_type(&formula, RuntimeType::BoolRuntimeType, st)?;
+            matches_type(formula.as_ref(), RuntimeType::BoolRuntimeType, st)?;
 
             Expression::Forall {
                 type_: RuntimeType::BoolRuntimeType,
                 elem,
                 range,
                 domain,
-                formula: Box::new(formula),
+                formula,
                 info,
             }
         }
@@ -769,14 +770,14 @@ fn type_expression(
             env.declare_var(elem.clone(), inner_type)?;
             env.declare_var(range.clone(), RuntimeType::IntRuntimeType)?;
             let formula = type_expression(formula.into(), &mut env, st)?;
-            matches_type(&formula, RuntimeType::BoolRuntimeType, st)?;
+            matches_type(formula.as_ref(), RuntimeType::BoolRuntimeType, st)?;
 
             Expression::Exists {
                 type_: RuntimeType::BoolRuntimeType,
                 elem,
                 range,
                 domain,
-                formula: Box::new(formula),
+                formula,
                 info,
             }
         }
@@ -804,11 +805,11 @@ fn type_expression(
             let value = type_expression(value, env, st)?;
             let type_ = match un_op {
                 UnOp::Negative => {
-                    matches_type(&value, RuntimeType::NUMRuntimeType, st)?;
+                    matches_type(value.as_ref(), RuntimeType::NUMRuntimeType, st)?;
                     value.type_of()
                 }
                 UnOp::Negate => {
-                    matches_type(&value, RuntimeType::BoolRuntimeType, st)?;
+                    matches_type(value.as_ref(), RuntimeType::BoolRuntimeType, st)?;
                     RuntimeType::BoolRuntimeType
                 }
             };
@@ -842,7 +843,7 @@ fn type_expression(
         Expression::Conditional { .. } => unreachable!("Ite in analysis phase"),
         // instance_of@Expression::InstanceOf { .. } => instance_of,
     };
-    Ok(expr)
+    Ok(expr.into())
 }
 
 /// Assumes exp1 and exp2 already have been typechecked.

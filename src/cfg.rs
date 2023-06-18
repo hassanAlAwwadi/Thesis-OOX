@@ -27,7 +27,7 @@ pub enum CFGStatement {
     /// Can be any Statement minus any of the branching statements in this enum
     Statement(Statement),
     Ite(Either<Rc<Expression>, TypeExpr>, u64, u64),
-    While(Expression, u64),
+    While(Rc<Expression>, u64),
     TryCatch(u64, u64, u64, u64), // l1: entry try body, l2: exit try body, l3: entry catch body, l4: exit catch body
     TryEntry(u64),
     TryExit,
@@ -125,11 +125,11 @@ fn member_cfg(
             v.push((
                 *i,
                 CFGStatement::Statement(Statement::Return {
-                    expression: Expression::Var {
+                    expression: Rc::new(Expression::Var {
                         var: this_str(),
                         type_: member.type_of(),
                         info: SourcePos::UnknownPosition,
-                    }
+                    })
                     .into(),
                     info: SourcePos::UnknownPosition,
                 }),

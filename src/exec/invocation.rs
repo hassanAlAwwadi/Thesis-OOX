@@ -398,7 +398,7 @@ fn push_stack_frame<'a, P>(
         .map(|(p, e)| (p.name.clone(), evaluate(state, e, en)))
         .collect();
     let stack_frame = StackFrame {
-        pc: return_point,
+        return_pc: return_point,
         returning_lhs: lhs,
         params,
         current_member: method,

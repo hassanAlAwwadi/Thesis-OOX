@@ -51,7 +51,7 @@ impl Stack {
 
 #[derive(Clone)]
 pub struct StackFrame {
-    pub pc: u64,
+    pub return_pc: u64,
     /// The left hand side operation of the method call; `int x := o.f();`. Needed here to assign the method result to.
     pub returning_lhs: Option<Lhs>,
     pub params: HashMap<Identifier, Rc<Expression>>,
@@ -61,8 +61,8 @@ pub struct StackFrame {
 impl std::fmt::Debug for StackFrame {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StackFrame")
-            .field("pc", &self.pc)
-            .field("returning_lhs", &self.returning_lhs)
+            .field("return_pc", &self.return_pc)
+            .field("returning_lhs", &self.returning_lhs.as_ref().map(|lhs| ToString::to_string(&lhs)))
             .field("params", &self.params)
             // .field("current_member", &self.current_member)       // omitted because the whole body will be logged.
             .finish()

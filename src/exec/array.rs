@@ -60,7 +60,7 @@ pub(crate) fn array_initialisation(
 pub(crate) fn exec_array_construction(
     state: &mut State,
     array_type: &NonVoidType,
-    sizes: &[Expression],
+    sizes: &[Rc<Expression>],
     type_: &RuntimeType,
     en: &mut impl Engine,
 ) -> Rc<Expression> {
@@ -69,7 +69,7 @@ pub(crate) fn exec_array_construction(
     assert!(sizes.len() == 1, "Support for only 1D arrays");
     // int[][] a = new int[10][10];
 
-    let size = evaluate_as_int(state, Rc::new(sizes[0].clone()), en)
+    let size = evaluate_as_int(state, sizes[0].clone(), en)
         .expect_right("no symbolic array sizes");
 
     let array = (0..size)

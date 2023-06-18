@@ -39,7 +39,7 @@ where
         guard: guard.into(),
         true_: e1.into(),
         false_: e2.into(),
-        type_: RuntimeType::ANYRuntimeType,
+        type_: RuntimeType::BoolRuntimeType,
         info: SourcePos::UnknownPosition,
     }
 }
