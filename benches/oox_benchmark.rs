@@ -15,6 +15,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         time_budget: 900,
         log_path: "./logs/log.txt",
         discard_logs: true,
+        prune_path_z3: false,
+        local_solving_threshold: Some(1000),
     };
     group.sample_size(10);
     group.sampling_mode(SamplingMode::Flat);

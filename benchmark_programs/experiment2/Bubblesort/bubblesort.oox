@@ -5,14 +5,24 @@ class Point {
        this.x := x ;
        this.y := y ;
     }
+
+    // operator `<=`
+    bool lessThanOnX(Point other) {
+        int thisX := this.x;
+        int otherX := other.x;
+        return thisX <= otherX;
+    }
 }
 
-// interface Sorter {
-//     Point[] sort(Point[] array);
-// }
 
-class SorterA {
-    static Point[] sort(Point[] array)
+interface Sorter {
+    Point[] sort(Point[] array);
+}
+
+class BubbleSort implements Sorter {
+    BubbleSort() {}
+
+    Point[] sort(Point[] array)
         requires(array != null)
         ensures(true)
         exceptional(false)
@@ -41,16 +51,81 @@ class SorterA {
     }
 }
 
+class MergeSort implements Sorter {
+    MergeSort() {}
+    Point[] sort(Point[] array)
+        requires(!(array == null))
+        // ensures(forall v, i : retval : forall w, j : retval : i < j ==> v <= w)
+        exceptional(false)
+    {
+        MergeSort.mergesort(array, 0, #array - 1);
+        return array;
+    }
+
+    static void mergesort(Point[] array, int left, int right)
+        requires(array != null)
+        exceptional(false)
+    {
+        // if (left >= right) {  // error , should be <
+        if (left < right) {
+            int middle := (left + right) / 2;
+            MergeSort.mergesort(array, left, middle);
+            MergeSort.mergesort(array, middle + 1, right);
+            MergeSort.merge(array, left, middle, right);
+        }
+    }
+
+    static void merge(Point[] array, int left, int middle, int right)
+        requires(array != null)
+        exceptional(false)
+    {
+        Point[] temp := new Point[right - left + 1];
+        int i := left;
+        int j := middle + 1;
+        int k := 0;
+        while (i <= middle && j <= right) {
+            Point arrayI := array[i];
+            Point arrayJ := array[j];
+            bool arrayILessThanArrayJ := arrayI.lessThanOnX(arrayJ);
+            if (arrayILessThanArrayJ) {
+                temp[k] := array[i];
+                k := k + 1;
+                i := i + 1;
+            } else {
+                temp[k] := array[j];
+                k := k + 1;
+                j := j + 1;
+            }
+        }
+        while (i <= middle) {
+            temp[k] := array[i];
+            k := k + 1;
+            i := i + 1;
+        }
+
+        while (j <= right) {
+            temp[k] := array[j];
+            k := k + 1;
+            j := j + 1;
+        }
+        i := left;
+        while (i <= right) {
+            array[i] := temp[i - left];
+            i := i + 1;
+        }
+    }
+}
+
 
 class Main
 {
     // // A Bubblesort algorithm.
     // static 
 
-    static void test(Point[] array)
+    static void test(Point[] array, Sorter sorter)
         requires(array != null)
     {
-        array := SorterA.sort(array);
+        array := sorter.sort(array);
 
         // assert it is sorted
         int k := 1 ;

@@ -395,7 +395,7 @@ class Test {
         return list;
     }
 
-    // infinite loop if #elements == 0,
+    // infinite loop if requires #elements == 0,
     // doesn't work if #elements > 3, because there won't be any branches since minimum array length is 3.
     static void test_symbolic(int[] elements)
         requires(elements != null && #elements == 3)
