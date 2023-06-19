@@ -13,6 +13,9 @@ You can find the arguments required by passing `--help` like this:
 Running in release is 5-30 times faster depending on the program, but will not log any debug logs to the log file.
 `cargo run --release -- "./examples/intLinkedList.oox" --heuristic depth-first-search --function Node.test2 --k 50`
 
+# Coverage
+The coverage is displayed when running the programs. The coverage is computed over the reachable program statements. Sometimes it may not be possible to reach 100% due to infeasible paths. 
+You can confirm this by using the `--visualize-coverage` command which will print the program to `coverage_visualized.txt` and show for each statement the coverage.
 
 # Tests
 `cargo test --release`

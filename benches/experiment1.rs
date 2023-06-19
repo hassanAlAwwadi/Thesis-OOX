@@ -1,11 +1,9 @@
-use criterion::{criterion_group, criterion_main, Criterion, SamplingMode};
+use criterion::{criterion_group, criterion_main, Criterion, SamplingMode, BenchmarkGroup, measurement::{Measurement}};
 use lib::{verify, Options};
 
-pub fn criterion_benchmark(c: &mut Criterion) {
-    let k = 40;
-    let mut group = c.benchmark_group("experiment1");
-    let options = Options {
-        k,
+fn options() -> Options<'static> {
+    Options {
+        k: 40,
         quiet: true,
         with_exceptional_clauses: true,
         heuristic: lib::Heuristic::DepthFirstSearch,
@@ -17,7 +15,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         discard_logs: true,
         prune_path_z3: false,
         local_solving_threshold: Some(1000),
-    };
+    }
+}
+
+fn experiment1<'a, M: Measurement>(c: &'a mut Criterion<M>) -> BenchmarkGroup<'a, M>{
+    let options = options();
+    let mut group = c.benchmark_group("experiment1");
     group.sample_size(10);
     group.sampling_mode(SamplingMode::Flat);
     group.bench_function("One Node", |b| {
@@ -60,8 +63,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             )
         })
     });
-    // group.bench_function("Five Nodes", |b| b.iter(|| verify("./benchmark_programs/experiment1/5Node.oox", "Main", "test2", k)));
+    group
 }
 
-criterion_group!(benches, criterion_benchmark);
+
+criterion_group!(benches, experiment1);
 criterion_main!(benches);

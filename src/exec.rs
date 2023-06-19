@@ -1515,6 +1515,7 @@ pub enum Heuristic {
     RoundRobinMD2URandomPath,
 }
 
+/// For a description of each option, see Commands in main.rs
 #[derive(Copy, Clone)]
 pub struct Options<'a> {
     pub k: u64,
@@ -1546,7 +1547,7 @@ impl Default for Options<'_> {
             symbolic_array_size: 3,
             time_budget: 900,
             log_path: "./logs/log.txt",
-            discard_logs: false,
+            discard_logs: true,
             prune_path_z3: false,
             local_solving_threshold: Some(1000),
         }

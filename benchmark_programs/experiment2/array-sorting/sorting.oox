@@ -38,7 +38,6 @@ class BubbleSort implements Sorter {
                 assume v != null ;
                 int a := u.x ;
                 int b := v.x ;
-                // if (a > b) { // bug should be a<b
                 if (a < b) {
                     array[i] := v;
                     array[i - 1] := u;
@@ -51,11 +50,12 @@ class BubbleSort implements Sorter {
     }
 }
 
+
+
 class MergeSort implements Sorter {
     MergeSort() {}
     Point[] sort(Point[] array)
         requires(!(array == null))
-        // ensures(forall v, i : retval : forall w, j : retval : i < j ==> v <= w)
         exceptional(false)
     {
         MergeSort.mergesort(array, 0, #array - 1);
@@ -85,7 +85,9 @@ class MergeSort implements Sorter {
         int k := 0;
         while (i <= middle && j <= right) {
             Point arrayI := array[i];
+            assume arrayI != null;
             Point arrayJ := array[j];
+            assume arrayJ != null;
             bool arrayILessThanArrayJ := arrayI.lessThanOnX(arrayJ);
             if (arrayILessThanArrayJ) {
                 temp[k] := array[i];
@@ -116,26 +118,23 @@ class MergeSort implements Sorter {
     }
 }
 
-
 class Main
 {
-    // // A Bubblesort algorithm.
-    // static 
-
-    static void test(Point[] array, Sorter sorter)
+    static void test(Point[] array, MergeSort sorter)
         requires(array != null)
     {
+        int N := 5;
         array := sorter.sort(array);
 
-        // assert it is sorted
-        int k := 1 ;
-        while (k < #array) {
-           Point u := array[k];
-           Point v := array[k - 1];
-           int a := u.x ;
-           int b := v.x ;
-           assert b <= a ;
-           k := k+1 ;
+
+        // assert it is sorted on x
+        int[] xs := new int[N];
+        int ix := 0;
+        while (ix < #array) {
+            Point arrayI := array[ix];
+            xs[ix] := arrayI.x;
+            ix := ix + 1;
         }
+        assert forall v , i : xs : (forall w , j : xs : i < j && j < #array ==> v <= w);
     }
 }

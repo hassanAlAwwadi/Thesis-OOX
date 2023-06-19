@@ -2,6 +2,7 @@ class Main {
     static void test(int x) {
         if (x == 0) {
             if (x == 1) {
+                // the option prune-path-z3 will prune this path, and as a result not visit this body.
                 int i := 0;
                 i := 1;
                 i := 2;

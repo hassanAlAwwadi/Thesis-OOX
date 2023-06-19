@@ -55,13 +55,16 @@ enum Commands {
         log_path: String,
 
         /// Prune paths using Z3. This may alter performance or not work well with some heuristics. But it will ensure we don't visit unfeasible paths.
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = false)]
         prune_path_z3: bool,
 
         /// Local concretization solving threshold for symbolic variables. If there are more than this threshold combinations of variables we leave it to Z3.
-        /// I believe there is a bug here so it is defaulted to None, meaning all work is left to Z3.
-        #[arg(long, default_value = None)]
-        local_solving_threshold: Option<u128>
+        #[arg(long, default_value = "1000")]
+        local_solving_threshold: u128,
+
+        /// Turn off local solving threshold
+        #[arg(long, default_value_t = false)]
+        no_local_solving_threshold: bool
     },
     /// Parse and typecheck an OOX source file
     Check {
@@ -89,7 +92,8 @@ fn main() -> Result<(), String> {
             time_budget,
             log_path,
             prune_path_z3,
-            local_solving_threshold
+            local_solving_threshold,
+            no_local_solving_threshold
         } => {
             if let Some((class_name, method_name)) = function.split('.').collect_tuple() {
                 let options = Options {
@@ -104,7 +108,7 @@ fn main() -> Result<(), String> {
                     log_path: &log_path,
                     discard_logs: false,
                     prune_path_z3,
-                    local_solving_threshold
+                    local_solving_threshold: if no_local_solving_threshold { None } else { Some(local_solving_threshold) }
                 };
                 verify(source_paths.as_slice(), class_name, method_name, options)?;
             } else {
