@@ -152,13 +152,16 @@ class Node {
 }
 
 class Main {
+    // Here I am testing the depth that the program can reach and still find the bug, given enough k.
+    // However if the bug is not found we explore all paths and this explodes.
+    // Also these bugs are not found with Depth first search, but are with other heuristics.
 
+    // Found with k = 300
     static void test(Node node) {
         int length := node.length();
-        if (length > 1) {
-            bool equalsItself := node.equals(node);
-            assert false;
-            assert equalsItself;
+        bool equalsItself := node.equals(node);
+        if (length > 2) {
+            assert !equalsItself;
         }
     }
 
@@ -168,6 +171,7 @@ class Main {
         assert equalsCloned;
     }
 
+    // found with k = 700 
     static void test3(Node node)
         requires(node != null) {
         Node nodeCloned := node.cloned();
@@ -175,7 +179,10 @@ class Main {
         Node reversedTwice := reversed.reversed2();
         bool reversedTwiceIsEqualToOriginal := node.equals(reversedTwice);
         
-        assert reversedTwiceIsEqualToOriginal;
+        int length := node.length();
+        if (length > 3) {
+            assert !reversedTwiceIsEqualToOriginal; // will be found with random path but not by dfs (in time before memory explodes).
+        }
     }
 
     // static void program(Node a, Node b)

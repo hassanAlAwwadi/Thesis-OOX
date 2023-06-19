@@ -1,12 +1,11 @@
+/// Taken from the ooxClone repository.
+
 class Main {
     static int[] sort(int[] array)
         requires(!(array == null))
         ensures(forall v, i : retval : forall w, j : retval : i < j ==> v <= w)
         exceptional(false)
     {
-        // if (#array <= 1) {
-        //     return array;
-        // }
         int x := #array;
         int y := x - 1;
         Main.mergesort(array, 0, y);

@@ -55,7 +55,7 @@ enum Commands {
         log_path: String,
 
         /// Prune paths using Z3. This may alter performance or not work well with some heuristics. But it will ensure we don't visit unfeasible paths.
-        #[arg(long, default_value_t = false)]
+        #[arg(long, default_value_t = true)]
         prune_path_z3: bool,
 
         /// Local concretization solving threshold for symbolic variables. If there are more than this threshold combinations of variables we leave it to Z3.

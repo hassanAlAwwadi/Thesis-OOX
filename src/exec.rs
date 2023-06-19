@@ -540,7 +540,7 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl E
 
                 n_combinations > local_solving_threshold
             } else {
-                false
+                true
             };
 
 
@@ -1534,6 +1534,8 @@ pub struct Options<'a> {
 
 impl Default for Options<'_> {
     fn default() -> Self {
+        // These settings are used during testing (by default). 
+        // The default settings used when running from the CLI can be found in main.rs `Commands::Verify`
         Self {
             k: 40,
             quiet: false,
@@ -1546,7 +1548,7 @@ impl Default for Options<'_> {
             log_path: "./logs/log.txt",
             discard_logs: false,
             prune_path_z3: false,
-            local_solving_threshold: Some(100),
+            local_solving_threshold: Some(1000),
         }
     }
 }
