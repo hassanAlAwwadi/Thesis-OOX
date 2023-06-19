@@ -26,6 +26,7 @@ mod symbol_table;
 mod typing;
 
 mod statistics;
+mod mutation;
 
 pub use language::*;
 
