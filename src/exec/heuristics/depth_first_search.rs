@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::{HashMap, BTreeMap}, rc::Rc};
 
 use slog::Logger;
 
@@ -65,8 +65,8 @@ pub(crate) fn sym_exec(
                         }
                     }
                 }
-                // Could be a method call, add children in random order
-                for (_pc, values) in new_states {
+                // Could be a method call, add children in order of path id
+                for (_path_id, values) in new_states.into_iter().collect::<BTreeMap<_, _>>() {
                     remaining_states.extend(values);
                 }
             }
