@@ -184,7 +184,7 @@ pub trait Engine {
     fn clone_state_with_new_path_id(&mut self, state: &State) -> State {
         let mut new_state = state.clone();
         new_state.path_id = self.next_path_id();
-        new_state.logger = self.new_logger(state.path_id);
+        new_state.logger = self.new_logger(new_state.path_id);
         new_state
     }
 
