@@ -44,6 +44,63 @@ class IntArray implements List {
     }
 }
 
+
+class Node implements List {
+    int value ;
+    Node next ;
+
+    int get(int i) {
+        if (i == 0) {
+            int value := this.value;
+            return value;
+        } else if (i < 0) {
+            throw "Out of range";
+        } else {
+            Node n := this.next;
+            int value := n.get(i - 1);
+            return value;
+        }
+    }
+
+    void set(int i, int element) {
+        if (i == 0) {
+            this.value := element;
+        } else if (i < 0) {
+            throw "Out of range";
+        } else {
+            Node n := this.next;
+            n.set(i - 1, element);
+        }
+    }
+
+    int length() {
+        Node n := this.next ;
+        if (n==null) return 1 ;
+        else {
+            int k := n.length() ;
+            return k+1 ;
+        }
+    }
+
+    int[] toArray() {
+        int length := this.length();
+        int[] a := new int[length];
+        int i := 0;
+        Node n := this;
+        while (i < length) {
+            int value := n.value;
+            a[i] := value;
+            n := n.next;
+            i := i + 1;
+        }
+        return a;
+    }
+
+    bool repOk() {
+        return true;
+    }
+}
+
 interface Sorter {
     int[] sort(int[] array);
 }
