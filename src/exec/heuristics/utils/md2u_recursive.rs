@@ -692,7 +692,7 @@ mod tests {
         let file_content = std::fs::read_to_string(path).unwrap();
 
         let mut coverage = HashMap::new();
-        let c = insert_exceptional_clauses(parse_program(&file_content, 0).unwrap());
+        let c = insert_exceptional_clauses(parse_program(&file_content, 0, false).unwrap());
 
         let symbol_table = SymbolTable::from_ast(&c).unwrap();
         let c = type_compilation_unit(c, &symbol_table).unwrap();

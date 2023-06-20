@@ -2,10 +2,10 @@ use pom::parser::*;
 
 use super::*;
 
-pub(super) fn interface<'a>() -> Parser<'a, Token<'a>, Interface> {
+pub(super) fn interface<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Interface> {
     ((keyword("interface") * identifier())
         + extends_many().opt().map(|x| x.unwrap_or(Vec::new()))
-        + punct("{") * interface_member().repeat(0..)
+        + punct("{") * interface_member(without_assumptions).repeat(0..)
         - punct("}"))
     .map(|((name, extends), members)| Interface {
         name,
@@ -14,10 +14,10 @@ pub(super) fn interface<'a>() -> Parser<'a, Token<'a>, Interface> {
     })
 }
 
-fn interface_member<'a>() -> Parser<'a, Token<'a>, InterfaceMember> {
+fn interface_member<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, InterfaceMember> {
     let member = type_() + identifier() + parameters();
 
-    (member + (punct(";").map(|_| Option::None) | body().map(Option::Some))).map(
+    (member + (punct(";").map(|_| Option::None) | body(without_assumptions).map(Option::Some))).map(
         |(((type_, name), parameters), body)| {
             match body {
                 Some(body) => InterfaceMember::DefaultMethod(
@@ -58,7 +58,7 @@ fn parse_interface() {
     dbg!(&tokens);
     let as_ref = tokens.as_slice();
     // //dbg!(as_ref);
-    let c = (interface() - end()).parse(&as_ref);
+    let c = (interface(false) - end()).parse(&as_ref);
     // //dbg!(&c);
     c.unwrap(); // should not panic;
 }

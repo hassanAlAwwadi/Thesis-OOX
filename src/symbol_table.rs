@@ -211,7 +211,7 @@ impl SymbolTable {
     }
 
     pub fn lookup_field(&self, class_name: &Identifier, field: &str) -> Option<&Field> {
-        self.class_to_fields[class_name]
+        self.class_to_fields.get(class_name).unwrap_or_else(|| panic!("{} was not found", class_name))
             .iter()
             .find(|(f, _)| *f == field)
     }

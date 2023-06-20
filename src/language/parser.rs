@@ -20,22 +20,24 @@ use super::lexer::*;
 
 mod interface;
 
-/// Main entrypoint for parsing a program,
-pub fn parse(tokens: &[Token]) -> Result<CompilationUnit, pom::Error> {
-    (program() - end()).parse(tokens)
+/// Main entrypoint for parsing a program.
+/// 
+/// `without_assumptions` will not insert assumptions, useful for generating mutations.
+pub fn parse(tokens: &[Token], without_assumptions: bool) -> Result<CompilationUnit, pom::Error> {
+    (program(without_assumptions) - end()).parse(tokens)
 }
 
-fn program<'a>() -> Parser<'a, Token<'a>, CompilationUnit> {
-    declaration().repeat(0..).map(|members| CompilationUnit {
+fn program<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, CompilationUnit> {
+    declaration(without_assumptions).repeat(0..).map(|members| CompilationUnit {
         members: members.into_iter().collect(),
     })
 }
 
-fn declaration<'a>() -> Parser<'a, Token<'a>, Declaration> {
+fn declaration<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Declaration> {
     let class = ((keyword("class") + identifier())
         + extends1().opt()
         + implements().opt()
-        + (punct("{") * member().repeat(0..) - punct("}")))
+        + (punct("{") * member(without_assumptions).repeat(0..) - punct("}")))
     .map(|((((class_token, name), extends), implements), members)| {
         Declaration::Class(
             Class {
@@ -49,11 +51,11 @@ fn declaration<'a>() -> Parser<'a, Token<'a>, Declaration> {
         )
     });
 
-    class | interface().map(Rc::new).map(Declaration::Interface)
+    class | interface(without_assumptions).map(Rc::new).map(Declaration::Interface)
 }
 
-fn member<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
-    field() | constructor() | method().name("method")
+fn member<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, DeclarationMember> {
+    field() | constructor(without_assumptions) | method(without_assumptions).name("method")
 
     // empty().map(|_| vec![])
 }
@@ -66,10 +68,10 @@ fn field<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     })
 }
 
-fn method<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
+pub(crate) fn method<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, DeclarationMember> {
     let is_static = keyword("static").opt().map(|x| x.is_some());
 
-    (is_static + type_() + identifier() + parameters() + specification() + body()).map(
+    (is_static + type_() + identifier() + parameters() + specification() + body(without_assumptions)).map(
         |(((((is_static, return_type), name), params), specification), body)| {
             DeclarationMember::Method(
                 Method {
@@ -87,10 +89,10 @@ fn method<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     )
 }
 
-fn constructor<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
+fn constructor<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, DeclarationMember> {
     let p = identifier() + parameters();
     // let specification = todo!();
-    let body = constructor_body();
+    let body = constructor_body(without_assumptions);
 
     (p + specification() + body).map(|(((name, params), specification), body)| {
         DeclarationMember::Constructor(
@@ -113,17 +115,17 @@ fn constructor<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
     })
 }
 
-fn body<'a>() -> Parser<'a, Token<'a>, Statement> {
-    (punct("{") * statement().opt() - punct("}")).map(|s| s.unwrap_or(Statement::Skip))
+fn body<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Statement> {
+    (punct("{") * statement(without_assumptions).opt() - punct("}")).map(|s| s.unwrap_or(Statement::Skip))
 }
 
-fn constructor_body<'a>() -> Parser<'a, Token<'a>, Statement> {
-    (punct("{") * statement().opt() - punct("}")).map(|s| s.unwrap_or(Statement::Skip))
+fn constructor_body<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Statement> {
+    (punct("{") * statement(without_assumptions).opt() - punct("}")).map(|s| s.unwrap_or(Statement::Skip))
 }
 
-fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
+pub fn statement<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Statement> {
     let declaration = (nonvoidtype() + identifier() + (punct(":=") * rhs()).opt() - punct(";"))
-        .map(|((type_, var), rhs)| {
+        .map(move |((type_, var), rhs)| {
             if let Some(rhs) = rhs {
                 let assignment = Statement::Assign {
                     info: rhs.get_position(),
@@ -134,7 +136,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
                     },
                     rhs: rhs.clone(),
                 };
-                let stat2 = class_cast_rhs(&rhs, assignment);
+                let stat2 = class_cast_rhs(&rhs, assignment, without_assumptions);
                 Statement::Seq {
                     stat1: Box::new(Statement::Declare {
                         info: type_.get_position(),
@@ -154,13 +156,13 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
 
     // let declaration = (nonvoidtype() + identifier() - punct(";"))
     //     .map(|(type_, var)| Statement::Declare { type_, var });
-    let assignment = (lhs() - punct(":=") + rhs() - punct(";")).map(|(lhs, rhs)| {
+    let assignment = (lhs() - punct(":=") + rhs() - punct(";")).map(move |(lhs, rhs)| {
         let assignment = Statement::Assign {
             info: lhs.get_position(),
             lhs,
             rhs: rhs.clone(),
         };
-        class_cast_rhs(&rhs, assignment)
+        class_cast_rhs(&rhs, assignment, without_assumptions)
     });
     let call_ = (invocation() - punct(";")).map(|invocation| Statement::Call {
         info: invocation.get_position(),
@@ -181,8 +183,8 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
     );
 
     let while_ = (keyword("while") * punct("(") * expression() - punct(")")
-        + ((punct("{") * call(statement).opt() - punct("}")) | call(statement).map(Some)))
-    .map(|(guard, body)| create_while(Rc::new(guard), body));
+        + ((punct("{") * call(move || statement(without_assumptions)).opt() - punct("}")) | call(move|| statement(without_assumptions)).map(Some)))
+    .map(move |(guard, body)| create_while(Rc::new(guard), body, without_assumptions));
 
     let continue_ = (keyword("continue") - punct(";")).map(|t| Statement::Continue {
         info: t.get_position(),
@@ -213,17 +215,17 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         }
     });
     let try_ = (keyword("try") - punct("{")
-        + call(statement)
+        + call(move || statement(without_assumptions))
         + punct("}")
             * keyword("catch")
-            * (punct("{") * call(statement).opt().map(|s| s.unwrap_or(Statement::Skip))
+            * (punct("{") * call(move || statement(without_assumptions)).opt().map(|s| s.unwrap_or(Statement::Skip))
                 - punct("}")))
     .map(|((try_token, try_body), catch_body)| Statement::Try {
         try_body: Box::new(try_body),
         catch_body: Box::new(catch_body),
         info: try_token.get_position(),
     });
-    let block = (punct("{") * call(statement).opt() - punct("}"))
+    let block = (punct("{") * call(move || statement(without_assumptions)).opt() - punct("}"))
         // .map(|body| Statement::Block {
         //     body: Box::new(body),
         // });
@@ -237,14 +239,14 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
         | assert
         | assume
         | while_
-        | ite()
+        | ite(without_assumptions)
         | continue_
         | break_
         | return_
         | throw
         | try_
         | block;
-    (p_statement + (call(statement)).opt()).map(|(stmt, other_statement)| {
+    (p_statement + (call(move || statement(without_assumptions))).opt()).map(|(stmt, other_statement)| {
         if let Some(other_statement) = other_statement {
             return match stmt {
                 Statement::Seq { stat1, stat2 } => Statement::Seq {
@@ -265,7 +267,7 @@ fn statement<'a>() -> Parser<'a, Token<'a>, Statement> {
 }
 
 /// Edge case for class_cast which inserts the exceptional clause here.
-fn class_cast_rhs(rhs: &Rhs, assignment: Statement) -> Statement {
+fn class_cast_rhs(rhs: &Rhs, assignment: Statement, without_assumptions: bool) -> Statement {
     if let Rhs::RhsCast { cast_type, var, .. } = &rhs {
         create_ite(
             Either::Right(TypeExpr::InstanceOf {
@@ -278,23 +280,24 @@ fn class_cast_rhs(rhs: &Rhs, assignment: Statement) -> Statement {
                 message: "ClassCastException".to_string(),
                 info: SourcePos::UnknownPosition,
             }),
+            without_assumptions,
         )
     } else {
         assignment
     }
 }
 
-fn ite<'a>() -> Parser<'a, Token<'a>, Statement> {
+fn ite<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Statement> {
     let ite = (keyword("if") * punct("(") * expression_or_type_guard() - punct(")")
-        + ((punct("{") * call(statement) - punct("}"))
+        + ((punct("{") * call(move || statement(without_assumptions)) - punct("}"))
             | (punct("{") * punct("}")).map(|_| Statement::Skip)
-            | call(statement))
+            | call(move || statement(without_assumptions)))
         + (keyword("else")
-            * ((punct("{") * call(statement) - punct("}"))
+            * ((punct("{") * call(move || statement(without_assumptions)) - punct("}"))
                 | (punct("{") * punct("}")).map(|_| Statement::Skip)
-                | call(statement)))
+                | call(move || statement(without_assumptions))))
         .opt())
-    .map(|((guard, true_body), false_body)| create_ite(guard, true_body, false_body));
+    .map(move |((guard, true_body), false_body)| create_ite(guard, true_body, false_body, without_assumptions));
 
     ite
 }
@@ -307,48 +310,63 @@ fn create_ite(
     guard: Either<Rc<Expression>, TypeExpr>,
     true_body: Statement,
     false_body: Option<Statement>,
+    without_assumptions: bool,
 ) -> Statement {
-    Statement::Ite {
-        guard: guard.clone(),
-        info: guard.get_position(),
-        true_body: Box::new(Statement::Seq {
-            stat1: Box::new(Statement::Assume {
-                assumption: guard.clone(),
-                info: guard.get_position(),
+    if without_assumptions {
+        Statement::Ite { guard: guard.clone(), true_body: Box::new(true_body), false_body: Box::new(false_body.unwrap_or(Statement::Skip)), info: guard.get_position() }
+
+    } else {
+        Statement::Ite {
+            guard: guard.clone(),
+            info: guard.get_position(),
+            true_body: Box::new(Statement::Seq {
+                stat1: Box::new(Statement::Assume {
+                    assumption: guard.clone(),
+                    info: guard.get_position(),
+                }),
+                stat2: Box::new(true_body),
             }),
-            stat2: Box::new(true_body),
-        }),
-        false_body: Box::new(Statement::Seq {
-            stat1: Box::new(Statement::Assume {
-                info: guard.get_position(),
-                assumption: guard
-                    .map_left(|guard| negate(guard).into())
-                    .map_right(|guard| guard.not()),
+            false_body: Box::new(Statement::Seq {
+                stat1: Box::new(Statement::Assume {
+                    info: guard.get_position(),
+                    assumption: guard
+                        .map_left(|guard| negate(guard).into())
+                        .map_right(|guard| guard.not()),
+                }),
+                stat2: Box::new(false_body.unwrap_or(Statement::Skip)),
             }),
-            stat2: Box::new(false_body.unwrap_or(Statement::Skip)),
-        }),
+        }
     }
 }
 
-fn create_while(guard: Rc<Expression>, body: Option<Statement>) -> Statement {
+fn create_while(guard: Rc<Expression>, body: Option<Statement>, without_assumptions: bool) -> Statement {
     if let Some(body) = body {
-        Statement::Seq {
-            stat1: Box::new(Statement::While {
+        if without_assumptions {
+            Statement::While {
                 info: guard.get_position(),
                 guard: guard.clone(),
-                body: Box::new(Statement::Seq {
-                    stat1: Box::new(Statement::Assume {
-                        info: guard.get_position(),
-                        assumption: Either::Left(guard.clone().into()),
+                body: Box::new(body),
+            }
+        } else {
+            Statement::Seq {
+                stat1: Box::new(Statement::While {
+                    info: guard.get_position(),
+                    guard: guard.clone(),
+                    body: Box::new(Statement::Seq {
+                        stat1: Box::new(Statement::Assume {
+                            info: guard.get_position(),
+                            assumption: Either::Left(guard.clone().into()),
+                        }),
+                        stat2: Box::new(body),
                     }),
-                    stat2: Box::new(body),
                 }),
-            }),
-            stat2: Box::new(Statement::Assume {
-                info: guard.get_position(),
-                assumption: Either::Left(negate(guard.into()).into()),
-            }),
+                stat2: Box::new(Statement::Assume {
+                    info: guard.get_position(),
+                    assumption: Either::Left(negate(guard.into()).into()),
+                }),
+            }
         }
+        
     } else {
         Statement::Skip
     }
@@ -1100,6 +1118,7 @@ fn create_exceptional_ites(
             info: pos,
         },
         Some(body),
+        false,
     )
 }
 
@@ -1289,6 +1308,8 @@ fn type_expr<'a>() -> Parser<'a, Token<'a>, TypeExpr> {
 mod tests {
     use super::*;
 
+    const WITHOUT_ASSUMPTIONS: bool = false;
+
     #[test]
     fn class_with_constructor() {
         let file_content = include_str!("../../examples/class_with_constructor.oox");
@@ -1296,7 +1317,7 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         //dbg!(as_ref);
-        let _c = program().parse(&as_ref).unwrap(); // should not panic;
+        let _c = program(WITHOUT_ASSUMPTIONS).parse(&as_ref).unwrap(); // should not panic;
                                                     //dbg!(c);
     }
 
@@ -1307,7 +1328,7 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         //dbg!(as_ref);
-        let _c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
+        let _c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref).unwrap(); // should not panic;
                                                                 //dbg!(c);
     }
 
@@ -1318,7 +1339,7 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         // //dbg!(as_ref);
-        let c = (program() - end()).parse(&as_ref);
+        let c = (program(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref);
         // //dbg!(&c);
         c.unwrap(); // should not panic;
 
@@ -1333,7 +1354,7 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         // //dbg!(as_ref);
-        let c = (program() - end()).parse(&as_ref);
+        let c = (program(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref);
         // //dbg!(&c);
         c.unwrap(); // should not panic;
 
@@ -1348,7 +1369,7 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         //dbg!(as_ref);
-        let _c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
+        let _c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref).unwrap(); // should not panic;
                                                                 //dbg!(c);
     }
 
@@ -1365,7 +1386,7 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         //dbg!(&as_ref);
-        let _c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
+        let _c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref).unwrap(); // should not panic;
                                                                 //dbg!(c);
     }
 
@@ -1380,7 +1401,7 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         dbg!(&as_ref);
-        let _c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
+        let _c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref).unwrap(); // should not panic;
                                                                 // let c = (type_expr() - end()).parse(&as_ref).unwrap(); // should not panic;
     }
 
@@ -1403,7 +1424,7 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         //dbg!(as_ref);
-        let _c = (statement() - end()).parse(&as_ref).unwrap(); // should not panic;
+        let _c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref).unwrap(); // should not panic;
                                                                 //dbg!(c);
     }
 
@@ -1423,7 +1444,7 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         // //dbg!(as_ref);
-        let c = (program() - end()).parse(&as_ref);
+        let c = (program(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref);
         // //dbg!(&c);
         c.unwrap(); // should not panic;
     }
@@ -1435,7 +1456,7 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         // //dbg!(as_ref);
-        let c = (program() - end()).parse(&as_ref);
+        let c = (program(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref);
         // //dbg!(&c);
         c.unwrap(); // should not panic;
     }
@@ -1453,7 +1474,7 @@ mod tests {
         let as_ref = tokens.as_slice();
         // //dbg!(as_ref);
         // let c = (pite() - end()).parse(&as_ref);
-        let c = (statement() - end()).parse(&as_ref);
+        let c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref);
         // //dbg!(&c);
         c.unwrap(); // should not panic;
     }
@@ -1470,7 +1491,7 @@ mod tests {
         //dbg!(&tokens);
         let as_ref = tokens.as_slice();
         // //dbg!(as_ref);
-        let c = (statement() - end()).parse(&as_ref);
+        let c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref);
         // //dbg!(&c);
         c.unwrap(); // should not panic;
     }
@@ -1482,7 +1503,7 @@ mod tests {
         let tokens = tokens(&file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         // //dbg!(as_ref);
-        let c = (program() - end()).parse(&as_ref);
+        let c = (program(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref);
         // //dbg!(&c);
         c.unwrap(); // should not panic;
     }
@@ -1495,7 +1516,7 @@ mod tests {
         dbg!(&tokens);
         let as_ref = tokens.as_slice();
         // //dbg!(as_ref);
-        let c = (statement() - end()).parse(&as_ref);
+        let c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref);
         // //dbg!(&c);
         c.unwrap(); // should not panic;
     }
@@ -1510,7 +1531,7 @@ mod tests {
         dbg!(&tokens);
         let as_ref = tokens.as_slice();
         // //dbg!(as_ref);
-        let c = (statement() - end()).parse(&as_ref);
+        let c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref);
         // //dbg!(&c);
         c.unwrap(); // should not panic;
     }
@@ -1522,7 +1543,7 @@ mod tests {
         let tokens = tokens(&file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         // //dbg!(as_ref);
-        let c = (program() - end()).parse(&as_ref);
+        let c = (program(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref);
         // //dbg!(&c);
         c.unwrap(); // should not panic;
     }
@@ -1534,7 +1555,7 @@ mod tests {
         let tokens = tokens(&file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         dbg!(as_ref);
-        let c = insert_exceptional_clauses(parse(&as_ref).unwrap());
+        let c = insert_exceptional_clauses(parse(&as_ref, WITHOUT_ASSUMPTIONS).unwrap());
         dbg!(&c);
     }
 
@@ -1546,7 +1567,7 @@ mod tests {
         dbg!(&tokens);
         let as_ref = tokens.as_slice();
         // //dbg!(as_ref);
-        let c = (statement() - end()).parse(&as_ref);
+        let c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref);
         // //dbg!(&c);
         c.unwrap(); // should not panic;
     }
@@ -1558,7 +1579,7 @@ mod tests {
         let tokens = tokens(&file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         dbg!(as_ref);
-        let c = insert_exceptional_clauses(parse(&as_ref).unwrap());
+        let c = insert_exceptional_clauses(parse(&as_ref, WITHOUT_ASSUMPTIONS).unwrap());
         dbg!(&c);
     }
 
@@ -1569,7 +1590,7 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         // dbg!(as_ref);
-        let _c = (statement() - end()).parse(&as_ref).unwrap();
+        let _c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref).unwrap();
         // dbg!(&c);
     }
 

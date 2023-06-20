@@ -85,7 +85,6 @@ fn eval_locally(
                 }
                 _ => todo!("Symbolic arrays are not implemented"),
             }
-            dbg!(&state.heap, var, state.stack.lookup(var).as_ref());
             panic!("invalid state, expected initialised array with arrayvalue in heap");
         }
         Expression::Ref { .. } => expression,

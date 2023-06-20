@@ -1588,7 +1588,7 @@ pub fn verify(
 
     for (file_number, path) in (0..).zip(paths.iter()) {
         let file_content = std::fs::read_to_string(path.as_ref()).map_err(|err| err.to_string())?;
-        let file_cu = parse_program(&file_content, file_number).map_err(|error| match error {
+        let file_cu = parse_program(&file_content, file_number, false).map_err(|error| match error {
             language::Error::ParseError(err) => err.to_string(),
             language::Error::LexerError((line, col)) => {
                 format!("Lexer error at {}:{}:{}", path.to_string(), line, col)

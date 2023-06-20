@@ -638,7 +638,7 @@ fn cfg_for_min() {
     use crate::{insert_exceptional_clauses, language};
     let file_content = include_str!("../examples/psv/min.oox");
 
-    let c = language::parse_program(file_content, 0).unwrap();
+    let c = language::parse_program(file_content, 0, false).unwrap();
     let c = insert_exceptional_clauses(c);
 
     // //dbg!(&c);
@@ -669,7 +669,7 @@ fn cfg_for_try_catch() {
     use crate::language;
     let file_content = include_str!("../examples/simple_try_catch.oox");
 
-    let c = language::parse_program(file_content, 0);
+    let c = language::parse_program(file_content, 0, false);
     let c = c.unwrap();
 
     // dbg!(&c);

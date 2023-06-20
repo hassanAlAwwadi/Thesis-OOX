@@ -829,10 +829,15 @@ fn type_expression(
             let type_ = lit.type_of();
             Expression::Lit { lit, type_, info }
         }
-        Expression::SizeOf { var, info, .. } => Expression::SizeOf {
-            var,
-            type_: RuntimeType::IntRuntimeType,
-            info,
+        Expression::SizeOf { var, info, .. } => {
+            let type_ = env.get_var_type(&var)?;
+            let var_expr = Expression::Var { var: var.clone(), type_, info: info };
+            matches_type(var_expr, RuntimeType::ARRAYRuntimeType, st)?;
+            Expression::SizeOf {
+                var,
+                type_: RuntimeType::IntRuntimeType,
+                info,
+            }
         },
         Expression::Ref { ref_, info, .. } => Expression::Ref {
             ref_,

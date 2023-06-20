@@ -1,0 +1,189 @@
+
+interface List {
+    int get(int i);
+
+    void set(int i, int element);
+
+    int length();
+
+    int[] toArray();
+
+    bool repOk();
+}
+
+class IntArray implements List {
+    int[] ints;
+
+    int get(int i) {
+        int[] ints := this.ints;
+        assert i >= 0 && i < #ints;
+        int atI := ints[i];
+        return atI;
+    }
+
+    void set(int i, int element){
+        int[] ints := this.ints;
+        assert i >= 0 && i < #ints;
+        ints[i] := element;
+    }
+
+    int length() {
+        int[] ints := this.ints;
+        return #ints;
+    }
+
+    // only for easy assertion. do not mutate.
+    int[] toArray() {
+        int[] ints := this.ints;
+        return ints;
+    }
+
+    bool repOk() {
+        int[] ints := this.ints;
+        return ints != null;
+    }
+}
+
+interface Sorter {
+    int[] sort(int[] array);
+}
+
+class BubbleSort implements Sorter {
+    BubbleSort() {}
+
+    List sort(List array)
+        requires(array != null)
+        ensures(true)
+        exceptional(false)
+    {
+        int length := array.length();
+        bool sorted := false;
+        while (!sorted) {
+            sorted := true;
+            int i := 1;
+            while (i < length) {
+                int u := array.get(i);
+                int v := array.get(i - 1);
+                if (u < v) {
+                    array.set(i, v);
+                    array.set(i - 1, u);
+                    sorted := false;
+                }
+                i := i + 1;
+            }
+        }
+        return array;
+    }
+}
+
+
+
+class MergeSort implements Sorter {
+    MergeSort() {}
+
+    List sort(List array)
+        requires(!(array == null))
+        exceptional(false)
+    {
+        int arrayLength := array.length();
+        MergeSort.mergesort(array, 0, arrayLength - 1);
+        return array;
+    }
+
+    static void mergesort(List array, int left, int right)
+        requires(array != null)
+        exceptional(false)
+    {
+        // if (left >= right) {  // error , should be <
+        if (left < right) {
+            int middle := (left + right) / 2;
+            MergeSort.mergesort(array, left, middle);
+            MergeSort.mergesort(array, middle + 1, right);
+            MergeSort.merge(array, left, middle, right);
+        }
+    }
+
+    static void merge(List array, int left, int middle, int right)
+        requires(array != null)
+        exceptional(false)
+    {
+        int[] temp := new int[right - left + 1];
+        int i := left;
+        int j := middle + 1;
+        int k := 0;
+        while (i <= middle && j <= right) {
+            int a := array.get(i);
+            int b := array.get(j);
+            if (a < b) {
+                temp[k] := array.get(i);
+                k := k + 1;
+                i := i + 1;
+            } else {
+                temp[k] := array.get(j);
+                k := k + 1;
+                j := j + 1;
+            }
+        }
+        while (i <= middle) {
+            temp[k] := array.get(i);
+            k := k + 1;
+            i := i + 1;
+        }
+
+        while (j <= right) {
+            temp[k] := array.get(j);
+            k := k + 1;
+            j := j + 1;
+        }
+        i := left;
+        while (i <= right) {
+            int tempIML := temp[i - left];
+            array.set(i, tempIML);
+            i := i + 1;
+        }
+    }
+}
+
+class InsertionSort implements Sorter {
+
+    List sort(List array)
+        requires(!(array == null))
+        exceptional(false)
+    {
+        int i := 1;
+        int element;
+        int j;
+
+        int length := array.length();
+        while (i < length) { 
+            element := array.get(i); 
+            j := i - 1; 
+            int arrayJ := array.get(j);
+            while (j >= 0 && arrayJ > element) { 
+                array.set(j + 1, arrayJ); 
+                j := j - 1; 
+            } 
+            array.set(j + 1, element); 
+            i := i + 1;
+            
+        }
+        return array;
+    }
+}
+
+class Main
+{
+    static void test(List list, Sorter sorter)
+        requires(list != null)
+    {
+        bool listIsOk := list.repOk();
+        assume listIsOk;
+        int N := 5;
+        list := sorter.sort(list);
+
+        int[] a := list.toArray();
+
+
+        assert forall v , i : a : (forall w , j : a : i < j ==> v <= w);
+    }
+}

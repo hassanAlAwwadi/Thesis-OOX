@@ -544,8 +544,8 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Rhs {
                 .pretty(allocator)
                 .append(index.pretty(allocator).brackets()),
             Rhs::RhsCall { invocation, .. } => invocation.pretty(allocator),
-            Rhs::RhsArray { sizes, type_, .. } => {
-                let mut result = type_.pretty(allocator);
+            Rhs::RhsArray { sizes, array_type, .. } => {
+                let mut result = allocator.text("new ").append(array_type.type_of().pretty(allocator));
                 for size in sizes {
                     result = result.append(size.pretty(allocator).brackets());
                 }
@@ -698,6 +698,13 @@ impl Display for Expression {
             .pretty(50)
             .to_string();
         f.write_str(&s)
+    }
+}
+
+impl Display for CompilationUnit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    
+        write!(f, "{}", pretty::Pretty::pretty(self, &pretty::BoxAllocator).1.pretty(30))
     }
 }
 

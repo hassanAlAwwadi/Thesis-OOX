@@ -43,4 +43,6 @@ pub use typing::type_compilation_unit;
 
 pub use symbol_table::SymbolTable;
 
+pub use mutation::mutate_program;
+
 pub static FILE_NAMES: Mutex<Vec<String>> = Mutex::new(vec![]);

@@ -7,8 +7,9 @@ use crate::syntax::{Expression, Invocation, Lhs, Method, NonVoidType, Rhs};
 use crate::{TypeExpr, FILE_NAMES};
 
 /// A type to describe the position of something in the source code.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
 pub enum SourcePos {
+    #[default]
     UnknownPosition,
     SourcePos {
         line: usize,
