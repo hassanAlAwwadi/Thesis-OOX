@@ -397,25 +397,18 @@ class Test {
 
     // infinite loop if requires #elements == 0,
     // doesn't work if #elements > 3, because there won't be any branches since minimum array length is 3.
-    static void test_symbolic(int[] elements)
-        requires(elements != null && #elements == 3)
+    static void test_symbolic(int[] a, int[] b)
+        requires(a != null && b != null && #a > 0 && #b == #a)
         exceptional(false) {
 
-
-        IntList collectionEven := Test.helper_IntList(elements);
+        IntList collectionA := Test.helper_IntList(a);
         
-        IntList collectionOdd := new IntList(6);
-        collectionOdd.add(1);
-        collectionOdd.add(3);
-        collectionOdd.add(5);
-        collectionOdd.add(7);
-        collectionOdd.add(9);
-        collectionOdd.add(1);
+        IntList collectionB := Test.helper_IntList(b);
 
-        Iterator evenIterator := collectionEven.iterator();
-        Iterator oddIterator := collectionOdd.iterator();
+        Iterator aIterator := collectionA.iterator();
+        Iterator bIterator := collectionB.iterator();
                
-        Iterator it := IteratorUtils.collatedIterator(null, evenIterator, oddIterator);
+        Iterator it := IteratorUtils.collatedIterator(null, aIterator, bIterator);
 
         assert it != null;
 

@@ -1487,7 +1487,7 @@ fn assume_type_guard(state: &mut State, type_guard: &TypeExpr, en: &mut impl Eng
             );
             assume_type_guard(state, type_guard, en)
         }
-        _ => panic!("expected ref or symbolic ref"),
+        e => panic!("expected ref or symbolic ref, found {:?}", e),
     }
 }
 

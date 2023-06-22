@@ -63,7 +63,47 @@ class Main {
         } catch {
             // Exception expected;
         }
-        
+    }
 
+    static void test_symbolic(ArchiveStreamFactory factory, int constant, int dummy_name)
+        requires(factory != null && dummy_name != 0)
+        exceptional(false)
+    {   
+        int zip := StringConstants.zip();
+        int jar := StringConstants.jar();
+        int ar := StringConstants.ar();
+        int cpio := StringConstants.cpio();
+        int tar := StringConstants.tar();
+        assume constant == zip || constant == jar || constant == ar || constant == cpio || constant == tar;
+
+        OutputStream out := new OutputStream();
+
+        ArchiveOutputStream aos;
+        aos := factory.createArchiveOutputStream(constant, out);
+
+        ArchiveEntry dummy;
+        if (aos instanceof ZipArchiveOutputStream) {
+            dummy := new ZipArchiveEntry(dummy_name);
+        } 
+        if (aos instanceof TarArchiveOutputStream) {
+            dummy := new TarArchiveEntry(dummy_name);
+        } 
+        if (aos instanceof ArArchiveOutputStream) {
+            dummy := new ArArchiveEntry(dummy_name, 100);
+        } 
+        if (aos instanceof CpioArchiveOutputStream) {
+            dummy := new CpioArchiveEntry(dummy_name);
+        } 
+        if (aos instanceof JarArchiveOutputStream) {
+            dummy := new JarArchiveEntry(dummy_name);
+        }
+        aos.putArchiveEntry(dummy);
+
+        try {
+            aos.finish();
+            assert false;
+        } catch {
+            // Exception expected;
+        }
     }
 }

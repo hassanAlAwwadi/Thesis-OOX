@@ -1,0 +1,13 @@
+class Main {
+    static void main() {
+
+        try {
+            throw "exception";
+        }
+        catch {
+            return;
+        }
+
+        assert false;
+    }
+}

@@ -40,5 +40,9 @@ name = "experiment1"
 harness = false
 
 [[bench]]
-name = "experiment2"
+name = "experiment2_3"
+harness = false
+
+[[bench]]
+name = "experiment2_4"
 harness = false

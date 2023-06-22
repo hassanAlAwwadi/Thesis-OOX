@@ -18,51 +18,51 @@ fn options() -> Options<'static> {
     }
 }
 
-fn experiment2<'a, M: Measurement>(c: &'a mut Criterion<M>) -> BenchmarkGroup<'a, M>{
+fn experiment3<'a, M: Measurement>(c: &'a mut Criterion<M>) -> BenchmarkGroup<'a, M>{
     let mut options = options();
-    let mut group = c.benchmark_group("experiment1");
-    group.sample_size(10);
+    let mut group = c.benchmark_group("experiment2.3");
+    group.sample_size(100);
     group.sampling_mode(SamplingMode::Flat);
-    group.bench_function("List sorting functions --heuristic Depth First Search", |b| {
+    group.bench_function("Collections 25 --heuristic Depth First Search", |b| {
         b.iter(|| {
             verify(
-                &["./benchmark_programs/experiment2/list-sorting/sorting.oox"],
+                &["./benchmark_programs/experiment2/defects4j/collections_25.oox"],
                 "Main",
-                "test",
+                "test_symbolic",
                 options,
             )
         })
     });
     options.heuristic = Heuristic::MinDist2Uncovered;
-    group.bench_function("List sorting functions --heuristic Min Dist 2 Uncovered", |b| {
+    group.bench_function("Collections 25 --heuristic Min Dist 2 Uncovered", |b| {
         b.iter(|| {
             verify(
-                &["./benchmark_programs/experiment2/list-sorting/sorting.oox"],
+                &["./benchmark_programs/experiment2/defects4j/collections_25.oox"],
                 "Main",
-                "test",
+                "test_symbolic",
                 options,
             )
         })
     });
     options.heuristic = Heuristic::RandomPath;
-    group.bench_function("List sorting functions --heuristic Random Path", |b| {
+    group.bench_function("Collections 25 --heuristic Random Path", |b| {
         b.iter(|| {
             verify(
-                &["./benchmark_programs/experiment2/list-sorting/sorting.oox"],
+                &["./benchmark_programs/experiment2/defects4j/collections_25.oox"],
                 "Main",
-                "test",
+                "test_symbolic",
                 options,
             )
         })
     });
 
     options.heuristic = Heuristic::RoundRobinMD2URandomPath;
-    group.bench_function("List sorting functions --heuristic Round Robin MD2U & Random Path", |b| {
+    group.bench_function("Collections 25 --heuristic Round Robin MD2U & Random Path", |b| {
         b.iter(|| {
             verify(
-                &["./benchmark_programs/experiment2/list-sorting/sorting.oox"],
+                &["./benchmark_programs/experiment2/defects4j/collections_25.oox"],
                 "Main",
-                "test",
+                "test_symbolic",
                 options,
             )
         })
@@ -71,5 +71,5 @@ fn experiment2<'a, M: Measurement>(c: &'a mut Criterion<M>) -> BenchmarkGroup<'a
 }
 
 
-criterion_group!(benches, experiment2);
+criterion_group!(benches, experiment3);
 criterion_main!(benches);

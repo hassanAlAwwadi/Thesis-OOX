@@ -58,3 +58,4 @@ This can be changed with feature flags from slog: <https://docs.rs/crate/slog/la
 - The resolver does not look at arguments.
     - This can cause weird behaviour like passing wrong values to functions to be OK, only to go wrong at assertions (where the values are checked).
 - It seems like method invocation slows the execution by alot, so refactoring a bit of code to a separate method has a lot of impact.
+- Bug in Control flow graph generation, when returning from inside a catch statement. (See ./examples/issues/CFG_bug.oox)
