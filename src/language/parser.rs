@@ -269,19 +269,23 @@ pub fn statement<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Stateme
 /// Edge case for class_cast which inserts the exceptional clause here.
 fn class_cast_rhs(rhs: &Rhs, assignment: Statement, without_assumptions: bool) -> Statement {
     if let Rhs::RhsCast { cast_type, var, .. } = &rhs {
-        create_ite(
-            Either::Right(TypeExpr::InstanceOf {
-                var: var.clone(),
-                rhs: cast_type.type_of(),
-                info: SourcePos::UnknownPosition,
-            }),
-            assignment,
-            Some(Statement::Throw {
-                message: "ClassCastException".to_string(),
-                info: SourcePos::UnknownPosition,
-            }),
-            without_assumptions,
-        )
+        if without_assumptions {
+            assignment
+        } else {
+            create_ite(
+                Either::Right(TypeExpr::InstanceOf {
+                    var: var.clone(),
+                    rhs: cast_type.type_of(),
+                    info: SourcePos::UnknownPosition,
+                }),
+                assignment,
+                Some(Statement::Throw {
+                    message: "ClassCastException".to_string(),
+                    info: SourcePos::UnknownPosition,
+                }),
+                without_assumptions,
+            )
+        }
     } else {
         assignment
     }

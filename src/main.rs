@@ -1,8 +1,10 @@
+use std::{fs, time::Instant};
+
 use clap::{Parser, Subcommand};
 use itertools::Itertools;
 use lib::{
-    insert_exceptional_clauses, parse_program, type_compilation_unit, verify, CompilationUnit,
-    Options, SymbolTable, FILE_NAMES, mutate_program,
+    insert_exceptional_clauses, mutate_program, parse_program, type_compilation_unit, verify,
+    CompilationUnit, Identifier, Options, SourcePos, SymResult, SymbolTable, FILE_NAMES,
 };
 use pretty::BoxAllocator;
 
@@ -64,7 +66,11 @@ enum Commands {
 
         /// Turn off local solving threshold
         #[arg(long, default_value_t = false)]
-        no_local_solving_threshold: bool
+        no_local_solving_threshold: bool,
+
+        /// Run as a benchmark
+        #[arg(long, default_value_t = false)]
+        run_as_benchmark: bool,
     },
     /// Parse and typecheck an OOX source file
     Check {
@@ -75,20 +81,20 @@ enum Commands {
         #[arg(short, long, default_value_t = false)]
         print: bool,
     },
-    /// Generate a mutation in an OOX source file. 
+    /// Generate a mutation in an OOX source file.
     Mutate {
         /// The source files, can be multiple. They will be merged into a single file.
         #[arg(num_args(0..))]
         source_paths: Vec<String>,
 
-        /// Upper limit of how many mutated programs to generate
-        #[arg(long, default_value = None)]
-        n: Option<u64>,
-        
         /// Output path for the mutated program.
-        #[arg(long, default_value = ".")]
-        out: String
-    }
+        #[arg(short, long, default_value = ".")]
+        out: String,
+
+        /// Methods to exclude from mutation, in the form `Main.test`
+        #[arg(short, long, num_args(0..))]
+        exclude: Vec<String>,
+    },
 }
 
 fn main() -> Result<(), String> {
@@ -107,7 +113,8 @@ fn main() -> Result<(), String> {
             log_path,
             prune_path_z3,
             local_solving_threshold,
-            no_local_solving_threshold
+            no_local_solving_threshold,
+            run_as_benchmark,
         } => {
             if let Some((class_name, method_name)) = function.split('.').collect_tuple() {
                 let options = Options {
@@ -122,9 +129,108 @@ fn main() -> Result<(), String> {
                     log_path: &log_path,
                     discard_logs: false,
                     prune_path_z3,
-                    local_solving_threshold: if no_local_solving_threshold { None } else { Some(local_solving_threshold) }
+                    local_solving_threshold: if no_local_solving_threshold {
+                        None
+                    } else {
+                        Some(local_solving_threshold)
+                    },
                 };
-                verify(source_paths.as_slice(), class_name, method_name, options)?;
+
+                if run_as_benchmark {
+                    let mut wtr = if !std::path::Path::new("benchmark").exists() {
+                        let file =
+                        fs::File::create(format!("benchmark")).map_err(|err| err.to_string())?;
+                        let mut wtr = csv::Writer::from_writer(file);
+                        wtr.write_record(&[
+                            "name",
+                            "heuristic",
+                            "k",
+                            "time",
+                            "result",
+                            "branches",
+                            "prunes",
+                            "completed paths",
+                            "z3 invocations",
+                            "paths explored",
+                            "coverage",
+                        ])
+                        .map_err(|err| err.to_string())?;
+                        wtr
+                    } else {
+                        let file = fs::File::options().append(true).open("benchmark").map_err(|err| err.to_string())?;
+                        csv::Writer::from_writer(file)
+                    };
+                    
+
+                    for _i in 0..2 {
+                        let start = Instant::now();
+                        let (sym_result, statistics) =
+                            verify(source_paths.as_slice(), class_name, method_name, options)?;
+                        let duration = start.elapsed();
+
+                        let result_text = result_text(sym_result, &source_paths);
+
+                        wtr.write_record(&[
+                            source_paths[0].split("/").last().unwrap(),
+                            &format!("{:?}", heuristic),
+                            &k.to_string(),
+                            &duration.as_secs_f64().to_string(),
+                            &result_text,
+                            &statistics.number_of_branches.to_string(),
+                            &statistics.number_of_prunes.to_string(),
+                            &statistics.number_of_complete_paths.to_string(),
+                            &statistics.number_of_z3_invocations.to_string(),
+                            &statistics.number_of_paths_explored.to_string(),
+                            &(format!(
+                                "{}/{} ({:.1}%)",
+                                statistics.covered_statements,
+                                statistics.reachable_statements,
+                                (statistics.covered_statements as f32
+                                    / statistics.reachable_statements as f32)
+                                    * 100.0
+                            )),
+                        ])
+                        .map_err(|err| err.to_string())?;
+                    }
+                } else {
+                    let start = Instant::now();
+                    let (sym_result, statistics) =
+                        verify(source_paths.as_slice(), class_name, method_name, options)?;
+                    let duration = start.elapsed();
+
+                    let result_text = result_text(sym_result, &source_paths);
+
+                    if options.quiet && sym_result != SymResult::Valid {
+                        println!("{}", result_text);
+                    } else if !options.quiet {
+                        println!("Statistics");
+                        println!("  Final result:     {}", result_text);
+                        println!("  time:             {:?}s", duration.as_secs_f64());
+                        println!("  #branches:        {}", statistics.number_of_branches);
+                        println!("  #prunes:          {}", statistics.number_of_prunes);
+                        println!(
+                            "  #complete_paths:  {}",
+                            statistics.number_of_complete_paths
+                        );
+                        println!("  #locally_solved:  {}", statistics.number_of_local_solves);
+                        println!(
+                            "  #Z3 invocations:  {}",
+                            statistics.number_of_z3_invocations
+                        );
+                        println!(
+                            "  #paths explored:  {}",
+                            statistics.number_of_paths_explored
+                        );
+                        println!(
+                            "  #coverage:        {}/{} ({:.1}%)",
+                            statistics.covered_statements,
+                            statistics.reachable_statements,
+                            (statistics.covered_statements as f32
+                                / statistics.reachable_statements as f32)
+                                * 100.0
+                        )
+                    }
+                }
             } else {
                 println!("Entry point must be of the form 'class.method' and be unambiguous");
             }
@@ -135,10 +241,14 @@ fn main() -> Result<(), String> {
         } => {
             check(source_paths, print)?;
         }
-        Commands::Mutate { source_paths, n, out } => {
+        Commands::Mutate {
+            source_paths,
+            out,
+            exclude,
+        } => {
             let mut c = CompilationUnit::empty();
 
-            let resulting_prefix = if source_paths.len() == 1 {
+            let file_name = if source_paths.len() == 1 {
                 source_paths[0].split("/").last().unwrap()
             } else {
                 "RESULT"
@@ -150,35 +260,45 @@ fn main() -> Result<(), String> {
             for (file_number, path) in (0..).zip(&source_paths) {
                 let file_content = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
                 let file_c =
-                    parse_program(&file_content, file_number, true).map_err(|error| match error {
-                        lib::Error::ParseError(err) => err.to_string(),
-                        lib::Error::LexerError((line, col)) => {
-                            format!("Lexer error at {}:{}:{}", path, line, col)
-                        }
-                    })?;
+                    parse_program(&file_content, file_number, true).map_err(
+                        |error| match error {
+                            lib::Error::ParseError(err) => err.to_string(),
+                            lib::Error::LexerError((line, col)) => {
+                                format!("Lexer error at {}:{}:{}", path, line, col)
+                            }
+                        },
+                    )?;
                 c = c.merge(file_c);
             }
 
             let symbol_table = SymbolTable::from_ast(&c)?;
             c = type_compilation_unit(c, &symbol_table)?;
 
-            let mutated_units = mutate_program(&c);
+            let excluded_methods = exclude
+                .into_iter()
+                .map(|s| s.split(".").map(Identifier::from).next_tuple())
+                .collect::<Option<Vec<_>>>()
+                .ok_or(
+                    "Expected excluded methods to be of the form 'class.method' and be unambiguous",
+                )?;
+            let mutated_units = mutate_program(&c, &excluded_methods);
 
             for (mutation_name, mutated_unit) in mutated_units {
                 // only write the mutation if it is type correct.
                 if let Ok(symbol_table) = SymbolTable::from_ast(&c) {
-                    if let Ok(typed_compilation_unit) = type_compilation_unit(mutated_unit, &symbol_table) {
-                        let path = format!("{}/{}_{}", out, resulting_prefix, mutation_name);
+                    if let Ok(typed_compilation_unit) =
+                        type_compilation_unit(mutated_unit, &symbol_table)
+                    {
+                        let path = format!("{}/{}_{}", out, mutation_name, file_name);
                         std::fs::write(path, typed_compilation_unit.to_string()).unwrap();
                     }
                 }
             }
-        },
+        }
     }
 
     Ok(())
 }
-
 
 fn check(source_paths: Vec<String>, print: bool) -> Result<(), String> {
     let mut c = CompilationUnit::empty();
@@ -207,4 +327,18 @@ fn check(source_paths: Vec<String>, print: bool) -> Result<(), String> {
     }
     println!("Type check OK");
     Ok(())
+}
+
+fn result_text(sym_result: SymResult, source_paths: &[String]) -> String {
+    match sym_result {
+        SymResult::Valid => "VALID".to_string(),
+        SymResult::Invalid(SourcePos::SourcePos {
+            line,
+            col,
+            file_number,
+        }) => {
+            format!("INVALID at {}:{}:{}", source_paths[file_number], line, col)
+        }
+        SymResult::Invalid(SourcePos::UnknownPosition) => "INVALID at unknown position".to_string(),
+    }
 }

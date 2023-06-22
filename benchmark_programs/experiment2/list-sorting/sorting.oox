@@ -239,8 +239,6 @@ class Main
         list := sorter.sort(list);
 
         int[] a := list.toArray();
-
-
         assert forall v , i : a : (forall w , j : a : i < j ==> v <= w);
     }
 }

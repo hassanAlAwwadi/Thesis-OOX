@@ -37,9 +37,7 @@ class Point implements Value {
     }
 }
 
-class Point3 implements Value {
-    int x;
-    int y;
+class Point3 extends Point {
     int z;
 
     bool equals(Value other) {
@@ -114,17 +112,7 @@ class Node implements Value {
 
 class Main {
 
-    static void test(Node node, Value value) {
-        bool nodeEqualsItself := node.equals(node);
-        assert nodeEqualsItself;
-    }
-
-    static void test2(Node node, Value value) {
-        bool nodeContainsValue := node.member(value);
-        assert nodeContainsValue;
-    }
-
-    static void test3(Node a, Node b) {
+    static void test(Node a, Node b) {
         bool aEqualsB := a.equals(b);
         int aLength := a.length();
         int bLength := b.length();

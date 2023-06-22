@@ -35,18 +35,14 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &'a Declaration {
                         .clone()
                         .map(|extends| format!("extends {}", extends)),
                     if !class.implements.is_empty() {
-                        if class.extends.is_some() {
-                            format!(
-                                " implements {}",
-                                class
-                                    .implements
-                                    .iter()
-                                    .map(Identifier::to_string)
-                                    .join(", ")
-                            )
-                        } else {
-                            String::new()
-                        }
+                        format!(
+                            " implements {}",
+                            class
+                                .implements
+                                .iter()
+                                .map(Identifier::to_string)
+                                .join(", ")
+                        )
                     } else {
                         String::new()
                     },
@@ -539,13 +535,19 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Rhs {
     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
         match self {
             Rhs::RhsExpression { value, .. } => value.pretty(allocator),
-            Rhs::RhsField { var, field, .. } => docs![allocator, var.as_ref(), ".", field.to_string()],
+            Rhs::RhsField { var, field, .. } => {
+                docs![allocator, var.as_ref(), ".", field.to_string()]
+            }
             Rhs::RhsElem { var, index, .. } => var
                 .pretty(allocator)
                 .append(index.pretty(allocator).brackets()),
             Rhs::RhsCall { invocation, .. } => invocation.pretty(allocator),
-            Rhs::RhsArray { sizes, array_type, .. } => {
-                let mut result = allocator.text("new ").append(array_type.type_of().pretty(allocator));
+            Rhs::RhsArray {
+                sizes, array_type, ..
+            } => {
+                let mut result = allocator
+                    .text("new ")
+                    .append(array_type.type_of().pretty(allocator));
                 for size in sizes {
                     result = result.append(size.pretty(allocator).brackets());
                 }
@@ -703,8 +705,13 @@ impl Display for Expression {
 
 impl Display for CompilationUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    
-        write!(f, "{}", pretty::Pretty::pretty(self, &pretty::BoxAllocator).1.pretty(30))
+        write!(
+            f,
+            "{}",
+            pretty::Pretty::pretty(self, &pretty::BoxAllocator)
+                .1
+                .pretty(30)
+        )
     }
 }
 
@@ -1023,7 +1030,9 @@ pub mod cfg_pretty {
                 }
                 CFGStatement::While(e, _) => {
                     write!(f, "while (")?;
-                    pretty::Pretty::pretty(e.as_ref(), &allocator).1.render_fmt(w, f)?;
+                    pretty::Pretty::pretty(e.as_ref(), &allocator)
+                        .1
+                        .render_fmt(w, f)?;
                     write!(f, ") {{ .. }} else {{ .. }}")
                 }
                 CFGStatement::TryCatch(_, _, _, _) => write!(f, "try {{ .. }} catch {{ .. }}"),
@@ -1080,5 +1089,18 @@ fn bin_op_to_str(bin_op: &BinOp) -> &'static str {
         BinOp::Multiply => "*",
         BinOp::Divide => "/",
         BinOp::Modulo => "%",
+    }
+}
+
+use std::fmt::Debug;
+impl Debug for Class {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Class")
+            .field("name", &self.name)
+            .field("members", &"..hidden..")
+            .field("extends", &self.extends)
+            .field("implements", &self.implements)
+            .field("info", &self.info)
+            .finish()
     }
 }

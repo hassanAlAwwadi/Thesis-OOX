@@ -118,12 +118,12 @@ fn operators() -> Vec<(&'static str, MutationOperator)> {
     ]
 }
 
-pub fn mutate_program(compilation_unit: &CompilationUnit) -> Vec<(String, CompilationUnit)> {
+pub fn mutate_program(compilation_unit: &CompilationUnit, exclude_methods: &[(Identifier, Identifier)]) -> Vec<(String, CompilationUnit)> {
     operators()
         .into_iter()
         .map(|(name, mutation)| {
             (0..)
-                .zip(mutate_compilation_unit(mutation, compilation_unit))
+                .zip(mutate_compilation_unit(mutation, compilation_unit, exclude_methods))
                 .map(move |(i, compilation_unit)| (format!("{}{}", name, i), compilation_unit))
         })
         .flatten()
@@ -133,8 +133,9 @@ pub fn mutate_program(compilation_unit: &CompilationUnit) -> Vec<(String, Compil
 fn mutate_compilation_unit(
     mutation: MutationOperator,
     compilation_unit: &CompilationUnit,
+    exclude_methods: &[(Identifier, Identifier)]
 ) -> Vec<CompilationUnit> {
-    let mutated_members = mutate_declarations(mutation, &compilation_unit.members);
+    let mutated_members = mutate_declarations(mutation, &compilation_unit.members, exclude_methods);
 
     mutated_members
         .into_iter()
@@ -145,11 +146,12 @@ fn mutate_compilation_unit(
 fn mutate_declarations(
     mutation: MutationOperator,
     declarations: &Vec<Declaration>,
+    exclude_methods: &[(Identifier, Identifier)]
 ) -> Vec<Vec<Declaration>> {
     (0..)
         .zip(declarations)
         .map(|(i, decl)| {
-            mutate_declaration(mutation, &decl)
+            mutate_declaration(mutation, &decl, exclude_methods)
                 .into_iter()
                 .map(|declaration| {
                     let mut declarations = declarations.clone();
@@ -163,17 +165,19 @@ fn mutate_declarations(
         .collect()
 }
 
-fn mutate_declaration(mutation: MutationOperator, declaration: &Declaration) -> Vec<Declaration> {
+fn mutate_declaration(mutation: MutationOperator, declaration: &Declaration, exclude_methods: &[(Identifier, Identifier)]) -> Vec<Declaration> {
     match declaration {
         Declaration::Class(class) => (0..)
             .zip(&class.members)
             .map(|(i, member)| {
-                mutate_declaration_member(mutation, member, class.name.clone())
+                mutate_declaration_member(mutation, member, class.name.clone(), exclude_methods)
                     .into_iter()
                     .map(move |member| {
                         let mut members = class.members.clone();
                         members[i] = member;
 
+                        // dbg!(&class.name);
+                        // dbg!(&class.extends);
                         Declaration::Class(
                             Class {
                                 members,
@@ -191,7 +195,7 @@ fn mutate_declaration(mutation: MutationOperator, declaration: &Declaration) -> 
         Declaration::Interface(interface) => (0..)
             .zip(&interface.members)
             .map(|(i, member)| {
-                mutate_interface_member(mutation, member, interface.name.clone())
+                mutate_interface_member(mutation, member, interface.name.clone(), exclude_methods)
                     .into_iter()
                     .map(move |member| {
                         let mut members = interface.members.clone();
@@ -216,13 +220,14 @@ fn mutate_declaration_member(
     mutation: MutationOperator,
     member: &DeclarationMember,
     decl_name: Identifier,
+    exclude_methods: &[(Identifier, Identifier)]
 ) -> Vec<DeclarationMember> {
     match member {
-        DeclarationMember::Constructor(method) => mutate_method(mutation, method, decl_name)
+        DeclarationMember::Constructor(method) => mutate_method(mutation, method, decl_name, exclude_methods)
             .into_iter()
             .map(|method| DeclarationMember::Constructor(method))
             .collect(),
-        DeclarationMember::Method(method) => mutate_method(mutation, method, decl_name)
+        DeclarationMember::Method(method) => mutate_method(mutation, method, decl_name, exclude_methods)
             .into_iter()
             .map(|method| DeclarationMember::Method(method))
             .collect(),
@@ -234,9 +239,10 @@ fn mutate_interface_member(
     mutation: MutationOperator,
     member: &InterfaceMember,
     decl_name: Identifier,
+    exclude_methods: &[(Identifier, Identifier)]
 ) -> Vec<InterfaceMember> {
     match member {
-        InterfaceMember::DefaultMethod(method) => mutate_method(mutation, method, decl_name)
+        InterfaceMember::DefaultMethod(method) => mutate_method(mutation, method, decl_name, exclude_methods)
             .into_iter()
             .map(|method| InterfaceMember::DefaultMethod(method))
             .collect(),
@@ -250,7 +256,11 @@ fn mutate_method(
     mutation: MutationOperator,
     method: &Method,
     decl_name: Identifier,
+    exclude_methods: &[(Identifier, Identifier)]
 ) -> Vec<Rc<Method>> {
+    if exclude_methods.contains(&(decl_name.clone(), method.name.clone())) {
+        return vec![];
+    }
     let mut env = Environment::new();
     env.insert(
         "this".into(),
@@ -544,7 +554,17 @@ fn mutate_rhs(mutation: MutationOperator, rhs: &Rhs, env: &mut Environment) -> V
                 });
             sizes.collect()
         }
-        Rhs::RhsCast { .. } => todo!(),
+        Rhs::RhsCast { cast_type, var, .. } => {
+            let vars = apply_var(mutation, var.clone(), env)
+                .into_iter()
+                .map(|var| Rhs::RhsCast {
+                    var: var.into(),
+                    cast_type: cast_type.clone(),
+                    info: info.clone(),
+                });
+
+            vars.collect()
+        },
     }
 }
 
@@ -902,7 +922,7 @@ mod tests {
             }
         });
 
-        let stats = mutate_method(mutator, &method, "SimpleClass".into());
+        let stats = mutate_method(mutator, &method, "SimpleClass".into(), &[]);
         println!("{}\n\n", method.body.borrow());
         for stat in stats {
             println!("{}\n\n", stat.body.borrow());
@@ -922,7 +942,7 @@ mod tests {
             }
         });
 
-        let mutated_units = mutate_compilation_unit(mutator, &compilation_unit);
+        let mutated_units = mutate_compilation_unit(mutator, &compilation_unit, &[]);
         // println!("{}\n\n", compilation_unit);
         for mutated_unit in mutated_units {
             println!("{}\n\n", mutated_unit);

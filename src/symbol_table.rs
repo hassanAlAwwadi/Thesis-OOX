@@ -210,10 +210,18 @@ impl SymbolTable {
         &self.decl_to_instance_types[class_name]
     }
 
-    pub fn lookup_field(&self, class_name: &Identifier, field: &str) -> Option<&Field> {
-        self.class_to_fields.get(class_name).unwrap_or_else(|| panic!("{} was not found", class_name))
-            .iter()
-            .find(|(f, _)| *f == field)
+    pub fn lookup_field(
+        &self,
+        class_name: &Identifier,
+        field: &str,
+    ) -> Result<Option<&Field>, SymbolError> {
+        self.class_to_fields
+            .get(class_name)
+            .ok_or(format!(
+                "{} was not found when searching for field {}",
+                class_name, field
+            ))
+            .map(|fields| fields.iter().find(|(f, _)| *f == field))
     }
 
     pub fn get_class(&self, class_name: &Identifier) -> Result<Rc<Class>, SymbolError> {

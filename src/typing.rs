@@ -475,7 +475,7 @@ fn type_lhs(lhs: Lhs, env: &mut TypeEnvironment, st: &SymbolTable) -> Result<Lhs
             })?;
 
             // something's going to need to be changed here due to inheritance of fields
-            if let Some((_, field_type)) = st.lookup_field(&class_name, &field) {
+            if let Some((_, field_type)) = st.lookup_field(&class_name, &field)? {
                 Ok(Lhs::LhsField {
                     var,
                     var_type,
@@ -530,7 +530,7 @@ fn type_rhs(
             let class_name = var_type.as_reference_type().ok_or_else(|| {
                 error::unification_error(RuntimeType::REFRuntimeType, var_type.clone(), info)
             })?;
-            if let Some((_, field_type)) = st.lookup_field(class_name, &field) {
+            if let Some((_, field_type)) = st.lookup_field(class_name, &field)? {
                 Ok(Rhs::RhsField {
                     var,
                     field,

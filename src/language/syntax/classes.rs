@@ -3,9 +3,8 @@ use derivative::Derivative;
 use crate::positioned::SourcePos;
 
 use super::{DeclarationMember, Identifier};
-use std::fmt::Debug;
 
-#[derive(Debug, Clone, Derivative)]
+#[derive(Clone, Derivative)]
 #[derivative(PartialEq, Eq)]
 pub struct Class {
     pub name: Identifier,

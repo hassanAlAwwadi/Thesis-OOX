@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion, SamplingMode, BenchmarkGroup, measurement::{Measurement, WallTime}};
-use lib::{verify, Options};
+use lib::{verify, Options, Heuristic};
 
 fn options() -> Options<'static> {
     Options {
@@ -19,14 +19,48 @@ fn options() -> Options<'static> {
 }
 
 fn experiment2<'a, M: Measurement>(c: &'a mut Criterion<M>) -> BenchmarkGroup<'a, M>{
-    let options = options();
+    let mut options = options();
     let mut group = c.benchmark_group("experiment1");
     group.sample_size(10);
     group.sampling_mode(SamplingMode::Flat);
-    group.bench_function("Array sorting functions", |b| {
+    group.bench_function("List sorting functions --heuristic Depth First Search", |b| {
         b.iter(|| {
             verify(
-                &["./benchmark_programs/experiment2/array-sorting/sorting.oox"],
+                &["./benchmark_programs/experiment2/list-sorting/sorting.oox"],
+                "Main",
+                "test",
+                options,
+            )
+        })
+    });
+    options.heuristic = Heuristic::MinDist2Uncovered;
+    group.bench_function("List sorting functions --heuristic Min Dist 2 Uncovered", |b| {
+        b.iter(|| {
+            verify(
+                &["./benchmark_programs/experiment2/list-sorting/sorting.oox"],
+                "Main",
+                "test",
+                options,
+            )
+        })
+    });
+    options.heuristic = Heuristic::RandomPath;
+    group.bench_function("List sorting functions --heuristic Random Path", |b| {
+        b.iter(|| {
+            verify(
+                &["./benchmark_programs/experiment2/list-sorting/sorting.oox"],
+                "Main",
+                "test",
+                options,
+            )
+        })
+    });
+
+    options.heuristic = Heuristic::RoundRobinMD2URandomPath;
+    group.bench_function("List sorting functions --heuristic Round Robin MD2U & Random Path", |b| {
+        b.iter(|| {
+            verify(
+                &["./benchmark_programs/experiment2/list-sorting/sorting.oox"],
                 "Main",
                 "test",
                 options,

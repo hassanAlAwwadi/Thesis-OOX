@@ -7,6 +7,7 @@ pub struct Statistics {
     pub number_of_verifications: u32,
     pub number_of_local_solves: u32,
     pub number_of_z3_invocations: u32,
+    pub number_of_paths_explored: u64,
     pub total_runtime: u32,
     // Coverage
     pub reachable_statements: u32,
@@ -29,6 +30,7 @@ impl Default for Statistics {
             covered_statements: 0,
             coverage: HashSet::new(),
             start_time: Instant::now(),
+            number_of_paths_explored: 0,
         }
     }
 }

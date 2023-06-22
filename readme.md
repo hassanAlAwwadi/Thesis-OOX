@@ -21,6 +21,11 @@ You can confirm this by using the `--visualize-coverage` command which will prin
 `cargo test --release`
 I recommend running the tests with the `--release` flag unless you are debugging, to speed it up.
 
+# Mutations
+The mutations for experiment 2 were generated using
+`cargo run -- mutate ./benchmark_programs/experiment2/list-sorting/sorting.oox --out ./benchmark_programs/experiment2/list-sorting/mutations --exclude Main.test Node.toArray List.toArray`.
+
+
 # Editor tips
 I recommend to use the visual studio code editor, with the 'rust analyzer' extension.
 
