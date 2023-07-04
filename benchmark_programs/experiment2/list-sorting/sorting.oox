@@ -14,6 +14,10 @@ interface List {
 class IntArray implements List {
     int[] ints;
 
+    IntArray(int[] ints) {
+        this.ints := ints;
+    }
+
     int get(int i) {
         int[] ints := this.ints;
         assert i >= 0 && i < #ints;
@@ -48,6 +52,15 @@ class IntArray implements List {
 class Node implements List {
     int value ;
     Node next ;
+
+    Node(int[] a, int i) {
+        if (i >= 0 && i < #a) {
+            this.value := a[i];
+            if (i + 1 < #a) {
+                this.next := new Node(a, i + 1);
+            }
+        }
+    }
 
     int get(int i) {
         if (i == 0) {
@@ -236,6 +249,25 @@ class Main
         bool listIsOk := list.repOk();
         assume listIsOk;
         int N := 5;
+        list := sorter.sort(list);
+
+        int[] a := list.toArray();
+        assert forall v , i : a : (forall w , j : a : i < j ==> v <= w);
+    }
+
+    static void test2(int[] arr, bool b, Sorter sorter)
+        requires(arr != null && #arr > 0)
+    {
+        List list;
+        if (b) {
+            list := new IntArray(arr);
+        } else {
+            list := new Node(arr, 0);
+            int length := list.length();
+            assert #arr == length;
+        }
+        bool listIsOk := list.repOk();
+        assume listIsOk;
         list := sorter.sort(list);
 
         int[] a := list.toArray();

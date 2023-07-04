@@ -890,7 +890,7 @@ fn same_type(t1: &NonVoidType, t2: &NonVoidType) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::{parse_program, parser, statement, tokens, typeable::Typeable, SourcePos};
+    use crate::{parse_program, parser, tokens};
 
     use super::*;
 

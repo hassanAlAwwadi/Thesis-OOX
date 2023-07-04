@@ -60,6 +60,14 @@ class Node implements Value {
     Value value ;
     Node next ;
 
+    Node(Value[] a, int i) {
+        if (i >= 0 && i < #a) {
+            this.value := a[i];
+            if (i + 1 < #a) {
+                this.next := new Node(a, i + 1);
+            }
+        }
+    }
 
     bool member(Value x) {
         Value v := this.value ;
@@ -113,6 +121,18 @@ class Node implements Value {
 class Main {
 
     static void test(Node a, Node b) {
+        bool aEqualsB := a.equals(b);
+        int aLength := a.length();
+        int bLength := b.length();
+
+        assert aEqualsB ==> aLength == bLength;
+    }
+
+    static void test2(Value[] as, Value[] bs)
+        requires(as != null && bs != null && #as > 0 && #bs > 0) {
+        Node a := new Node(as, 0);
+        Node b := new Node(bs, 0);
+
         bool aEqualsB := a.equals(b);
         int aLength := a.length();
         int bLength := b.length();

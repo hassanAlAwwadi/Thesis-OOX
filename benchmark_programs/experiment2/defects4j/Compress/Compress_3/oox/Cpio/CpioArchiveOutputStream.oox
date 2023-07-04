@@ -24,8 +24,6 @@ class FilterOutputStream extends OutputStream {
     FilterOutputStream(OutputStream out) {}
 }
 
-class OutputStream {}
-
 
 class CpioArchiveOutputStream implements ArchiveOutputStream {
 

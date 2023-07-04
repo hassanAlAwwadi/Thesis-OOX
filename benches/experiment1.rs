@@ -3,7 +3,7 @@ use lib::{verify, Options};
 
 fn options() -> Options<'static> {
     Options {
-        k: 40,
+        k: 60,
         quiet: true,
         with_exceptional_clauses: true,
         heuristic: lib::Heuristic::DepthFirstSearch,

@@ -327,7 +327,7 @@ fn action(
                     // First check the normal expression
                     let expression = evaluate(state, requires, en);
                     if *expression == Expression::FALSE {
-                        println!("Constraint is infeasible");
+                        debug!(state.logger, "Constraint is infeasible");
                         return ActionResult::InfeasiblePath;
                     } else if *expression != Expression::TRUE {
                         state.constraints.insert(expression);
@@ -2318,4 +2318,28 @@ fn arrays3() {
         verify(&["./examples/array/array3.oox"], "Main", "test", options).unwrap().0,
         SymResult::Valid
     )
+}
+
+
+#[test]
+fn idk() {
+    let path = &["./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/ArchiveOutputStream.oox", 
+                 "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/ArchiveEntry.oox", 
+                 "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/ArchiveStreamFactory.oox", 
+                 "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/Zip/ZipArchiveOutputStream.oox", 
+                 "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/Zip/ZipArchiveEntry.oox", 
+                 "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/Tar/TarArchiveOutputStream.oox", 
+                 "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/Tar/TarArchiveEntry.oox", 
+                 "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/Jar/JarArchiveOutputStream.oox", 
+                 "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/Jar/JarArchiveEntry.oox", 
+                 "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/Cpio/CpioArchiveOutputStream.oox", 
+                 "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/Cpio/CpioArchiveEntry.oox", 
+                 "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/Ar/ArArchiveOutputStream.oox", 
+                 "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/Ar/ArArchiveEntry.oox", 
+                 "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/StringConstants.oox", 
+                 "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/Main.oox", 
+    ];
+
+    
+    verify(path, "Main", "test_symbolic", Options::default_with_k(1000)).unwrap();
 }

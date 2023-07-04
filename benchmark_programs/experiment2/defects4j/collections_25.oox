@@ -353,7 +353,7 @@ class ListIteratorOfInt implements Iterator {
 }
 
 
-class Test {
+class Main {
     // original test in Java, converted to OOX
     static void test()
         exceptional(false) {
@@ -401,9 +401,9 @@ class Test {
         requires(a != null && b != null && #a > 0 && #b == #a)
         exceptional(false) {
 
-        IntList collectionA := Test.helper_IntList(a);
+        IntList collectionA := Main.helper_IntList(a);
         
-        IntList collectionB := Test.helper_IntList(b);
+        IntList collectionB := Main.helper_IntList(b);
 
         Iterator aIterator := collectionA.iterator();
         Iterator bIterator := collectionB.iterator();
@@ -418,7 +418,7 @@ class Test {
     static void test3(int[] elements)
         requires(elements != null && #elements == 3)
         exceptional(false) {
-        IntList collectionEven := Test.helper_IntList(elements);
+        IntList collectionEven := Main.helper_IntList(elements);
 
         int expected := elements[0];
         int actual := collectionEven.get(0);

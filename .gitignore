@@ -4,3 +4,4 @@ logs.txt
 visualize
 coverage_visualized.txt
 /logs/*
+benchmark

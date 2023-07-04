@@ -591,7 +591,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Invocation {
                 arguments,
                 ..
             } => {
-                let result = allocator.text(class_name.to_string());
+                let result = allocator.text("new ").append(allocator.text(class_name.to_string()));
                 result.append(pretty_arguments(arguments, allocator))
             }
             Invocation::InvokeSuperConstructor { arguments, .. } => {

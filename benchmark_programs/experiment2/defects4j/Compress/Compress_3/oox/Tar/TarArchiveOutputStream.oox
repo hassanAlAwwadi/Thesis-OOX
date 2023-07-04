@@ -1,5 +1,3 @@
-class OutputStream {}
-
 
 class TarArchiveOutputStream implements ArchiveOutputStream {
     int LONGFILE_ERROR;

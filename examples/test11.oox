@@ -1,3 +1,9 @@
+
+interface A {
+
+    void f() {}
+}
+
 class Main {
     static void test(int x) {
         if (x == 0) {
@@ -12,5 +18,10 @@ class Main {
             }
         }
 
+    }
+
+    static void test2(A a) {
+        a.f();
+        assert false;
     }
 }

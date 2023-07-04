@@ -1,9 +1,9 @@
-use criterion::{criterion_group, criterion_main, Criterion, SamplingMode, BenchmarkGroup, measurement::{Measurement, WallTime}};
+use criterion::{criterion_group, criterion_main, Criterion, SamplingMode, BenchmarkGroup, measurement::{Measurement}};
 use lib::{verify, Options, Heuristic};
 
 fn options() -> Options<'static> {
     Options {
-        k: 120,
+        k: 1000,
         quiet: true,
         with_exceptional_clauses: true,
         heuristic: lib::Heuristic::DepthFirstSearch,
@@ -18,7 +18,7 @@ fn options() -> Options<'static> {
     }
 }
 
-fn experiment3<'a, M: Measurement>(c: &'a mut Criterion<M>) -> BenchmarkGroup<'a, M>{
+fn experiment3<'a, M: Measurement>(c: &'a mut Criterion<M>) -> BenchmarkGroup<'a, M> {
     let mut options = options();
     let mut group = c.benchmark_group("experiment2.3");
     group.sample_size(100);

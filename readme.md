@@ -13,6 +13,9 @@ You can find the arguments required by passing `--help` like this:
 Running in release is 5-30 times faster depending on the program, but will not log any debug logs to the log file.
 `cargo run --release -- "./examples/intLinkedList.oox" --heuristic depth-first-search --function Node.test2 --k 50`
 
+You can also run a multi-file setup, the files will be merged in the order you pass them. Note that sometimes this can leads to some typing problems. For example:
+`cargo run --release -- verify ./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/ArchiveOutputStream.oox ./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/ArchiveEntry.oox ./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/Zip/* ./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/**/*.oox ./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/*.oox --k 1000 -f Main.test_symbolic`
+
 # Coverage
 The coverage is displayed when running the programs. The coverage is computed over the reachable program statements. Sometimes it may not be possible to reach 100% due to infeasible paths. 
 You can confirm this by using the `--visualize-coverage` command which will print the program to `coverage_visualized.txt` and show for each statement the coverage.

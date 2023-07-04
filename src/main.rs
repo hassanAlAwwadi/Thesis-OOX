@@ -68,9 +68,14 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         no_local_solving_threshold: bool,
 
-        /// Run as a benchmark
+        /// Run as a benchmark, exporting results to the file 'benchmark'
         #[arg(long, default_value_t = false)]
         run_as_benchmark: bool,
+
+        /// When run as a benchmark, repeat for this often
+        #[arg(long, default_value_t = 3)]
+        benchmark_repeat: u64,
+
     },
     /// Parse and typecheck an OOX source file
     Check {
@@ -115,6 +120,7 @@ fn main() -> Result<(), String> {
             local_solving_threshold,
             no_local_solving_threshold,
             run_as_benchmark,
+            benchmark_repeat
         } => {
             if let Some((class_name, method_name)) = function.split('.').collect_tuple() {
                 let options = Options {
@@ -127,7 +133,7 @@ fn main() -> Result<(), String> {
                     symbolic_array_size,
                     time_budget,
                     log_path: &log_path,
-                    discard_logs: false,
+                    discard_logs: if run_as_benchmark { true } else { false },
                     prune_path_z3,
                     local_solving_threshold: if no_local_solving_threshold {
                         None
@@ -162,7 +168,7 @@ fn main() -> Result<(), String> {
                     };
                     
 
-                    for _i in 0..2 {
+                    for _i in 0..benchmark_repeat {
                         let start = Instant::now();
                         let (sym_result, statistics) =
                             verify(source_paths.as_slice(), class_name, method_name, options)?;
