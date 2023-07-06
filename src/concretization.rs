@@ -1,3 +1,27 @@
+//!
+//! 
+//! Original OOX deals with symbolic references in Z3 expressions as follows:
+//! Find all concrete references (aliasMap) for each of the symbolic references 
+//! create for each combination of these an expression with their concrete references
+//! this results in multiple expressions that need to be solved
+//! 
+//! Concretization example
+//! Given the following two symbolic objects and their aliases
+//!  _node = [null, ref(1)] 
+//!  _next1 = [null, ref(1), ref(2)]
+//!  
+//!  And given the expression
+//!  _node == _next1
+//!  
+//!  There are len(_node) * len(_next1) number of unique concretizations that will be solved by Z3:
+//!  
+//!  null == null
+//!  null == ref(1)
+//!  null == ref(2)
+//!  ref(1) == null
+//!  ref(1) == ref(1)
+//!  ref(1) == ref(2)
+
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
@@ -124,72 +148,6 @@ fn helper(
         | Expression::Ref { .. } => expression.clone(),
     }
 }
-
-// [
-//     node1: [1, 2, 3],
-//     node2: [3, 4],
-//     node3: [5, 6],
-// ]
-
-// [
-//     node1: [1, 1, 2, 2, 3, 3]
-//     node2: [3, 4, 3, 4, 3, 4]
-//     node5: []
-// ]
-
-// [
-//     node3: [5, 6]
-// ], node2
-
-// =>
-// [
-//     node2: [3, 3, 4, 4]
-//     node3, [5, 6, 5, 6]
-// ], node1
-
-// [
-//     node1: [1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]
-//     node2: [3, 3, 4, 4, 3, 3, 4, 4, 3, 3, 4, 4]
-//     node3, [5, 6, 5, 6, 5, 6, 5, 6, 5, 6, 5, 6]
-// ]
-
-// alias_map.iter().fold(HashMap::new(), |mut a: HashMap<&Identifier, Option<Box<dyn Iterator<Item = &Expression>>>>, x| {
-
-//     if a.is_empty() {
-//         a.insert(x.0, Some(Box::new(x.1.iter())));
-//     }
-//     for ref_ in x.1 {
-//         for (key, refs) in  a.iter_mut() {
-//             let r = refs.take().unwrap();
-//             *refs = Some( Box::new(std::iter::repeat(ref_).chain(r)));
-
-//         }
-//     }
-
-//     a
-// });
-
-// cycle all and take(<all_len_multiplied>)
-
-// let mut iter = symbolic_refs.iter().map(|ref_| (ref_, &alias_map[ref_]));
-
-// let mut m: HashMap<&'a String, Option<Box<dyn CloneIterator<Item=&Expression>>>> = HashMap::new();
-// let mut size = 0;
-
-// let (ref_, crefs) = iter.next().unwrap();
-// m.insert(ref_, Some(Box::new(crefs.iter())));
-// size = crefs.len();
-
-// for (ref_, concrete_refs) in iter {
-// let len = concrete_refs.len();
-
-// for concrete_refs in m.values_mut() {
-//     let r = concrete_refs.take().unwrap();
-//     let z = r.clone_box();
-//     let r = Box::new(r.chain(z));
-//     // *concrete_refs = Some(r);
-// }
-// }
 
 // returns the identifiers of all Expression::SymbolicRef in expression.
 pub fn find_symbolic_refs(expression: &Expression) -> HashSet<&Identifier> {

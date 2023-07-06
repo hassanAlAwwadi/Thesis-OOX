@@ -167,14 +167,6 @@ fn finish_state_in_path(mut leaf: Rc<RefCell<ExecutionTree>>) -> bool {
         let parent = if let Some(parent) = leaf.borrow().parent().upgrade() {
             parent
         } else {
-            // We have reached the root node that has no parent, set it to be an empty leaf and exit.
-            // let mut leaf = leaf.borrow_mut();
-            // let statement = leaf.statement();
-            // *leaf = N::Leaf {
-            //     parent: Weak::new(),
-            //     statement: 0,
-            //     states: vec![],
-            // };
             return true;
         };
 

@@ -62,6 +62,7 @@ impl AliasEntry {
         }
     }
 
+    /// Null aliases can be removed if the object is accessed after the null guard checks (which are inserted in the parser).
     pub fn remove_null(&mut self) {
         self.aliases.retain(|x| *x.as_ref() != Expression::NULL);
     }

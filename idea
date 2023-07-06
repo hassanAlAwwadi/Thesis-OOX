@@ -1,8 +1,0 @@
-Logger with filtering options for each path (will help with debugging!)
-links:
-https://docs.rs/slog-bunyan/2.4.0/slog_bunyan/
-https://docs.rs/slog/latest/slog/macro.log.html
-https://github.com/slog-rs/misc/blob/master/examples/features.rs
-https://github.com/slog-rs/example-lib
-
-cargo test array1 | bunyan --output simple -l ERROR
