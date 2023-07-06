@@ -2227,7 +2227,7 @@ fn benchmark_col_25() {
     assert_eq!(
         verify(
             &["./benchmark_programs/experiment2/defects4j/collections_25.oox"],
-            "Test",
+            "Main",
             "test",
             options
         )
@@ -2243,7 +2243,7 @@ fn benchmark_col_25_symbolic() {
     assert_eq!(
         verify(
             &["./benchmark_programs/experiment2/defects4j/collections_25.oox"],
-            "Test",
+            "Main",
             "test_symbolic",
             options
         )
@@ -2259,7 +2259,7 @@ fn benchmark_col_25_test3() {
     assert_eq!(
         verify(
             &["./benchmark_programs/experiment2/defects4j/collections_25.oox"],
-            "Test",
+            "Main",
             "test3",
             options
         )
