@@ -9,6 +9,8 @@ Make sure you have Rust installed <https://www.rust-lang.org/tools/install>.
 We can run and build the project in debug mode with `cargo run`, `cargo build` and in release mode by passing the `--release` flag.
 Building the project for the first time can take 5-10 minutes because it has to build a version of Z3.
 
+Alternatively you can use the provided Dockerfile.
+
 ### Passing arguments
 Arguments to OOX can be passed after a `--`.
 You can find the arguments required by passing `--help` like this:
