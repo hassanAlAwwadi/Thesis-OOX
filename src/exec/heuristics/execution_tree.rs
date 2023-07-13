@@ -142,7 +142,6 @@ pub(super) fn sym_exec_execution_tree(
     mut heuristic: impl ExecutionTreeBasedHeuristic,
     options: &Options,
 ) -> SymResult {
-    // let mut paths = PathTree {root: state.pc, nodes: HashMap::from([(state.pc, TreeNode::Leaf(vec![state]))]) };
     let tree = Rc::new(RefCell::new(ExecutionTree::Leaf {
         parent: Weak::new(),
         statement: state.pc,
@@ -195,13 +194,6 @@ pub(super) fn sym_exec_execution_tree(
 
                 match new_states.len() {
                     0 => {
-                        // Branch finished due to "throw"
-                        // dbg!(current_pc, &program[&current_pc]);
-                        // if let Some(parent) = states_node.borrow().parent().upgrade() {
-                        //     dbg!(parent.borrow().deref().statement());
-                        // } else {
-                        //     dbg!("no parent");
-                        // }
                         let is_finished = finish_state_in_path(states_node.clone());
                         if is_finished {
                             // We have explored all states.
@@ -211,14 +203,7 @@ pub(super) fn sym_exec_execution_tree(
                     }
                     1 => {
                         let (_pc, states) = new_states.into_iter().next().unwrap();
-                        // debug!(root_logger, "new state {:?}", pc);
-
-                        // let mut tree = Rc::new(RefCell::new(N::Leaf(Weak::new(), states)));
-                        // tree.borrow_mut().set_parent(Rc::<_>::downgrade(&tree));
-
                         states_node.borrow_mut().set_states(states);
-
-                        // *states_node.borrow_mut() = N::Leaf { parent: Weak::new(), states };
                     }
                     _n => {
                         // Branching, split up states
@@ -239,8 +224,6 @@ pub(super) fn sym_exec_execution_tree(
                                 }))
                             })
                             .collect();
-
-                        // assert!(true_.len() > 0 && false_.len() > 0);
 
                         let parent = states_node.borrow().parent();
                         *states_node.borrow_mut() = ExecutionTree::Node {

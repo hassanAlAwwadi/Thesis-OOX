@@ -1,4 +1,4 @@
-// since the class and method declaration must be inserted into the abstract syntax tree, this mess is needed.
+//! Resolving of the invocations, has to be done once during startup. The resolved invocations are inserted back into the syntax tree.
 
 use std::{collections::HashMap, rc::Rc};
 
