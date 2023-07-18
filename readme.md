@@ -1,3 +1,5 @@
+Note: this is a clone of Daniel's thesis project work on OOX, https://github.com/DanielvanVliet/OO
+
 # OOX
 A symbolic verification tool for verifying object oriented languages. Programs that are verified are written in the OOX intermediate verification language, examples can be found in `/examples` and `/benchmark_programs`. This repository is a rewrite of the <https://github.com/stefankoppier/oox> repository, without support for concurrency, with the following additions:
 - Support for inheritance, interfaces and dynamic dispatch
