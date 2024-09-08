@@ -5,3 +5,4 @@ visualize
 coverage_visualized.txt
 /logs/*
 benchmark
+Cargo.lock
