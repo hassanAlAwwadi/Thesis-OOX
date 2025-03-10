@@ -107,71 +107,73 @@ fn member_cfg(
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
     match member {
         DeclarationMember::Method(method) => label_method(class_name, method, i),
-        DeclarationMember::Constructor(method) => {
-            let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
-            let mut v = Vec::new();
-            v.push((
-                *i,
-                CFGStatement::FunctionEntry {
-                    decl_name: class_name.clone(),
-                    method_name: method.name.clone(),
-                    argument_types: method.params.iter().map(Typeable::type_of).collect(),
-                },
-            ));
-            let entry_label = *i;
-            *i += 1;
-            v.append(&mut statement_cfg(&method.body.borrow(), i));
-            // insert `return this;` at the end of the constructor flow.
-            v.push((
-                *i,
-                CFGStatement::Statement(Statement::Return {
-                    expression: Rc::new(Expression::Var {
-                        var: this_str(),
-                        type_: member.type_of(),
-                        info: SourcePos::UnknownPosition,
-                    })
-                    .into(),
-                    info: SourcePos::UnknownPosition,
-                }),
-            ));
-            let return_this_label = *i;
-            *i += 1;
-            v.push((
-                *i,
-                CFGStatement::FunctionExit {
-                    decl_name: class_name,
-                    method_name: method.name.clone(),
-                    argument_types: method.params.iter().map(Typeable::type_of).collect(),
-                },
-            ));
-            let exit_label = *i;
-            *i += 1;
-
-            let init_l = init(&v[1]);
-            let init = (init_l, lookup(init(&v[1]), &v));
-            let mut flw = flow(&v[1], &v);
-
-            flw.push((entry_label, init.0));
-
-            // //dbg!(&v[1]);
-            // final(S)
-            for l in r#final(&v[1], &v) {
-                flw.push((l, return_this_label));
-            }
-            // fallthrough(S)
-            // //dbg!(&fallthrough(&v[1], &v));
-            for (l, _s) in fallthrough(&v[1], &v) {
-                flw.push((l, return_this_label));
-            }
-
-            // from `return this;` to function exit.
-            flw.push((return_this_label, exit_label));
-
-            labelled_statements.append(&mut v);
-            (labelled_statements, flw)
-        }
+        DeclarationMember::Constructor(method) => label_constructor(class_name, member, method, i),
         DeclarationMember::Field { .. } => (Vec::new(), Vec::new()),
     }
+}
+
+fn label_constructor(class_name: Identifier, member: &DeclarationMember, method: &Rc<Method>, i: &mut u64) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
+    let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
+    let mut v = Vec::new();
+    v.push((
+        *i,
+        CFGStatement::FunctionEntry {
+            decl_name: class_name.clone(),
+            method_name: method.name.clone(),
+            argument_types: method.params.iter().map(Typeable::type_of).collect(),
+        },
+    ));
+    let entry_label = *i;
+    *i += 1;
+    v.append(&mut statement_cfg(&method.body.borrow(), i));
+    // insert `return this;` at the end of the constructor flow.
+    v.push((
+        *i,
+        CFGStatement::Statement(Statement::Return {
+            expression: Rc::new(Expression::Var {
+                var: this_str(),
+                type_: member.type_of(),
+                info: SourcePos::UnknownPosition,
+            })
+            .into(),
+            info: SourcePos::UnknownPosition,
+        }),
+    ));
+    let return_this_label = *i;
+    *i += 1;
+    v.push((
+        *i,
+        CFGStatement::FunctionExit {
+            decl_name: class_name,
+            method_name: method.name.clone(),
+            argument_types: method.params.iter().map(Typeable::type_of).collect(),
+        },
+    ));
+    let exit_label = *i;
+    *i += 1;
+
+    let init_l = init(&v[1]);
+    let init = (init_l, lookup(init(&v[1]), &v));
+    let mut flw = flow(&v[1], &v);
+
+    flw.push((entry_label, init.0));
+
+    // //dbg!(&v[1]);
+    // final(S)
+    for l in r#final(&v[1], &v) {
+        flw.push((l, return_this_label));
+    }
+    // fallthrough(S)
+    // //dbg!(&fallthrough(&v[1], &v));
+    for (l, _s) in fallthrough(&v[1], &v) {
+        flw.push((l, return_this_label));
+    }
+
+    // from `return this;` to function exit.
+    flw.push((return_this_label, exit_label));
+
+    labelled_statements.append(&mut v);
+    (labelled_statements, flw)
 }
 
 fn interface_member_cfg(
@@ -192,27 +194,28 @@ fn label_method(
 ) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
     let mut v = Vec::new();
+    let entry_label = *i;
+    *i += 1;
     v.push((
-        *i,
+        entry_label,
         CFGStatement::FunctionEntry {
             decl_name: class_name.clone(),
             method_name: method.name.clone(),
             argument_types: method.params.iter().map(Typeable::type_of).collect(),
         },
     ));
-    let entry_label = *i;
-    *i += 1;
     v.append(&mut statement_cfg(&method.body.borrow(), i));
+    
+    let exit_label: u64 = *i;
+    *i += 1;
     v.push((
-        *i,
+        exit_label,
         CFGStatement::FunctionExit {
             decl_name: class_name,
             method_name: method.name.clone(),
             argument_types: method.params.iter().map(Typeable::type_of).collect(),
         },
     ));
-    let exit_label = *i;
-    *i += 1;
 
     let init_l = init(&v[1]);
     let init = (init_l, lookup(init(&v[1]), &v));

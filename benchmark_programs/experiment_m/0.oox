@@ -1,0 +1,11 @@
+class Main {
+  // testing extremely simple programs
+
+  // Found with k = 300
+  static void main() {
+    int i = 1;
+    int j = 3;
+    bool ok = i < j;
+    assert ok;
+  }
+}

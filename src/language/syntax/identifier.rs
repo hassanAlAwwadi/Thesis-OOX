@@ -8,12 +8,14 @@ use std::{
 };
 
 #[derive(Clone, Derivative)]
-#[derivative(PartialEq, Hash, Eq)]
+#[derivative(PartialEq, Hash, Eq, PartialOrd, Ord)]
 pub struct Identifier {
     name: Rc<str>,
 
     #[derivative(PartialEq = "ignore")]
     #[derivative(Hash = "ignore")]
+    #[derivative(PartialOrd = "ignore")]
+    #[derivative(Ord = "ignore")]
     info: SourcePos,
 }
 

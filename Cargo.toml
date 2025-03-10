@@ -13,6 +13,9 @@ path = "src/main.rs"
 name = "lib"
 path = "src/lib.rs"
 
+[build-dependencies]
+cc="*"
+
 [dependencies]
 # nom = "7" old parser
 pom = "3.2.0"

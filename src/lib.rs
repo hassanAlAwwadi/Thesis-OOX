@@ -27,7 +27,9 @@ mod typing;
 
 mod statistics;
 mod mutation;
-
+mod merge;
+mod state;
+mod unique_supply;
 pub use language::*;
 
 #[macro_use]
@@ -46,3 +48,4 @@ pub use symbol_table::SymbolTable;
 pub use mutation::mutate_program;
 
 pub static FILE_NAMES: Mutex<Vec<String>> = Mutex::new(vec![]);
+

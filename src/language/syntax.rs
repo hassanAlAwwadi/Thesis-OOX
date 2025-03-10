@@ -5,7 +5,6 @@ use ordered_float::NotNan;
 mod classes;
 mod identifier;
 mod interfaces;
-
 pub use identifier::*;
 
 pub type Reference = i64;
@@ -546,9 +545,11 @@ pub enum Rhs {
     },
 }
 
+
+
 #[derive(Clone, Derivative)]
-#[derivative(PartialEq, Hash, Eq)]
-pub enum Expression {
+#[derivative(PartialEq, Hash, Eq, PartialOrd, PartialOrd="feature_allow_slow_enum", Ord="feature_allow_slow_enum")]
+pub enum Expression{
     Forall {
         elem: Identifier,
         range: Identifier,
@@ -556,7 +557,7 @@ pub enum Expression {
         formula: Rc<Expression>,
         type_: RuntimeType,
 
-        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        #[derivative(PartialEq = "ignore", Hash = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         info: SourcePos,
     },
     Exists {
@@ -565,7 +566,7 @@ pub enum Expression {
         domain: Identifier,
         formula: Rc<Expression>,
         type_: RuntimeType,
-        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        #[derivative(PartialEq = "ignore", Hash = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         info: SourcePos,
     },
     BinOp {
@@ -573,20 +574,20 @@ pub enum Expression {
         lhs: Rc<Expression>,
         rhs: Rc<Expression>,
         type_: RuntimeType,
-        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        #[derivative(PartialEq = "ignore", Hash = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         info: SourcePos,
     },
     UnOp {
         un_op: UnOp,
         value: Rc<Expression>,
         type_: RuntimeType,
-        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        #[derivative(PartialEq = "ignore", Hash = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         info: SourcePos,
     },
     Var {
         var: Identifier,
         type_: RuntimeType,
-        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        #[derivative(PartialEq = "ignore", Hash = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         info: SourcePos,
     },
     SymbolicVar {
@@ -594,28 +595,28 @@ pub enum Expression {
         var: Identifier,
         type_: RuntimeType,
 
-        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        #[derivative(PartialEq = "ignore", Hash = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         info: SourcePos,
     },
     Lit {
         lit: Lit,
         type_: RuntimeType,
 
-        #[derivative(Hash = "ignore", PartialEq = "ignore")]
+        #[derivative(Hash = "ignore", PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         info: SourcePos,
     },
     SizeOf {
         var: Identifier,
         type_: RuntimeType,
 
-        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        #[derivative(PartialEq = "ignore", Hash = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         info: SourcePos,
     },
     Ref {
         ref_: Reference,
         type_: RuntimeType,
 
-        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        #[derivative(PartialEq = "ignore", Hash = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         info: SourcePos,
     },
     SymbolicRef {
@@ -623,7 +624,7 @@ pub enum Expression {
         var: Identifier,
         type_: RuntimeType, // If this is REFRuntimeType, this means that we have different types in the aliasmap and a state split may be necessary if we invoke a method
 
-        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        #[derivative(PartialEq = "ignore", Hash = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         info: SourcePos,
     },
     Conditional {
@@ -632,7 +633,7 @@ pub enum Expression {
         false_: Rc<Expression>,
         type_: RuntimeType,
 
-        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        #[derivative(PartialEq = "ignore", Hash = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         info: SourcePos,
     },
 }
@@ -688,9 +689,64 @@ impl Expression {
         }
         None
     }
+
+    pub(crate) fn or(left: Rc<Expression>, right: Rc<Expression>) -> Rc<Expression> {
+        return  Rc::from(Expression::BinOp {
+            bin_op: BinOp::Or,
+            lhs: left,
+            rhs: right,
+            type_: RuntimeType::BoolRuntimeType,
+            info: SourcePos::UnknownPosition,
+        });
+    }
+    
+    pub(crate) fn and(left: Rc<Expression>, right: Rc<Expression>) -> Rc<Expression> {
+        return  Rc::from(Expression::BinOp {
+            bin_op: BinOp::And,
+            lhs: left,
+            rhs: right,
+            type_: RuntimeType::BoolRuntimeType,
+            info: SourcePos::UnknownPosition,
+        });
+    }
+    
+    pub(crate) fn implies(left: Rc<Expression>, right: Rc<Expression>) -> Rc<Expression> {
+        return  Rc::from(Expression::BinOp {
+            bin_op: BinOp::Implies,
+            lhs: left,
+            rhs: right,
+            type_: RuntimeType::BoolRuntimeType,
+            info: SourcePos::UnknownPosition,
+        });
+    }
+
+    pub(crate) fn not(condition: Rc<Expression>) -> Rc<Expression> {
+        return  Rc::from(Expression::UnOp { 
+            un_op: UnOp::Negate,
+            value: condition,
+            type_: RuntimeType::BoolRuntimeType,
+            info: SourcePos::UnknownPosition
+        })
+    }
+
+    pub(crate) fn get_type(self : &Expression) -> RuntimeType{
+        match self{
+            Expression::Forall { .. } => RuntimeType::BoolRuntimeType,
+            Expression::Exists { .. } => RuntimeType::BoolRuntimeType,
+            Expression::BinOp { type_, .. } => type_.clone(),
+            Expression::UnOp { type_, .. } => type_.clone(),
+            Expression::Var { type_, .. } => type_.clone(),
+            Expression::SymbolicVar { type_, .. } => type_.clone(),
+            Expression::Lit { type_, .. } => type_.clone(),
+            Expression::SizeOf { type_, .. } => RuntimeType::IntRuntimeType,
+            Expression::Ref { type_, .. } => type_.clone(),
+            Expression::SymbolicRef { type_, .. } => type_.clone(),
+            Expression::Conditional { type_, .. } => type_.clone(),
+        }
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum BinOp {
     Implies,
     And,
@@ -708,13 +764,13 @@ pub enum BinOp {
     Modulo,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum UnOp {
     Negative,
     Negate,
 }
 
-#[derive(Debug, Clone, PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq, Hash, PartialOrd, Ord)]
 pub enum Lit {
     BoolLit { bool_value: bool },
     UIntLit { uint_value: u64 },
@@ -772,7 +828,7 @@ pub enum NonVoidType {
 }
 
 /// The type of something at runtime
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RuntimeType {
     /// This variant is set to types during parsing phase, and is replaced after typing check.
     UnknownRuntimeType,

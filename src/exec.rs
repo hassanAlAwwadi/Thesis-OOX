@@ -814,6 +814,23 @@ fn collect_path_constraints(state: &State) -> Rc<Expression> {
         .unwrap()
 }
 
+fn collect_constraints(constraints: &PathConstraints) -> Rc<Expression> {
+    constraints
+        .iter()
+        .cloned()
+        .reduce(|x, y| {
+            Expression::BinOp {
+                bin_op: BinOp::And,
+                lhs: x,
+                rhs: y,
+                type_: RuntimeType::BoolRuntimeType,
+                info: SourcePos::UnknownPosition,
+            }
+            .into()
+        })
+        .unwrap()
+}
+
 fn read_field_concrete_ref(heap: &mut Heap, ref_: i64, field: &Identifier) -> Rc<Expression> {
     match heap.get_mut(&ref_).unwrap() {
         HeapValue::ObjectValue { fields, .. } => fields[field].clone(),
@@ -1022,10 +1039,10 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
                     write_field_concrete_ref(&mut state.heap, *ref_, field, e);
                 }
                 Expression::SymbolicRef { var, type_, .. } => {
-                    init_symbolic_reference(state, var, type_, en);
+                    init_symbolic_reference(state, &var, &type_, en);
                     // should also remove null here? --Assignemnt::45
                     // Yes, we have if (x = null) { throw; } guards that ensure it cannot be null
-                    remove_symbolic_null(&mut state.alias_map, var);
+                    remove_symbolic_null(&mut state.alias_map, &var);
                     let concrete_refs = &state.alias_map[var];
                     // dbg!(&var, &concrete_refs);
                     write_field_symbolic_ref(
@@ -1079,7 +1096,7 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
     match rhs {
         Rhs::RhsExpression { value, .. } => {
             match value.as_ref() {
-                Expression::Var { var, .. } => state.stack.lookup(var).unwrap_or_else(|| {
+                Expression::Var { var, .. } => state.stack.lookup(&var).unwrap_or_else(|| {
                     panic!(
                         "Could not find {:?} on the stack {:?}",
                         var,
@@ -1091,7 +1108,7 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
         }
         Rhs::RhsField { var, field, .. } => {
             if let Expression::Var { var, .. } = var.as_ref() {
-                let object = state.stack.lookup(var).unwrap();
+                let object = state.stack.lookup(&var).unwrap();
                 exec_rhs_field(state, object, field, en)
             } else {
                 panic!(
@@ -1103,7 +1120,7 @@ fn evaluate_rhs(state: &mut State, rhs: &Rhs, en: &mut impl Engine) -> Rc<Expres
         // where in each state the aliasmap is left with one concrete array.
         Rhs::RhsElem { var, index, .. } => {
             if let Expression::Var { var, .. } = var.as_ref() {
-                let array = state.stack.lookup(var).unwrap();
+                let array = state.stack.lookup(&var).unwrap();
                 exec_rhs_elem(state, array, index.to_owned().into(), en)
             } else {
                 panic!("Unexpected uninitialized array");
@@ -1188,8 +1205,8 @@ fn exec_rhs_field(
         } => panic!("infeasible"),
         Expression::Ref { ref_, .. } => read_field_concrete_ref(&mut state.heap, *ref_, field),
         Expression::SymbolicRef { var, type_, .. } => {
-            init_symbolic_reference(state, var, type_, en);
-            remove_symbolic_null(&mut state.alias_map, var);
+            init_symbolic_reference(state, &var, &type_, en);
+            remove_symbolic_null(&mut state.alias_map, &var);
             let concrete_refs = &state.alias_map[var];
             // dbg!(&alias_map);
             // dbg!(&heap);
@@ -1514,6 +1531,7 @@ pub enum Heuristic {
     RandomPath,
     MinDist2Uncovered,
     RoundRobinMD2URandomPath,
+    PathMerging,
 }
 
 /// For a description of each option, see Commands in main.rs
@@ -1716,7 +1734,7 @@ pub fn verify(
     };
 
     let path_counter = Rc::new(RefCell::new(IdCounter::new(0)));
-    let mut statistics = Statistics::default();
+    let mut statistics: Statistics = Default::default();
 
     // Choose between heuristic function (with matching parameters)
     let sym_exec = match options.heuristic {
@@ -1724,6 +1742,7 @@ pub fn verify(
         Heuristic::RandomPath => heuristics::random_path::sym_exec,
         Heuristic::MinDist2Uncovered => heuristics::min_dist_to_uncovered::sym_exec,
         Heuristic::RoundRobinMD2URandomPath => heuristics::round_robin::sym_exec,
+        Heuristic::PathMerging              => heuristics::path_merging::sym_exec,
     };
     let sym_result = sym_exec(
         state,

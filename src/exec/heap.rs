@@ -8,7 +8,7 @@ use std::{collections::HashMap, rc::Rc};
 
 use crate::exec::ImHashMap;
 use crate::{Expression, Identifier, Reference, RuntimeType};
-
+use std::collections::BTreeMap;
 pub type Heap = ImHashMap<Reference, HeapValue>;
 
 /// Get an element at index from reference in the heap.
@@ -22,10 +22,10 @@ pub fn get_element(index: usize, ref_: Reference, heap: &Heap) -> Rc<Expression>
 }
 
 /// A value on the heap, either an object (mapping from fields to expression) or an array (mapping from index to expression)
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum HeapValue {
     ObjectValue {
-        fields: HashMap<Identifier, Rc<Expression>>,
+        fields: BTreeMap<Identifier, Rc<Expression>>,
         type_: RuntimeType,
     },
     ArrayValue {

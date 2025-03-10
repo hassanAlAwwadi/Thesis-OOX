@@ -61,7 +61,7 @@ fn eval_locally(
         Expression::Var { var, .. } => {
             let o = state
                 .stack
-                .lookup(var)
+                .lookup(&var)
                 .unwrap_or_else(|| panic!("infeasible, object does not exist: {:?}", var));
 
             eval_locally(state, o, en)
@@ -69,7 +69,7 @@ fn eval_locally(
         Expression::SymbolicVar { .. } => expression,
         Expression::Lit { .. } => expression,
         Expression::SizeOf { var, .. } => {
-            let expr = single_alias_elimination(state.stack.lookup(var).unwrap(), &state.alias_map);
+            let expr = single_alias_elimination(state.stack.lookup(&var).unwrap(), &state.alias_map);
 
             match expr.as_ref() {
                 Expression::Lit {
@@ -89,7 +89,7 @@ fn eval_locally(
         }
         Expression::Ref { .. } => expression,
         Expression::SymbolicRef { var, type_, info } => {
-            init_symbolic_reference(state, var, type_, en);
+            init_symbolic_reference(state, &var, &type_, en);
 
             Rc::new(Expression::SymbolicRef {
                 var: var.clone(),
@@ -133,14 +133,14 @@ fn eval_locally(
             domain,
             formula,
             ..
-        } => evaluate_quantifier(ands, elem, range, domain, formula.clone(), state, en),
+        } => evaluate_quantifier(ands, &elem, &range, &domain, formula.clone(), state, en),
         Expression::Exists {
             elem,
             range,
             domain,
             formula,
             ..
-        } => evaluate_quantifier(ors, elem, range, domain, formula.clone(), state, en),
+        } => evaluate_quantifier(ors, &elem, &range, &domain, formula.clone(), state, en),
     }
 }
 
@@ -402,7 +402,7 @@ where
         } => Expression::FALSE.into(), // return false?
         Expression::Ref { ref_, .. } => {
             let len = if let heap::HeapValue::ArrayValue { elements, .. } =
-                state.heap.get(ref_).unwrap()
+                state.heap.get(&ref_).unwrap()
             {
                 elements.len()
             } else {
