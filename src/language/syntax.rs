@@ -738,7 +738,7 @@ impl Expression {
             Expression::Var { type_, .. } => type_.clone(),
             Expression::SymbolicVar { type_, .. } => type_.clone(),
             Expression::Lit { type_, .. } => type_.clone(),
-            Expression::SizeOf { type_, .. } => RuntimeType::IntRuntimeType,
+            Expression::SizeOf {  .. } => RuntimeType::IntRuntimeType,
             Expression::Ref { type_, .. } => type_.clone(),
             Expression::SymbolicRef { type_, .. } => type_.clone(),
             Expression::Conditional { type_, .. } => type_.clone(),

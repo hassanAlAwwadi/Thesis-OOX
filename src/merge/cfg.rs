@@ -1,12 +1,12 @@
 use std::rc::Rc;
 
 use derivative::Derivative;
-use im_rc::{HashMap, HashSet};
+use im_rc::{HashMap};
 use itertools::Either;
 
 use crate::{Declaration, SourcePos};
 
-use super::{Class, CompilationUnit, DeclarationMember, Expression, Identifier, Interface, InterfaceMember, Invocation, Lhs, Method, NonVoidType, Rhs, RuntimeType, Statement, TypeExpr};
+use super::{Class, CompilationUnit, DeclarationMember, Expression, Identifier, Interface, InterfaceMember, Invocation, Lhs, Method, NonVoidType, Rhs, Statement, TypeExpr};
 
 type Label  = u64; 
 type Supply = u64; 
@@ -118,7 +118,7 @@ impl Interface{
 }
 
 impl DeclarationMember{
-    fn fill_graph(&self, supply:  &mut Supply, nodes: &mut Nodes, flows: &mut Flows) -> Option<(Label)>{
+    fn fill_graph(&self, supply:  &mut Supply, nodes: &mut Nodes, flows: &mut Flows) -> Option<Label>{
         match self {
             DeclarationMember::Method(method) => {
                 return Some(method.fill_graph(supply, nodes, flows));
@@ -132,20 +132,20 @@ impl DeclarationMember{
 }
 
 impl InterfaceMember{
-    fn fill_graph(&self, supply:  &mut Supply, nodes: &mut Nodes, flows: &mut Flows) -> Option<(Label)>{
+    fn fill_graph(&self, supply:  &mut Supply, nodes: &mut Nodes, flows: &mut Flows) -> Option<Label>{
         match self{
             InterfaceMember::DefaultMethod(method) => {
                 return Some(method.fill_graph(supply, nodes, flows));
             },
-            InterfaceMember::AbstractMethod(abstract_method) => return None,
+            InterfaceMember::AbstractMethod(_abstract_method) => return None,
         }
     }
 }
 
 
 impl Method{
-    fn fill_graph(&self, supply:  &mut Supply, nodes: &mut Nodes, flows: &mut Flows) -> (Label){
-        let (entry, exit) = self.body.borrow().fill_graph(supply, nodes, flows, None, None);
+    fn fill_graph(&self, supply:  &mut Supply, nodes: &mut Nodes, flows: &mut Flows) -> Label{
+        let (entry, _exit) = self.body.borrow().fill_graph(supply, nodes, flows, None, None);
         return entry;
     }
 }
@@ -296,11 +296,11 @@ impl Statement{
                 }
             },
             Statement::Try { try_body, catch_body, info: _  } => {
-                let tc_index = new_unique(supply); 
-                let (cb_index, cb_exit)= catch_body.fill_graph(supply, nodes, flows, lob, catch);
-                let (tr_index, tr_exit) = try_body.fill_graph(supply, nodes, flows, lob, Some(cb_index));
+                let _tc_index = new_unique(supply); 
+                let (cb_index, _cb_exit)= catch_body.fill_graph(supply, nodes, flows, lob, catch);
+                let (_tr_index, _tr_exit) = try_body.fill_graph(supply, nodes, flows, lob, Some(cb_index));
                 
-                let tc_element = 
+                let _tc_element = 
                 todo!();
             },
             Statement::Block { body } => {

@@ -1,13 +1,13 @@
 use std::{
-  cell::RefCell, collections::{BTreeMap, HashMap}, os::unix::process::parent_id, rc::Rc
+  cell::RefCell, collections::{HashMap}, rc::Rc
 };
 
-use itertools::{Either, Merge};
+use itertools::{Either};
 use slog::Logger;
-use z3::SatResult;
+
 
 use crate::{
-  cfg::CFGStatement, exec::{constants, IdCounter, PathConstraints, SymResult}, merge::{self, DynamicPointer, MState, MergingState}, statistics::Statistics, symbol_table::SymbolTable, z3_checker, Expression, Invocation, Lhs, Options, Rhs, SourcePos, Statement
+  cfg::CFGStatement, exec::{constants, IdCounter, SymResult}, merge::{DynamicPointer, MState, MergingState}, statistics::Statistics, symbol_table::SymbolTable, Expression, Invocation, Lhs, Options, Rhs, Statement
 };
 
 use super::State;
@@ -23,7 +23,7 @@ pub(crate) fn sym_exec(
   _entry_method: crate::cfg::MethodIdentifier,
   options: &Options,
 ) -> SymResult {
-  let mut state: MState = MergingState::new(init.pc, Rc::new(Expression::TRUE));
+  let state: MState = MergingState::new(init.pc, Rc::new(Expression::TRUE));
   return run(
      state,
      program, 
@@ -47,13 +47,13 @@ struct MergeInfo{
 }
 
 fn run<P>(
-  mut init_state: P ,
+  init_state: P ,
   program: &HashMap<u64, CFGStatement>,
   flows: &HashMap<u64, Vec<u64>>,
-  st: &SymbolTable,
-  root_logger: Logger,
-  path_counter: Rc<RefCell<IdCounter<u64>>>,
-  statistics: &mut Statistics,
+  _st: &SymbolTable,
+  _root_logger: Logger,
+  _path_counter: Rc<RefCell<IdCounter<u64>>>,
+  _statistics: &mut Statistics,
   _entry_method: crate::cfg::MethodIdentifier,
   options: &Options,
 ) -> SymResult 
@@ -128,7 +128,7 @@ where P : MergingState {
         }
         else if let Status::Waiting() = sib_status{
           //our sibling has been waiting, so we can merge :relieved:
-          let (mut parent, parent_status) = paths.pop().unwrap(); 
+          let (mut parent, _parent_status) = paths.pop().unwrap(); 
           
           parent.merge_full(current, sibling);
           paths.push((parent, Status::Active()));
@@ -174,7 +174,7 @@ where P : MergingState {
               }
             },
 
-            Statement::Call { invocation, info } => {
+            Statement::Call { invocation, info: _ } => {
               let nexts = flows.get(&current.get_pointer()).unwrap_or_else( ||{ panic!("malformed graph") } );
               assert_eq!(nexts.len(), 1);
               let next = nexts.last().unwrap().clone();
@@ -191,7 +191,7 @@ where P : MergingState {
               }
               return SymResult::Invalid(*info)
             },
-            Statement::Assume { assumption, info } => {
+            Statement::Assume { assumption, info: _ } => {
               current.assume(assumption.clone()); 
               if current.is_feasible()  {
                 set_to_next_pc(&mut current, flows);
@@ -202,7 +202,7 @@ where P : MergingState {
               if let Some(_) = m_at_s_at.pop() {
                 //merge info present, so our sibling must be one 
                 //behind us and our parent two behind us
-                let (mut sibling, _) = paths.pop().unwrap();
+                let (sibling, _) = paths.pop().unwrap();
                 let (mut parent , _)=  paths.pop().unwrap();
 
                 parent.merge_part(sibling);
@@ -210,12 +210,12 @@ where P : MergingState {
               }
               
             },
-            Statement::Continue { info } => {
+            Statement::Continue { info: _ } => {
               todo!("pop stack until WHL, reset join point if needed");
               set_to_next_pc(&mut current, flows);
               paths.push((current, current_status));
             },
-            Statement::Break { info } => {
+            Statement::Break { info: _ } => {
               todo!("pop stack until WHL, reset join point if needed");
               set_to_next_pc(&mut current, flows);
               paths.push((current, current_status));
@@ -281,7 +281,7 @@ where P : MergingState {
                 paths.push((current, Status::Active()));    
               }
             },
-            Statement::Throw { message, info } => {
+            Statement::Throw { message: _, info: _ } => {
               let mut return_pointer   = 0;
               let mut wait_pointer = 0;
               let mut still_searching: bool = true;
@@ -291,7 +291,7 @@ where P : MergingState {
                 if let DynamicPointer::Thr(catch_entry, try_catch_next) = control {
                     still_searching = false;
                     return_pointer = catch_entry;
-                    wait_pointer =try_catch_next;
+                    wait_pointer = try_catch_next;
                     break; 
                 }
               }
@@ -300,6 +300,8 @@ where P : MergingState {
                 panic!("broken control flow in return statement");
               }
               
+              current.set_pointer(return_pointer);
+
               if let Some(MergeInfo{ merge_at, dcf_size }) = m_at_s_at.pop(){
                 let current_dcf_size = current.get_dynamic_cf_size(); 
                 //oops, we've busted through our merge point
@@ -350,7 +352,7 @@ where P : MergingState {
           CFGStatement::While(expression, b) => {
 
             if let Some(dyn_ptr) = current.pop_dynamic_cf(){
-              if let DynamicPointer::Whl(head, next) = dyn_ptr{
+              if let DynamicPointer::Whl(head, _next) = dyn_ptr{
                 //we've been in this loop before
                 if head == stmt_id{
                   // we reinsert this one in the then child
@@ -392,7 +394,7 @@ where P : MergingState {
             paths.push((then_child, Status::Active() ));
 
           },
-          CFGStatement::TryCatch(try_entry, try_exit, catch_entry, catch_exit) => {
+          CFGStatement::TryCatch(try_entry, try_exit, catch_entry, _catch_exit) => {
             current.set_pointer(*try_entry); 
 
             let nexts = flows.get(&try_exit).unwrap_or_else( ||{ panic!("malformed graph") } );
@@ -420,17 +422,17 @@ where P : MergingState {
             set_to_next_pc(&mut current, flows);
             paths.push((current, Status::Active()));
           },
-          CFGStatement::Seq(l, r) => {
+          CFGStatement::Seq(l, _r) => {
             current.set_pointer(*l);
             paths.push((current, Status::Active()));
           },
-          CFGStatement::FunctionEntry { decl_name, method_name, argument_types } => {
+          CFGStatement::FunctionEntry { decl_name: _, method_name: _, argument_types: _ } => {
             todo!("check precondition");
             todo!("assign variables to stack");
             set_to_next_pc(&mut current, flows);
             paths.push((current, Status::Active()));
           },
-          CFGStatement::FunctionExit { decl_name, method_name, argument_types } => {
+          CFGStatement::FunctionExit { decl_name: _, method_name: _, argument_types: _ } => {
             // simpler than a return, this can't break through an enclosing while or try block :relieved
             // and it can't possible return a value :relieved
             todo!("check postcondition"); 
@@ -469,7 +471,7 @@ fn insert_states_function_call<P>(
       if constraints_target_pairs.len() > 0 {
         merges.push(MergeInfo { merge_at: return_ptr, dcf_size: head.get_dynamic_cf_size() });
       
-        let (mut left, mut right) = head.split_on(expr);
+        let (mut left, right) = head.split_on(expr);
         left.set_pointer(entry);
         left.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
         paths.push((head, Status::Waiting()));
@@ -488,7 +490,7 @@ fn insert_states_function_call<P>(
     }
 }
 
-fn get_possible_function_heads(invocation: &Invocation) -> Vec<(Rc<Expression>, u64)> {
+fn get_possible_function_heads(_invocation: &Invocation) -> Vec<(Rc<Expression>, u64)> {
     todo!()
 }
 

@@ -1,19 +1,19 @@
 
-use im_rc::vector;
+
 use itertools::Either;
 use itertools::Itertools;
-use queues::Queue;
-use z3::ast::Dynamic;
+
+
 
 use itertools::iproduct;
-use crate::dsl::{ands, negate, negative, ors, to_int_expr};
-use crate::exec::constants::unreachable;
+use crate::dsl::{negate, negative};
+
 use crate::exec::heap::HeapValue;
-use crate::state;
+
 use crate::typeable::Typeable;
 use crate::z3_checker;
 use crate::SourcePos;
-use std::borrow::Borrow;
+
 use std::collections::HashSet;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -82,7 +82,7 @@ pub(crate) struct State<C, S, H>
   pub dynamic_cont : Vec<DynamicPointer>, 
 }
 
-fn union_with<K,V, F>(mut left: HashMap<K,V>, mut right: HashMap<K,V>, fun: F) -> HashMap<K,V>
+fn union_with<K,V, F>(mut left: HashMap<K,V>, right: HashMap<K,V>, fun: F) -> HashMap<K,V>
   where K:PartialEq, K:Eq, K:Hash, F: Fn(V,V) -> V{
     for (k, v) in right {
       if let Some(w) = left.remove(&k) {
@@ -1150,10 +1150,10 @@ fn gen_expr_set(rhs: &Rhs, stack: &mut MStack, heap: &mut MHeap, r: i64) -> Opti
       }
       return Some(result);
     },
-    Rhs::RhsCall { invocation, type_, info } =>{
+    Rhs::RhsCall { invocation: _, type_: _, info: _ } =>{
       unreachable!("should be handled before getting here")
     },
-    Rhs::RhsArray { array_type, sizes, type_, info } => {
+    Rhs::RhsArray { array_type, sizes, type_, info: _ } => {
       let ref_ = Rc::new(Expression::Ref {
         ref_: r,
         type_: type_.clone(),
