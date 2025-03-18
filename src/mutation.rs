@@ -295,101 +295,102 @@ fn mutate_expression(
     let info = Default::default();
     match expression {
         Expression::BinOp {
-            bin_op,
-            lhs,
-            rhs,
-            type_,
-            ..
-        } => {
-            let bin_ops =
-                apply_binop(mutation, *bin_op)
-                    .into_iter()
-                    .map(|bin_op| Expression::BinOp {
                         bin_op,
-                        lhs: lhs.clone(),
+                        lhs,
+                        rhs,
+                        type_,
+                        ..
+            } => {
+                let bin_ops =
+                    apply_binop(mutation, *bin_op)
+                        .into_iter()
+                        .map(|bin_op| Expression::BinOp {
+                            bin_op,
+                            lhs: lhs.clone(),
+                            rhs: rhs.clone(),
+                            type_: type_.clone(),
+                            info,
+                        });
+                let lhss = mutate_expression(mutation, lhs, env)
+                    .into_iter()
+                    .map(|lhs| Expression::BinOp {
+                        bin_op: *bin_op,
+                        lhs: lhs.into(),
                         rhs: rhs.clone(),
                         type_: type_.clone(),
                         info,
                     });
-            let lhss = mutate_expression(mutation, lhs, env)
-                .into_iter()
-                .map(|lhs| Expression::BinOp {
-                    bin_op: *bin_op,
-                    lhs: lhs.into(),
-                    rhs: rhs.clone(),
-                    type_: type_.clone(),
-                    info,
-                });
-            let rhss = mutate_expression(mutation, rhs, env)
-                .into_iter()
-                .map(|rhs| Expression::BinOp {
-                    bin_op: *bin_op,
-                    lhs: lhs.clone(),
-                    rhs: rhs.into(),
-                    type_: type_.clone(),
-                    info,
-                });
+                let rhss = mutate_expression(mutation, rhs, env)
+                    .into_iter()
+                    .map(|rhs| Expression::BinOp {
+                        bin_op: *bin_op,
+                        lhs: lhs.clone(),
+                        rhs: rhs.into(),
+                        type_: type_.clone(),
+                        info,
+                    });
 
-            bin_ops.chain(lhss).chain(rhss).collect()
-        }
+                bin_ops.chain(lhss).chain(rhss).collect()
+            }
         Expression::UnOp {
-            un_op,
-            value,
-            type_,
-            ..
-        } => {
-            let un_ops = apply_unop(mutation, *un_op)
-                .into_iter()
-                .flatten()
-                .map(|un_op| Expression::UnOp {
-                    un_op,
-                    value: value.clone(),
-                    type_: type_.clone(),
-                    info,
-                });
-            let values = mutate_expression(mutation, value, env)
-                .into_iter()
-                .map(|value| Expression::UnOp {
-                    un_op: *un_op,
-                    value: value.into(),
-                    type_: type_.clone(),
-                    info,
-                });
-            un_ops.chain(values).collect()
-        }
+                un_op,
+                value,
+                type_,
+                ..
+            } => {
+                let un_ops = apply_unop(mutation, *un_op)
+                    .into_iter()
+                    .flatten()
+                    .map(|un_op| Expression::UnOp {
+                        un_op,
+                        value: value.clone(),
+                        type_: type_.clone(),
+                        info,
+                    });
+                let values = mutate_expression(mutation, value, env)
+                    .into_iter()
+                    .map(|value| Expression::UnOp {
+                        un_op: *un_op,
+                        value: value.into(),
+                        type_: type_.clone(),
+                        info,
+                    });
+                un_ops.chain(values).collect()
+            }
         Expression::Var { var, type_, .. } => apply_var(mutation, var.clone(), env)
-            .into_iter()
-            .map(|var| Expression::Var {
-                var,
-                type_: type_.clone(),
-                info,
-            })
-            .collect(),
-        Expression::Lit { lit, type_, .. } => {
-            let lits = apply_lit(mutation, lit.clone())
                 .into_iter()
-                .map(|lit| Expression::Lit {
-                    lit,
-                    type_: type_.clone(),
-                    info,
-                });
-            lits.collect()
-        }
-        Expression::SizeOf { var, type_, .. } => {
-            let vars = apply_var(mutation, var.clone(), env)
-                .into_iter()
-                .map(|var| Expression::SizeOf {
+                .map(|var| Expression::Var {
                     var,
                     type_: type_.clone(),
-                    info: info.clone(),
-                });
-            vars.collect()
-        }
+                    info,
+                })
+                .collect(),
+        Expression::Lit { lit, type_, .. } => {
+                let lits = apply_lit(mutation, lit.clone())
+                    .into_iter()
+                    .map(|lit| Expression::Lit {
+                        lit,
+                        type_: type_.clone(),
+                        info,
+                    });
+                lits.collect()
+            }
+        Expression::SizeOf { var, type_, .. } => {
+                let vars = apply_var(mutation, var.clone(), env)
+                    .into_iter()
+                    .map(|var| Expression::SizeOf {
+                        var,
+                        type_: type_.clone(),
+                        info: info.clone(),
+                    });
+                vars.collect()
+            }
         Expression::Forall { .. } | Expression::Exists { .. } => vec![],
         Expression::Ref { .. }
-        | Expression::SymbolicRef { .. }
-        | Expression::SymbolicVar { .. }
-        | Expression::Conditional { .. } => unreachable!("Cannot be reached during typing phase"),
+            | Expression::SymbolicRef { .. }
+            | Expression::SymbolicVar { .. }
+            | Expression::Conditional { .. } => unreachable!("Cannot be reached during typing phase"),
+        Expression::TypeExpr { texpr } => todo!(),
     }
 }
 

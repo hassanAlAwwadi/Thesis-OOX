@@ -98,54 +98,54 @@ fn helper(
     match expression.as_ref() {
         Expression::SymbolicRef { var, .. } => concretization[&var].clone(),
         Expression::BinOp {
-            bin_op,
-            lhs,
-            rhs,
-            type_,
-            info,
-        } => Rc::new(Expression::BinOp {
-            bin_op: *bin_op,
-            lhs: helper(lhs.clone(), concretization),
-            rhs: helper(rhs.clone(), concretization),
-            type_: type_.clone(),
-            info: *info,
-        }),
+                        bin_op,
+                        lhs,
+                        rhs,
+                        type_,
+                        info,
+            } => Rc::new(Expression::BinOp {
+                bin_op: *bin_op,
+                lhs: helper(lhs.clone(), concretization),
+                rhs: helper(rhs.clone(), concretization),
+                type_: type_.clone(),
+                info: *info,
+            }),
         Expression::UnOp {
-            un_op,
-            value,
-            type_,
-            info,
-        } => Rc::new(Expression::UnOp {
-            un_op: un_op.clone(),
-            value: helper(value.clone(), concretization),
-            type_: type_.clone(),
-            info: *info,
-        }),
-
+                un_op,
+                value,
+                type_,
+                info,
+            } => Rc::new(Expression::UnOp {
+                un_op: un_op.clone(),
+                value: helper(value.clone(), concretization),
+                type_: type_.clone(),
+                info: *info,
+            }),
         Expression::Conditional {
-            guard,
-            true_,
-            false_,
-            type_,
-            info,
-        } => Rc::new(Expression::Conditional {
-            guard: helper(guard.clone(), concretization),
-            true_: helper(true_.clone(), concretization),
-            false_: helper(false_.clone(), concretization),
-            type_: type_.clone(),
-            info: *info,
-        }),
+                guard,
+                true_,
+                false_,
+                type_,
+                info,
+            } => Rc::new(Expression::Conditional {
+                guard: helper(guard.clone(), concretization),
+                true_: helper(true_.clone(), concretization),
+                false_: helper(false_.clone(), concretization),
+                type_: type_.clone(),
+                info: *info,
+            }),
         Expression::Forall { .. } => {
-            unreachable!("Unexpected forall in concretization expression.")
-        }
+                unreachable!("Unexpected forall in concretization expression.")
+            }
         Expression::Exists { .. } => {
-            unreachable!("Unexpected forall in concretization expression.")
-        }
+                unreachable!("Unexpected forall in concretization expression.")
+            }
         Expression::Var { .. }
-        | Expression::SymbolicVar { .. }
-        | Expression::Lit { .. }
-        | Expression::SizeOf { .. }
-        | Expression::Ref { .. } => expression.clone(),
+            | Expression::SymbolicVar { .. }
+            | Expression::Lit { .. }
+            | Expression::SizeOf { .. }
+            | Expression::Ref { .. } => expression.clone(),
+            | Expression::TypeExpr { .. } => todo!(),
     }
 }
 

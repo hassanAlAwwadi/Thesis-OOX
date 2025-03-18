@@ -284,96 +284,93 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Expression {
         match self {
             Expression::Var { var, .. } => allocator.text(var.to_string()),
             Expression::BinOp {
-                bin_op, lhs, rhs, ..
-            } => docs![
-                allocator,
-                lhs.pretty(allocator),
-                allocator.space(),
-                bin_op_to_str(bin_op),
-                allocator.space(),
-                rhs.pretty(allocator)
-            ],
-
+                        bin_op, lhs, rhs, ..
+                    } => docs![
+                        allocator,
+                        lhs.pretty(allocator),
+                        allocator.space(),
+                        bin_op_to_str(bin_op),
+                        allocator.space(),
+                        rhs.pretty(allocator)
+                    ],
             Expression::UnOp { un_op, value, .. } => {
-                let un_op_str = match un_op {
-                    UnOp::Negative => "-",
-                    UnOp::Negate => "!",
-                };
-                allocator
-                    .text(un_op_str)
-                    .append(value.pretty(allocator).parens())
-            }
+                        let un_op_str = match un_op {
+                            UnOp::Negative => "-",
+                            UnOp::Negate => "!",
+                        };
+                        allocator
+                            .text(un_op_str)
+                            .append(value.pretty(allocator).parens())
+                    }
             Expression::SymbolicVar { var, .. } => {
-                allocator.text("$").append(allocator.text(var.to_string()))
-            }
+                        allocator.text("$").append(allocator.text(var.to_string()))
+                    }
             Expression::Lit { lit, .. } => match lit {
-                Lit::NullLit => allocator.text("null"),
-                Lit::BoolLit { bool_value } => allocator.text(bool_value.to_string()),
-                Lit::UIntLit { uint_value } => allocator.text(uint_value.to_string()),
-                Lit::IntLit { int_value } => allocator.text(int_value.to_string()),
-                Lit::FloatLit { float_value } => allocator.text(float_value.to_string()),
-                Lit::StringLit { string_value } => allocator.text(string_value.to_string()),
-                Lit::CharLit { char_value } => allocator.text(char_value.to_string()),
-            },
+                        Lit::NullLit => allocator.text("null"),
+                        Lit::BoolLit { bool_value } => allocator.text(bool_value.to_string()),
+                        Lit::UIntLit { uint_value } => allocator.text(uint_value.to_string()),
+                        Lit::IntLit { int_value } => allocator.text(int_value.to_string()),
+                        Lit::FloatLit { float_value } => allocator.text(float_value.to_string()),
+                        Lit::StringLit { string_value } => allocator.text(string_value.to_string()),
+                        Lit::CharLit { char_value } => allocator.text(char_value.to_string()),
+                    },
             Expression::SizeOf { var, .. } => allocator.text(format!("#{}", var)),
             Expression::Ref { ref_, .. } => allocator
-                .text("ref")
-                .append(allocator.text(ref_.to_string()).parens()),
-
+                        .text("ref")
+                        .append(allocator.text(ref_.to_string()).parens()),
             Expression::Conditional {
-                guard,
-                true_,
-                false_,
-                ..
-            } => docs![
-                allocator,
-                "ite",
-                "(",
-                guard.as_ref(),
-                comma(),
-                true_.as_ref(),
-                comma(),
-                false_.as_ref(),
-                ")"
-            ]
-            .parens(),
+                        guard,
+                        true_,
+                        false_,
+                        ..
+                    } => docs![
+                        allocator,
+                        "ite",
+                        "(",
+                        guard.as_ref(),
+                        comma(),
+                        true_.as_ref(),
+                        comma(),
+                        false_.as_ref(),
+                        ")"
+                    ]
+                    .parens(),
             Expression::Forall {
-                elem,
-                range,
-                domain,
-                formula,
-                ..
-            } => docs![
-                allocator,
-                "forall ",
-                elem.to_string(),
-                ", ",
-                range.to_string(),
-                ": ",
-                domain.to_string(),
-                ": ",
-                formula.as_ref()
-            ],
-
+                        elem,
+                        range,
+                        domain,
+                        formula,
+                        ..
+                    } => docs![
+                        allocator,
+                        "forall ",
+                        elem.to_string(),
+                        ", ",
+                        range.to_string(),
+                        ": ",
+                        domain.to_string(),
+                        ": ",
+                        formula.as_ref()
+                    ],
             Expression::Exists {
-                elem,
-                range,
-                domain,
-                formula,
-                ..
-            } => docs![
-                allocator,
-                "exists ",
-                elem.to_string(),
-                ", ",
-                range.to_string(),
-                ": ",
-                domain.to_string(),
-                ": ",
-                formula.as_ref()
-            ],
-
+                        elem,
+                        range,
+                        domain,
+                        formula,
+                        ..
+                    } => docs![
+                        allocator,
+                        "exists ",
+                        elem.to_string(),
+                        ", ",
+                        range.to_string(),
+                        ": ",
+                        domain.to_string(),
+                        ": ",
+                        formula.as_ref()
+                    ],
             Expression::SymbolicRef { var, .. } => allocator.text(var.to_string()),
+            Expression::TypeExpr { texpr } => todo!(),
         }
     }
 }

@@ -48,99 +48,100 @@ fn eval_locally(
 ) -> Rc<Expression> {
     match expression.as_ref() {
         Expression::BinOp {
-            bin_op, lhs, rhs, ..
-        } => {
-            let lhs = eval_locally(state, lhs.clone(), en);
-            let rhs = eval_locally(state, rhs.clone(), en);
-            evaluate_binop(*bin_op, lhs, rhs)
-        }
+                        bin_op, lhs, rhs, ..
+            } => {
+                let lhs = eval_locally(state, lhs.clone(), en);
+                let rhs = eval_locally(state, rhs.clone(), en);
+                evaluate_binop(*bin_op, lhs, rhs)
+            }
         Expression::UnOp { un_op, value, .. } => {
-            let value = eval_locally(state, value.clone(), en);
-            evaluate_unop(un_op.clone(), value)
-        }
+                let value = eval_locally(state, value.clone(), en);
+                evaluate_unop(un_op.clone(), value)
+            }
         Expression::Var { var, .. } => {
-            let o = state
-                .stack
-                .lookup(&var)
-                .unwrap_or_else(|| panic!("infeasible, object does not exist: {:?}", var));
+                let o = state
+                    .stack
+                    .lookup(&var)
+                    .unwrap_or_else(|| panic!("infeasible, object does not exist: {:?}", var));
 
-            eval_locally(state, o, en)
-        }
+                eval_locally(state, o, en)
+            }
         Expression::SymbolicVar { .. } => expression,
         Expression::Lit { .. } => expression,
         Expression::SizeOf { var, .. } => {
-            let expr = single_alias_elimination(state.stack.lookup(&var).unwrap(), &state.alias_map);
+                let expr = single_alias_elimination(state.stack.lookup(&var).unwrap(), &state.alias_map);
 
-            match expr.as_ref() {
-                Expression::Lit {
-                    lit: Lit::NullLit, ..
-                } => {
-                    // infeasible path
-                    return Expression::int(-1);
-                }
-                Expression::Ref { ref_, .. } => {
-                    if let heap::HeapValue::ArrayValue { elements, .. } = &state.heap[ref_] {
-                        return Expression::int(elements.len() as i64);
+                match expr.as_ref() {
+                    Expression::Lit {
+                        lit: Lit::NullLit, ..
+                    } => {
+                        // infeasible path
+                        return Expression::int(-1);
                     }
+                    Expression::Ref { ref_, .. } => {
+                        if let heap::HeapValue::ArrayValue { elements, .. } = &state.heap[ref_] {
+                            return Expression::int(elements.len() as i64);
+                        }
+                    }
+                    _ => todo!("Symbolic arrays are not implemented"),
                 }
-                _ => todo!("Symbolic arrays are not implemented"),
+                panic!("invalid state, expected initialised array with arrayvalue in heap");
             }
-            panic!("invalid state, expected initialised array with arrayvalue in heap");
-        }
         Expression::Ref { .. } => expression,
         Expression::SymbolicRef { var, type_, info } => {
-            init_symbolic_reference(state, &var, &type_, en);
+                init_symbolic_reference(state, &var, &type_, en);
 
-            Rc::new(Expression::SymbolicRef {
-                var: var.clone(),
-                type_: type_.clone(),
-                info: *info,
-            })
-        }
-        Expression::Conditional {
-            guard,
-            true_,
-            false_,
-            type_,
-            info,
-        } => {
-            let guard = eval_locally(state, guard.clone(), en);
-            let true_ = eval_locally(state, true_.clone(), en);
-            let false_ = eval_locally(state, false_.clone(), en);
-
-            match *guard {
-                Expression::Lit {
-                    lit: Lit::BoolLit { bool_value: true },
-                    ..
-                } => true_,
-
-                Expression::Lit {
-                    lit: Lit::BoolLit { bool_value: false },
-                    ..
-                } => false_,
-                _ => Rc::new(Expression::Conditional {
-                    guard,
-                    true_,
-                    false_,
+                Rc::new(Expression::SymbolicRef {
+                    var: var.clone(),
                     type_: type_.clone(),
                     info: *info,
-                }),
+                })
             }
-        }
+        Expression::Conditional {
+                guard,
+                true_,
+                false_,
+                type_,
+                info,
+            } => {
+                let guard = eval_locally(state, guard.clone(), en);
+                let true_ = eval_locally(state, true_.clone(), en);
+                let false_ = eval_locally(state, false_.clone(), en);
+
+                match *guard {
+                    Expression::Lit {
+                        lit: Lit::BoolLit { bool_value: true },
+                        ..
+                    } => true_,
+
+                    Expression::Lit {
+                        lit: Lit::BoolLit { bool_value: false },
+                        ..
+                    } => false_,
+                    _ => Rc::new(Expression::Conditional {
+                        guard,
+                        true_,
+                        false_,
+                        type_: type_.clone(),
+                        info: *info,
+                    }),
+                }
+            }
         Expression::Forall {
-            elem,
-            range,
-            domain,
-            formula,
-            ..
-        } => evaluate_quantifier(ands, &elem, &range, &domain, formula.clone(), state, en),
+                elem,
+                range,
+                domain,
+                formula,
+                ..
+            } => evaluate_quantifier(ands, &elem, &range, &domain, formula.clone(), state, en),
         Expression::Exists {
-            elem,
-            range,
-            domain,
-            formula,
-            ..
-        } => evaluate_quantifier(ors, &elem, &range, &domain, formula.clone(), state, en),
+                elem,
+                range,
+                domain,
+                formula,
+                ..
+            } => evaluate_quantifier(ors, &elem, &range, &domain, formula.clone(), state, en),
+            Expression::TypeExpr { texpr } => todo!(),
     }
 }
 

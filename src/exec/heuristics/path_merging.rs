@@ -1,5 +1,5 @@
 use std::{
-  cell::RefCell, collections::{HashMap}, rc::Rc
+  cell::RefCell, collections::HashMap, rc::Rc
 };
 
 use itertools::{Either};
@@ -7,7 +7,7 @@ use slog::Logger;
 
 
 use crate::{
-  cfg::CFGStatement, exec::{constants, IdCounter, SymResult}, merge::{DynamicPointer, MState, MergingState}, statistics::Statistics, symbol_table::SymbolTable, Expression, Invocation, Lhs, Options, Rhs, Statement
+  cfg::CFGStatement, exec::{constants, IdCounter, SymResult}, merge::{DynamicPointer, RExpr, SValue, SetMergeEngine, SetState}, statistics::Statistics, symbol_table::SymbolTable, typeable::Typeable, Expression, Identifier, Invocation, Lhs, Options, Rhs, RuntimeType, Statement, TypeExpr
 };
 
 use super::State;
@@ -23,8 +23,21 @@ pub(crate) fn sym_exec(
   _entry_method: crate::cfg::MethodIdentifier,
   options: &Options,
 ) -> SymResult {
-  let state: MState = MergingState::new(init.pc, Rc::new(Expression::TRUE));
+  let mut engine = SetMergeEngine::new();
+
+  let mut symbols = vec![];
+  for (id, expr) in init.stack.current_stackframe().unwrap().params.iter() {
+    if let Expression::SymbolicVar { var, type_, info } = expr.as_ref(){
+      symbols.push((id.clone(), var.clone(), type_.clone()));
+    }
+    else{
+      panic!("starting out with non symbolic values!?");
+    }
+  }
+  let mut state = engine.make_new_state(init.pc, Rc::new(Expression::TRUE), symbols);
+
   return run(
+    engine,
      state,
      program, 
      flows, 
@@ -32,9 +45,9 @@ pub(crate) fn sym_exec(
      root_logger, 
      path_counter, 
      statistics, 
-     _entry_method, options);   
+     _entry_method, 
+     options);   
 }
-
 
 enum Status {
   Waiting(),
@@ -46,23 +59,44 @@ struct MergeInfo{
   dcf_size: usize
 }
 
-fn run<P>(
-  init_state: P ,
+type FTable = HashMap<(Identifier, Identifier, Vec<RuntimeType>), (u64, Vec<Identifier>)>;
+fn run(
+  engine: SetMergeEngine,
+  init_state: SetState ,
   program: &HashMap<u64, CFGStatement>,
   flows: &HashMap<u64, Vec<u64>>,
-  _st: &SymbolTable,
+  st: &SymbolTable,
   _root_logger: Logger,
   _path_counter: Rc<RefCell<IdCounter<u64>>>,
   _statistics: &mut Statistics,
   _entry_method: crate::cfg::MethodIdentifier,
   options: &Options,
-) -> SymResult 
-where P : MergingState {
+) -> SymResult {
+  
 
+  let mut function_entry_map: FTable  = HashMap::new();
 
+  for (entry, stmt) in program{
+    if let CFGStatement::FunctionEntry { decl_name, method_name, argument_types }= stmt{
+      let method_name = method_name.clone();
+      let class = st.get_class(decl_name).unwrap();
+
+      let mut arg_names = vec![];
+      for imp in class.members.clone(){
+        if let Some(method) = imp.method(){
+          if method.name == method_name{
+            arg_names = method.params.iter().map(|par|{par.name.clone()}).collect();
+          }
+        }
+      }
+
+      let key = (decl_name.clone(), method_name, argument_types.clone()); 
+      function_entry_map.insert(key, (entry.clone(), arg_names));
+    }
+  }
   // states that are actively progressing
   // together with a reference to their parent and sibling
-  let mut paths: Vec<(P, Status)> = vec![];
+  let mut paths: Vec<(SetState, Status)> = vec![];
   let mut m_at_s_at: Vec<MergeInfo> = vec![];
   paths.push((init_state, Status::Active()));
 
@@ -152,39 +186,44 @@ where P : MergingState {
             },
 
             Statement::Declare { type_, var, info } => {
-              current.decl(&type_, &var, &info);
+              engine.decl_in(&mut current, &type_, &var, &info);
               set_to_next_pc(&mut current, flows);
               paths.push((current, current_status));
             },
             Statement::Assign { lhs, rhs, info } => {
               if let Rhs::RhsCall { invocation, .. } = rhs {
-                let nexts = flows.get(&current.get_pointer()).unwrap_or_else( ||{ panic!("malformed graph") } );
-                assert_eq!(nexts.len(), 1);
-                let next = nexts.last().unwrap().clone();
-            
-                // the constraints can also be used to narrow the values on the stack/heap, but we don't do that yet
-                let mut constraints_target_pairs : Vec<(Rc<Expression>, u64)> = get_possible_function_heads(&invocation);
-                insert_states_function_call(current, &mut constraints_target_pairs, &mut paths, &mut m_at_s_at, Some(lhs.clone()), next);
-                // there must be at least one possible function we can refer to, or else this call is impossible
-              }
+                  let nexts: &Vec<u64> = flows.get(&current.get_pointer()).unwrap_or_else( ||{ panic!("malformed graph") } );
+                  assert_eq!(nexts.len(), 1);
+
+                  let mut constraints_target_pairs = get_possible_function_heads(&invocation, st, &function_entry_map);
+                  let next = nexts.last().unwrap().clone();
+                  let vals = invocation.arguments().iter()
+                    .map(|expr|{(expr.get_type(), engine.eval_with(&current, expr.clone()))})
+                    .collect();
+                  current.push_stack();
+                  engine.insert_states_function_call(current,&vals, &mut constraints_target_pairs, &mut paths, &mut m_at_s_at, None, next);
+                }
               else{
-                current.assign(&lhs, &rhs, &info);
+                engine.assign_expr(&mut current, &lhs, &rhs);
                 set_to_next_pc(&mut current, flows);
                 paths.push((current, current_status));
               }
             },
 
             Statement::Call { invocation, info: _ } => {
-              let nexts = flows.get(&current.get_pointer()).unwrap_or_else( ||{ panic!("malformed graph") } );
+              let nexts: &Vec<u64> = flows.get(&current.get_pointer()).unwrap_or_else( ||{ panic!("malformed graph") } );
               assert_eq!(nexts.len(), 1);
-              let next = nexts.last().unwrap().clone();
-              
 
-              let mut constraints_target_pairs : Vec<(Rc<Expression>, u64)> = get_possible_function_heads(&invocation);
-              insert_states_function_call(current, &mut constraints_target_pairs, &mut paths, &mut m_at_s_at, None, next);
+              let mut constraints_target_pairs = get_possible_function_heads(&invocation, st, &function_entry_map);
+              let next = nexts.last().unwrap().clone();
+              let vals = invocation.arguments().iter()
+                .map(|expr|{(expr.get_type(), engine.eval_with(&mut current, expr.clone()))})
+                .collect();
+              current.push_stack();
+              engine.insert_states_function_call(current,&vals, &mut constraints_target_pairs, &mut paths, &mut m_at_s_at, None, next);
             },
             Statement::Assert { assertion, info } => {
-              if current.is_valid(assertion) {
+              if engine.is_valid_for(&current, assertion.clone()) {
                 set_to_next_pc(&mut current, flows);
                 paths.push((current, current_status));
                 continue;  
@@ -192,8 +231,8 @@ where P : MergingState {
               return SymResult::Invalid(*info)
             },
             Statement::Assume { assumption, info: _ } => {
-              current.assume(assumption.clone()); 
-              if current.is_feasible()  {
+              engine.add_assumption_to(&mut current, assumption.clone()); 
+              if engine.is_feasible(&current)  {
                 set_to_next_pc(&mut current, flows);
                 paths.push((current, current_status));
                 continue;  
@@ -231,12 +270,12 @@ where P : MergingState {
               let mut still_searching = true;
 
               while let Some(control) = current.pop_dynamic_cf() {
-                current.pop_stack();
                 if let DynamicPointer::Ret(return_i, return_value_to) = control {
-                    still_searching = false;
-                    return_var = return_value_to;
-                    return_pointer = return_i;
-                    break; 
+                  current.pop_stack();
+                  still_searching = false;
+                  return_var = return_value_to;
+                  return_pointer = return_i;
+                  break; 
                 }
               }
 
@@ -247,10 +286,10 @@ where P : MergingState {
               current.set_pointer(return_pointer);
               if let Some(value) = return_value {
                 if let Some(var) = return_var {
-                  current.assign(&var, &value, &info);
+                  engine.assign_expr(&mut current, &var, &value);
                 }
                 else{
-                  current.assign_to_stack(constants::retval(), &value, &info);
+                  engine.assign_expr(&mut current,&Lhs::LhsVar{ var: constants::retval(), type_: value.get_type(), info: *info }, &value);
                 }
               }
 
@@ -333,7 +372,7 @@ where P : MergingState {
               Either::Right(_) => todo!(),
               Either::Left(expr) => {
                 let join_at = get_join_point(flows, &left, &right); 
-                let (mut then_child, mut else_child) = current.split_on(expr.clone());
+                let (mut then_child, mut else_child) = engine.split_on(&current, expr.clone());
 
                 then_child.set_pointer(*left); 
 
@@ -370,7 +409,7 @@ where P : MergingState {
               }
             }
 
-            let (mut then_child, mut else_child) = current.split_on(expression.clone());
+            let (mut then_child, mut else_child) = engine.split_on(&current, expression.clone());
             then_child.set_pointer(*b); 
 
             //get pointer to the next statement after the while
@@ -426,9 +465,7 @@ where P : MergingState {
             current.set_pointer(*l);
             paths.push((current, Status::Active()));
           },
-          CFGStatement::FunctionEntry { decl_name: _, method_name: _, argument_types: _ } => {
-            todo!("check precondition");
-            todo!("assign variables to stack");
+          CFGStatement::FunctionEntry { decl_name, method_name, argument_types } => {
             set_to_next_pc(&mut current, flows);
             paths.push((current, Status::Active()));
           },
@@ -454,48 +491,97 @@ where P : MergingState {
   
 }
 
-fn insert_states_function_call<P>(
-  current: P,
-  constraints_target_pairs: &mut Vec<(Rc<Expression>, u64)>,
-  paths: &mut Vec<(P, Status)>,
-  merges: &mut Vec<MergeInfo>,
-  return_var: Option<Lhs>,
-  return_ptr: u64) -> () where P : MergingState {
-    if constraints_target_pairs.len() <= 0 {
-      panic!("no function entry points found")
-    }
-
-    let mut head = current;
-    while let Some((expr, entry)) = constraints_target_pairs.pop(){
-      
-      if constraints_target_pairs.len() > 0 {
-        merges.push(MergeInfo { merge_at: return_ptr, dcf_size: head.get_dynamic_cf_size() });
-      
-        let (mut left, right) = head.split_on(expr);
-        left.set_pointer(entry);
-        left.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
-        paths.push((head, Status::Waiting()));
-        paths.push((left, Status::Active()));
-        head = right;
-  
+impl SetMergeEngine{
+  fn insert_states_function_call(
+    &self,
+    current: SetState,
+    values: &Vec<(RuntimeType, SValue)>,
+    constraints_target_pairs: &mut Vec<(TypeExpr, (u64, Vec<Identifier>))>,
+    paths: &mut Vec<(SetState, Status)>,
+    merges: &mut Vec<MergeInfo>,
+    return_var: Option<Lhs>,
+    return_ptr: u64) {
+      if constraints_target_pairs.len() <= 0 {
+        panic!("no function entry points found")
       }
-      // last iteration
+
+      let mut head = current;
+      while let Some((expr, (entry, args))) = constraints_target_pairs.pop(){
+        
+        if constraints_target_pairs.len() > 0 {
+          merges.push(MergeInfo { merge_at: return_ptr, dcf_size: head.get_dynamic_cf_size() });
+        
+          let (mut left, right) = self.split_on(&head, Rc::new(Expression::TypeExpr { texpr: expr }));
+
+          for (arg, (type_, val)) in args.iter().zip(values.iter()){
+            self.assign_evaled(&mut left, &Lhs::LhsVar { var: arg.clone(), type_: type_.clone(), info: crate::SourcePos::UnknownPosition }, val.clone());
+          }
+          left.set_pointer(entry);
+          
+
+          left.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
+          paths.push((head, Status::Waiting()));
+          paths.push((left, Status::Active()));
+          head = right;
+    
+        }
+        // last iteration
+        else{
+          self.add_assumption_to(&mut head, (Either::Right(expr)));
+          head.set_pointer(entry);
+          head.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
+          paths.push((head, Status::Active()));
+          break;
+        }
+      }
+    }
+}
+
+fn get_possible_function_heads(
+  invocation: &Invocation, 
+  st: &SymbolTable, 
+  funmap: &FTable) -> Vec<(TypeExpr, (u64, Vec<Identifier>))> {
+  match invocation{
+    Invocation::InvokeMethod { lhs, rhs, arguments, resolved, info } => {
+      let arg_types: Vec<RuntimeType> = arguments.iter().map(|expr| {expr.as_ref().type_of()}).collect();
+      let mut res= vec![];
+
+      if let Some(resolved) = resolved{
+
+        for (i, (c, m)) in resolved.iter(){
+          let cond = TypeExpr::InstanceOf { 
+            var: lhs.clone(), 
+            rhs: RuntimeType::ReferenceRuntimeType { type_: c.name().clone() }, 
+            info: crate::SourcePos::UnknownPosition 
+          };
+
+          let ptr= funmap.get(&(c.name().clone(), m.name.clone(), arg_types.clone())).unwrap().clone();
+          res.push((cond, ptr));
+        }
+        return res;
+      }
       else{
-        head.assume(Either::Left(expr));
-        head.set_pointer(entry);
-        head.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
-        paths.push((head, Status::Active()));
-        break;
+        let classes = st.subclasses(lhs);
+
+        for class in classes{
+          //there should be a way to do this without cloning arg_types
+          let key = &(class.as_ref().name.clone(), rhs.clone(), arg_types.clone());
+          let cond = TypeExpr::InstanceOf { var: lhs.clone(), rhs: RuntimeType::ReferenceRuntimeType { type_: class.name.clone() }, info: crate::SourcePos::UnknownPosition };
+          let ptr = funmap.get(key).unwrap().clone();
+          res.push((cond, ptr));
+        }
+        return res;
       }
-    }
+
+    },
+    Invocation::InvokeSuperMethod { rhs, arguments, resolved, info } => todo!(),
+    Invocation::InvokeConstructor { class_name, arguments, resolved, info } => todo!(),
+    Invocation::InvokeSuperConstructor { arguments, resolved, info } => todo!(),
+  }
 }
 
-fn get_possible_function_heads(_invocation: &Invocation) -> Vec<(Rc<Expression>, u64)> {
-    todo!()
-}
 
-
-fn set_to_next_pc<P>(top_state: &mut P, flows: &HashMap<u64, Vec<u64>>) where P : MergingState {
+fn set_to_next_pc(top_state: &mut SetState, flows: &HashMap<u64, Vec<u64>>) {
     let nexts = flows.get(&top_state.get_pointer()).unwrap_or_else( ||{ panic!("malformed graph") } );
     assert_eq!(nexts.len(), 1);
     let next = nexts.last().unwrap().clone();

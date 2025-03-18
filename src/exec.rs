@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, ops::AddAssign, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, ops::AddAssign, rc::Rc, time::Instant};
 
 use clap::ValueEnum;
 use im_rc::{vector, HashMap as ImHashMap, HashSet as ImHashSet};
@@ -1594,7 +1594,7 @@ pub fn verify(
     class_name: &str,
     method_name: &str,
     options: Options,
-) -> std::result::Result<(SymResult, Statistics), Error> {
+) -> std::result::Result<(SymResult, SymResult, Statistics), Error> {
     if !options.quiet {
         println!("Starting up");
     }
@@ -1634,6 +1634,7 @@ pub fn verify(
         })?;
 
     let symbol_table = SymbolTable::from_ast(&c)?;
+
     if !options.quiet {
         println!("Symbol table completed");
     }
@@ -1645,11 +1646,17 @@ pub fn verify(
 
     let (result, flw) = labelled_statements(c);
 
-    let program = result.into_iter().collect();
-
+    let program: HashMap<u64, CFGStatement> = result.into_iter().collect();
     // dbg!(&program);
 
     let flows: HashMap<u64, Vec<u64>> = utils::group_by(flw.into_iter());
+    println!("starting to print program");
+    for (i, stmt) in program.clone().into_iter().sorted_by_key(|(k, _)|{ *k }){
+        println!("{:?}: {:?}", i, stmt);
+    }
+    for (s, e) in flows.clone().into_iter().sorted_by_key(|(k, _)|{ *k }){
+        println!("{:?} -> {:?}", s, e);
+    }
 
     // dbg!(&flows);
     let argument_types = initial_method
@@ -1744,7 +1751,25 @@ pub fn verify(
         Heuristic::RoundRobinMD2URandomPath => heuristics::round_robin::sym_exec,
         Heuristic::PathMerging              => heuristics::path_merging::sym_exec,
     };
-    let sym_result = sym_exec(
+
+    let s2 = state.clone();
+    let l2 = root_logger.clone();
+    let now = Instant::now();
+    let sym_result_1 =  heuristics::path_merging::sym_exec(
+        s2,
+        &program,
+        &flows,
+        &symbol_table,
+        l2,
+        path_counter.clone(),
+        &mut statistics,
+        entry_method.clone(),
+        &options,
+    );
+    println!("merging took: {:?}", now.elapsed());
+
+    let now = Instant::now();
+    let sym_result_2 =  heuristics::depth_first_search::sym_exec(
         state,
         &program,
         &flows,
@@ -1755,6 +1780,8 @@ pub fn verify(
         entry_method.clone(),
         &options,
     );
+    println!("depth first took: {:?}", now.elapsed());
+
 
     let reachability = reachability(entry_method, &program, &flows, &symbol_table);
     statistics.reachable_statements = reachability.len() as u32;
@@ -1779,7 +1806,7 @@ pub fn verify(
 
 
 
-    Ok((sym_result, statistics))
+    return Ok((sym_result_1, sym_result_2, statistics));
 }
 
 #[test]

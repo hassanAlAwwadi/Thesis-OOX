@@ -545,7 +545,33 @@ pub enum Rhs {
     },
 }
 
+impl Rhs {
+    pub(crate) fn get_type(&self) -> RuntimeType{
+        match(self){
+            Rhs::RhsExpression { value, type_, info } => type_.clone(),
+            Rhs::RhsField { var, field, type_, info } => type_.clone(),
+            Rhs::RhsElem { var, index, type_, info } => type_.clone(),
+            Rhs::RhsCall { invocation, type_, info } => type_.clone(),
+            Rhs::RhsArray { array_type, sizes, type_, info } => type_.clone(),
+            Rhs::RhsCast { cast_type, var, info } => cast_type.clone().into(),
+        }
+    }
+}
 
+impl Into<RuntimeType> for NonVoidType{
+    fn into(self) -> RuntimeType {
+        match self{
+            NonVoidType::UIntType { info } => RuntimeType::UIntRuntimeType,
+            NonVoidType::IntType { info } => RuntimeType::IntRuntimeType,
+            NonVoidType::FloatType { info } => RuntimeType::FloatRuntimeType,
+            NonVoidType::BoolType { info } => RuntimeType::BoolRuntimeType,
+            NonVoidType::StringType { info } => RuntimeType::StringRuntimeType,
+            NonVoidType::CharType { info } => RuntimeType::CharRuntimeType,
+            NonVoidType::ReferenceType { identifier, info } => RuntimeType::ReferenceRuntimeType { type_: identifier },
+            NonVoidType::ArrayType { inner_type, info } => RuntimeType::ArrayRuntimeType { inner_type: Box::new(inner_type.deref().clone().into()) },
+        }
+    }
+}
 
 #[derive(Clone, Derivative)]
 #[derivative(PartialEq, Hash, Eq, PartialOrd, PartialOrd="feature_allow_slow_enum", Ord="feature_allow_slow_enum")]
@@ -636,6 +662,9 @@ pub enum Expression{
         #[derivative(PartialEq = "ignore", Hash = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         info: SourcePos,
     },
+    TypeExpr { 
+        texpr: TypeExpr
+    }
 }
 
 impl Expression {
@@ -742,6 +771,7 @@ impl Expression {
             Expression::Ref { type_, .. } => type_.clone(),
             Expression::SymbolicRef { type_, .. } => type_.clone(),
             Expression::Conditional { type_, .. } => type_.clone(),
+            Expression::TypeExpr { texpr } => RuntimeType::BoolRuntimeType,
         }
     }
 }
@@ -873,20 +903,20 @@ impl RuntimeType {
 }
 
 #[derive(Clone, Derivative, Debug)]
-#[derivative(PartialEq, Hash, Eq)]
+#[derivative(PartialEq, Hash, Eq, PartialOrd="feature_allow_slow_enum", Ord="feature_allow_slow_enum")]
 pub enum TypeExpr {
     InstanceOf {
         var: Identifier,
         rhs: RuntimeType,
 
-        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        #[derivative(PartialEq = "ignore", Hash = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         info: SourcePos,
     },
     NotInstanceOf {
         var: Identifier,
         rhs: RuntimeType,
 
-        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        #[derivative(PartialEq = "ignore", Hash = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         info: SourcePos,
     },
 }

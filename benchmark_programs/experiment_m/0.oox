@@ -1,11 +1,11 @@
 class Main {
-  // testing extremely simple programs
+  static void main(bool p) {
+    int i   := 0;
+    bool qi := Main.q(i);
+    assert qi;
+  }
 
-  // Found with k = 300
-  static void main() {
-    int i = 1;
-    int j = 3;
-    bool ok = i < j;
-    assert ok;
+  static bool q(int x){
+    return x < 100;
   }
 }
