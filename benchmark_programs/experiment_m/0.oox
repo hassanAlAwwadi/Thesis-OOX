@@ -1,6 +1,101 @@
 class Main {
   static void main(bool p) {
-    int i   := 0;
+    int i   := 9;
+
+    if(p) {
+      i := 50;
+    }
+    else {
+      i := 80;
+    }
+
+    if(p) {
+      i := 50;
+    }
+    else {
+      i := 80;
+    }
+
+    if(p) {
+      i := 50;
+    }
+    else {
+      i := 80;
+    }
+
+    if(p) {
+      i := 50;
+    }
+    else {
+      i := 80;
+    }
+
+    if(p) {
+      i := 50;
+    }
+    else {
+      i := 80;
+    }
+
+    if(p) {
+      i := 50;
+    }
+    else {
+      i := 80;
+    }
+
+    if(p) {
+      i := 50;
+    }
+    else {
+      i := 80;
+    }
+
+    if(p) {
+      i := 50;
+    }
+    else {
+      i := 80;
+    }
+
+    if(p) {
+      i := 50;
+    }
+    else {
+      i := 80;
+    }
+
+    if(p) {
+      i := 50;
+    }
+    else {
+      i := 80;
+    }
+    if(p) {
+      i := 50;
+    }
+    else {
+      i := 80;
+    }
+    if(p) {
+      i := 50;
+    }
+    else {
+      i := 80;
+    }
+    if(p) {
+      i := 50;
+    }
+    else {
+      i := 80;
+    }
+    if(p) {
+      i := 50;
+    }
+    else {
+      i := 80;
+    }
+
     bool qi := Main.q(i);
     assert qi;
   }

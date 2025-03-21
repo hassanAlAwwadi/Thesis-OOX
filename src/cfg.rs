@@ -26,7 +26,7 @@ pub struct MethodIdentifier {
 pub enum CFGStatement {
     /// Can be any Statement minus any of the branching statements in this enum
     Statement(Statement),
-    Ite(Either<Rc<Expression>, TypeExpr>, u64, u64),
+    Ite(Either<Rc<Expression>, TypeExpr>, u64, u64, Option<u64>),
     While(Rc<Expression>, u64),
     TryCatch(u64, u64, u64, u64), // l1: entry try body, l2: exit try body, l3: entry catch body, l4: exit catch body
     TryEntry(u64),
@@ -239,18 +239,30 @@ fn label_method(
 }
 
 fn statement_cfg(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> {
+
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
     match statement {
         Statement::Seq { stat1, stat2 } => {
             let mut v = vec![];
             let seq_l = *i;
+            
             *i += 1;
             let s1_l = *i;
-            v.append(&mut statement_cfg(stat1.as_ref(), i));
+            let mut v1 = &mut statement_cfg(stat1.as_ref(), i);
+            
             *i += 1;
             let s2_l = *i;
-            v.append(&mut statement_cfg(stat2.as_ref(), i));
+            let mut v2 = &mut statement_cfg(stat2.as_ref(), i);
 
+            let (_, ite) = v1.first_mut().unwrap();
+            
+            if let CFGStatement::Ite(c, l, r, _) = ite{
+                let next = init(v2.first().unwrap());
+
+                *ite =  CFGStatement::Ite(c.clone(), l.clone(), r.clone(), Some(next));
+            }
+            v.append(&mut v1);
+            v.append(&mut v2);
             labelled_statements.push((seq_l, CFGStatement::Seq(s1_l, s2_l)));
             labelled_statements.append(&mut v);
         }
@@ -267,7 +279,7 @@ fn statement_cfg(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)>
             v.append(&mut statement_cfg(true_body.as_ref(), i));
             let i_false = *i;
             v.append(&mut statement_cfg(false_body.as_ref(), i));
-            labelled_statements.push((ite_l, CFGStatement::Ite(guard.clone(), i_true, i_false)));
+            labelled_statements.push((ite_l, CFGStatement::Ite(guard.clone(), i_true, i_false, None)));
             labelled_statements.append(&mut v);
         }
         Statement::While { guard, body, .. } => {
@@ -342,7 +354,7 @@ fn init((l, stmt): &(u64, CFGStatement)) -> u64 {
             unreachable!("Block is not a CFGStatement")
         }
         CFGStatement::Statement(s) => unreachable!("{:?} is not a CFGStatement", s),
-        CFGStatement::Ite(_, _, _) => l,
+        CFGStatement::Ite(_, _, _, _) => l,
         CFGStatement::Seq(l1, _) => l1, // could technically be a seq too but nah
         CFGStatement::While(_, _) => l,
         CFGStatement::TryCatch(_, _, _, _) => l,
@@ -365,7 +377,7 @@ fn fallthrough(
         CFGStatement::Statement(Statement::Continue { .. }) => vec![s_l.clone()],
         CFGStatement::Statement(Statement::Return { .. }) => vec![s_l.clone()],
         CFGStatement::Statement(_) => vec![],
-        CFGStatement::Ite(_, l1, l2) => {
+        CFGStatement::Ite(_, l1, l2, _) => {
             let final_s1 = fallthrough(&(*l1, lookup(*l1, all_smts)), all_smts);
             let mut final_s2 = fallthrough(&(*l2, lookup(*l2, all_smts)), all_smts);
 
@@ -438,7 +450,7 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
             unreachable!("Seq is not a CFGStatement")
         }
         CFGStatement::Statement(s) => unreachable!("{:?} is not a CFGStatement", s),
-        CFGStatement::Ite(_, s1, s2) => {
+        CFGStatement::Ite(_, s1, s2,_ ) => {
             let mut final_s1 = r#final(&(*s1, lookup(*s1, all_smts)), all_smts);
             let mut final_s2 = r#final(&(*s2, lookup(*s2, all_smts)), all_smts);
             final_s1.append(&mut final_s2);
@@ -457,7 +469,7 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
                 CFGStatement::Statement(_) => final_s2,
                 CFGStatement::FunctionEntry { .. } => unreachable!(),
                 CFGStatement::FunctionExit { .. } => unreachable!(),
-                CFGStatement::Ite(_, _, _) => final_s2,
+                CFGStatement::Ite(_, _, _, _) => final_s2,
                 CFGStatement::While(_, _) => final_s2,
                 CFGStatement::TryCatch(_, _, _, _) => final_s2,
                 CFGStatement::Seq(_, _) => unreachable!("No seq in l1"),
@@ -511,7 +523,7 @@ fn flow((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>) ->
         CFGStatement::Statement(Statement::Throw { .. }) => Vec::new(),
         CFGStatement::Statement(Statement::Try { .. }) => Vec::new(), // to be fixed
         CFGStatement::Statement(_) => unreachable!("block, ite and seq and while are not covered"),
-        CFGStatement::Ite(_, l1, l2) => {
+        CFGStatement::Ite(_, l1, l2, _) => {
             let s1 = (*l1, lookup(*l1, all_smts));
             let s2 = (*l2, lookup(*l2, all_smts));
             let flow_s1 = flow(&s1, all_smts);

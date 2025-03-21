@@ -127,10 +127,8 @@ fn main() -> Result<(), String> {
         };
 
         let source_paths = vec!["./benchmark_programs/experiment_m/0.oox"];
-        let start = Instant::now();
         let (sym_result_1, sym_result_2, statistics) =
             verify(source_paths.as_slice(), class_name, method_name, options)?;
-        let duration = start.elapsed();
         println!("merging got result: {:?}, depth_first got result {:?}", sym_result_1, sym_result_2)
         /* 
         let result_text = result_text(sym_result_1, source_paths);

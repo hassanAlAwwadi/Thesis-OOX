@@ -1,5 +1,5 @@
 use std::{
-  cell::RefCell, collections::HashMap, rc::Rc
+  cell::RefCell, collections::{HashMap, HashSet}, rc::Rc
 };
 
 use itertools::{Either};
@@ -84,7 +84,7 @@ fn run(
       let mut arg_names = vec![];
       for imp in class.members.clone(){
         if let Some(method) = imp.method(){
-          if method.name == method_name{
+          if method.name.eq(&method_name){
             arg_names = method.params.iter().map(|par|{par.name.clone()}).collect();
           }
         }
@@ -135,8 +135,6 @@ fn run(
             m_at_s_at.push(p_merge_info);
           }
         }
-
-        //check if the parent perhaps needs their merge point moved
       }
       else{
         todo!("only path has gotten too long...")
@@ -171,6 +169,9 @@ fn run(
           panic!("we claim to be the sibling of the prime path...")
         }
         continue;
+      }
+      else{
+        m_at_s_at.push(MergeInfo { merge_at, dcf_size});
       }
     }
 
@@ -271,7 +272,6 @@ fn run(
 
               while let Some(control) = current.pop_dynamic_cf() {
                 if let DynamicPointer::Ret(return_i, return_value_to) = control {
-                  current.pop_stack();
                   still_searching = false;
                   return_var = return_value_to;
                   return_pointer = return_i;
@@ -285,12 +285,18 @@ fn run(
               
               current.set_pointer(return_pointer);
               if let Some(value) = return_value {
+                let v = engine.eval_with_r(&current,&value);
+                current.pop_stack();
+
                 if let Some(var) = return_var {
-                  engine.assign_expr(&mut current, &var, &value);
+                  engine.assign_evaled(&mut current, &var, v);
                 }
                 else{
-                  engine.assign_expr(&mut current,&Lhs::LhsVar{ var: constants::retval(), type_: value.get_type(), info: *info }, &value);
+                  engine.assign_evaled(&mut current,&Lhs::LhsVar{ var: constants::retval(), type_: value.get_type(), info: *info }, v);
                 }
+              }
+              else{
+                current.pop_stack();
               }
 
               if let Some(MergeInfo{ merge_at, dcf_size }) = m_at_s_at.pop(){
@@ -366,26 +372,29 @@ fn run(
             _ => unreachable!("CFGStatement::Statement should only ever be a non control statement"), 
           },
           
-          CFGStatement::Ite(condition, left, right) => {
-            match condition{
-              //type conditions...
-              Either::Right(_) => todo!(),
-              Either::Left(expr) => {
-                let join_at = get_join_point(flows, &left, &right); 
-                let (mut then_child, mut else_child) = engine.split_on(&current, expr.clone());
+          CFGStatement::Ite(_, _, _, join) => {
+            let (mut then_child, mut else_child) = engine.split_on(&current, Rc::new(Expression::TRUE));
 
-                then_child.set_pointer(*left); 
+            if let [left, right] = flows.get(&stmt_id).unwrap().as_slice(){
+              //its possible the two branches don't have a join
+              //a possibility conjured by a twisted mind for sure
+              //we ignore this for now
+              let join = join.unwrap();
 
-                else_child.set_pointer(*right);
+              then_child.set_pointer(*left); 
 
-    
-                m_at_s_at.push(MergeInfo { merge_at: join_at, dcf_size: current.get_dynamic_cf_size() });
-                paths.push((current, Status::Waiting()));
+              else_child.set_pointer(*right);
 
-            
-                paths.push((else_child, Status::Active()));
-                paths.push((then_child, Status::Active()));
-              },
+
+              m_at_s_at.push(MergeInfo { merge_at: join, dcf_size: current.get_dynamic_cf_size() });
+              paths.push((current, Status::Waiting()));
+
+          
+              paths.push((else_child, Status::Active()));
+              paths.push((then_child, Status::Active()));
+            }
+            else{
+              panic!("ite with only one branch?!")
             }
           },
           CFGStatement::While(expression, b) => {
@@ -472,15 +481,19 @@ fn run(
           CFGStatement::FunctionExit { decl_name: _, method_name: _, argument_types: _ } => {
             // simpler than a return, this can't break through an enclosing while or try block :relieved
             // and it can't possible return a value :relieved
-            todo!("check postcondition"); 
             current.pop_stack();
-            if let DynamicPointer::Ret(return_i, None) = current.pop_dynamic_cf().unwrap() {
-              current.set_pointer(return_i);
+            let next = current.pop_dynamic_cf();
+            match next{
+              None => {
+                //guess we're at the end of it all :relieved:
+                return SymResult::Valid;
+              }
+              Some(DynamicPointer::Ret(return_i, None)) =>{
+                current.set_pointer(return_i);
+                paths.push((current, Status::Active()));
+              }
+              _ => panic!("strange end of function state")
             }
-            else{
-              panic!("functionexit, but not the top dynamic flow or it needs a return value?")
-            }
-            paths.push((current, Status::Active()));
           },
         }
       }
@@ -496,7 +509,7 @@ impl SetMergeEngine{
     &self,
     current: SetState,
     values: &Vec<(RuntimeType, SValue)>,
-    constraints_target_pairs: &mut Vec<(TypeExpr, (u64, Vec<Identifier>))>,
+    constraints_target_pairs: &mut Vec<(Rc<Expression>, (u64, Vec<Identifier>))>,
     paths: &mut Vec<(SetState, Status)>,
     merges: &mut Vec<MergeInfo>,
     return_var: Option<Lhs>,
@@ -511,7 +524,7 @@ impl SetMergeEngine{
         if constraints_target_pairs.len() > 0 {
           merges.push(MergeInfo { merge_at: return_ptr, dcf_size: head.get_dynamic_cf_size() });
         
-          let (mut left, right) = self.split_on(&head, Rc::new(Expression::TypeExpr { texpr: expr }));
+          let (mut left, right) = self.split_on(&head, expr);
 
           for (arg, (type_, val)) in args.iter().zip(values.iter()){
             self.assign_evaled(&mut left, &Lhs::LhsVar { var: arg.clone(), type_: type_.clone(), info: crate::SourcePos::UnknownPosition }, val.clone());
@@ -527,7 +540,10 @@ impl SetMergeEngine{
         }
         // last iteration
         else{
-          self.add_assumption_to(&mut head, (Either::Right(expr)));
+          self.add_assumption_to(&mut head, Either::Left(expr));
+          for (arg, (type_, val)) in args.iter().zip(values.iter()){
+            self.assign_evaled(&mut head, &Lhs::LhsVar { var: arg.clone(), type_: type_.clone(), info: crate::SourcePos::UnknownPosition }, val.clone());
+          }
           head.set_pointer(entry);
           head.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
           paths.push((head, Status::Active()));
@@ -540,7 +556,7 @@ impl SetMergeEngine{
 fn get_possible_function_heads(
   invocation: &Invocation, 
   st: &SymbolTable, 
-  funmap: &FTable) -> Vec<(TypeExpr, (u64, Vec<Identifier>))> {
+  funmap: &FTable) -> Vec<(Rc<Expression>, (u64, Vec<Identifier>))> {
   match invocation{
     Invocation::InvokeMethod { lhs, rhs, arguments, resolved, info } => {
       let arg_types: Vec<RuntimeType> = arguments.iter().map(|expr| {expr.as_ref().type_of()}).collect();
@@ -548,15 +564,23 @@ fn get_possible_function_heads(
 
       if let Some(resolved) = resolved{
 
-        for (i, (c, m)) in resolved.iter(){
-          let cond = TypeExpr::InstanceOf { 
-            var: lhs.clone(), 
-            rhs: RuntimeType::ReferenceRuntimeType { type_: c.name().clone() }, 
-            info: crate::SourcePos::UnknownPosition 
-          };
 
+        if resolved.len() == 1{
+          let (c, m) = resolved.get(lhs).unwrap();
           let ptr= funmap.get(&(c.name().clone(), m.name.clone(), arg_types.clone())).unwrap().clone();
-          res.push((cond, ptr));
+          res.push((Rc::new(Expression::TRUE), ptr));
+        }
+        else {
+          for (i, (c, m)) in resolved.iter(){
+            let cond = Rc::new(Expression::TypeExpr { texpr: TypeExpr::InstanceOf { 
+              var: lhs.clone(), 
+              rhs: RuntimeType::ReferenceRuntimeType { type_: c.name().clone() }, 
+              info: crate::SourcePos::UnknownPosition 
+            }});
+
+            let ptr= funmap.get(&(c.name().clone(), m.name.clone(), arg_types.clone())).unwrap().clone();
+            res.push((cond, ptr));
+          }
         }
         return res;
       }
@@ -566,7 +590,9 @@ fn get_possible_function_heads(
         for class in classes{
           //there should be a way to do this without cloning arg_types
           let key = &(class.as_ref().name.clone(), rhs.clone(), arg_types.clone());
-          let cond = TypeExpr::InstanceOf { var: lhs.clone(), rhs: RuntimeType::ReferenceRuntimeType { type_: class.name.clone() }, info: crate::SourcePos::UnknownPosition };
+          let cond = Rc::new(Expression::TypeExpr { texpr: 
+            TypeExpr::InstanceOf { var: lhs.clone(), rhs: RuntimeType::ReferenceRuntimeType { type_: class.name.clone() }, info: crate::SourcePos::UnknownPosition 
+          }});
           let ptr = funmap.get(key).unwrap().clone();
           res.push((cond, ptr));
         }
@@ -587,11 +613,3 @@ fn set_to_next_pc(top_state: &mut SetState, flows: &HashMap<u64, Vec<u64>>) {
     let next = nexts.last().unwrap().clone();
     top_state.set_pointer(next);
 }
-
-fn get_join_point(flows: &HashMap<u64, Vec<u64>>, left: &u64, right: &u64) -> u64 {
-  let l_n = flows.get(&left).unwrap_or_else( ||{ panic!("malformed graph") } ).last().unwrap().clone();
-  let r_n = flows.get(&right).unwrap_or_else( ||{ panic!("malformed graph") }).last().unwrap().clone();
-  assert!(l_n == r_n);
-  return l_n;
-}
-

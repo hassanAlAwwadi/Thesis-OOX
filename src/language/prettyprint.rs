@@ -888,7 +888,7 @@ pub mod cfg_pretty {
                     result = result.append(format!(" // {}", decoration))
                 }
             }
-            CFGStatement::Ite(e, t, f) => {
+            CFGStatement::Ite(e, t, f, _) => {
                 result = docs![
                     allocator,
                     "if (",
@@ -1020,7 +1020,7 @@ pub mod cfg_pretty {
                 CFGStatement::Statement(s) => {
                     pretty::Pretty::pretty(s, &allocator).1.render_fmt(w, f)
                 }
-                CFGStatement::Ite(e, _, _) => {
+                CFGStatement::Ite(e, _, _, _) => {
                     write!(f, "if (")?;
                     if_guard(e.clone(), &allocator).1.render_fmt(w, f)?;
                     write!(f, ") {{ .. }} else {{ .. }}")

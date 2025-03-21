@@ -32,14 +32,14 @@ type Stack = Vec<HashMap<Identifier, Rc<Expression>>>;
 type Heap  = HashMap<i64, Rc<HeapValue>>;
 
 
-#[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone)]
+#[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Debug)]
 pub(crate) enum TyOp{
   IsInstanceOf,
   IsNotInstanceOf
 }
 //"resolved" expression
 //at least it would be resolved, if we didn't have symbols :pensive:
-#[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone)]
+#[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Debug)]
 pub(crate) enum RExpr {
   Lit{ lit: Lit                                          , type_: RuntimeType},
   Sym{ id : Identifier                                   , type_: RuntimeType},
@@ -163,7 +163,20 @@ impl SetMergeEngine{
     return Result::Ok;
   }
 
+  pub(crate) fn eval_with_r(&self, state: &SetState, rhs: &Rhs) -> SValue{
+    match rhs {
+      Rhs::RhsExpression { value, type_, info } => {
+        let vals = self.eval_with(state, value.clone());
+        return vals;
+      },
+      Rhs::RhsField { var, field, type_, info } => todo!("field getting"),
+      Rhs::RhsElem { var, index, type_, info } => todo!("elem getting"),
+      Rhs::RhsArray { array_type, sizes, type_, info } => todo!("array construction"),
+      Rhs::RhsCast { cast_type, var, info } => todo!("casting"),
+      Rhs::RhsCall { invocation, type_, info } => unreachable!("should be handled by the engine"),
+    }
 
+  }
   pub(crate) fn eval_with(&self, state: &SetState, expr: Rc<Expression>) -> SValue{
     match expr.as_ref(){
       Expression::Lit { lit, type_, info } 
@@ -173,7 +186,9 @@ impl SetMergeEngine{
       Expression::Ref { ref_, type_, info } 
         => hashunit(Rc::new(RExpr::Ref { ptr: ref_.clone(), type_: type_.clone() })),
 
-      Expression::Var { var, type_, info } => state.stack.last().unwrap().get(var).unwrap().clone(),
+      Expression::Var { var, type_, info } => {
+        state.stack.last().unwrap().get(var).unwrap().clone()
+      },
       
       Expression::Conditional { guard, true_, false_, type_, info } => {
         let gs = self.eval_with(state, guard.clone());
@@ -241,6 +256,7 @@ impl SetMergeEngine{
       Lhs::LhsVar { var, type_, info } => {
         let stack = state.stack.last_mut().unwrap();
         stack.insert(var.clone(), value);
+
       },
       Lhs::LhsElem { var, index, type_, info } => todo!("elem setting"),
       Lhs::LhsField { var, var_type, field, type_, info } => todo!("field setting"),
@@ -248,14 +264,18 @@ impl SetMergeEngine{
   }
 
   pub(crate) fn is_feasible(&self, state: &SetState) -> bool {
-    todo!()
+    return true;
   }
   pub(crate) fn is_valid_for(&self, state: &SetState, expr: Rc<Expression>) -> bool {
-    todo!()
+    return true;
   }
 
   pub(crate) fn add_assumption_to(&self, state: &mut SetState, assumption: Either<Rc<Expression>, TypeExpr>) {
-    todo!();
+    let expr = assumption.either(
+    | s|{ s }, 
+    | t|{ Rc::new(Expression::TypeExpr { texpr: t })});
+    let cond = self.eval_with(state, expr);
+    state.unq_constr = RExpr::and(state.unq_constr.clone(), cond);
   }
 }
 
@@ -434,6 +454,49 @@ fn evaluate_unop(unop: UnOp, expression: Rc<RExpr>) -> Rc<RExpr> {
   use crate::syntax::Lit::*;
   use RExpr::*;
 
-  todo!();
+  match (unop, expression.as_ref()){
+
+    (Negative, Lit { lit: IntLit{int_value}, type_ }) 
+      => Rc::new(Lit{lit: IntLit{int_value: -int_value.clone()}, type_: type_.clone()}),
+    (Negative, Lit { lit: FloatLit{float_value}, type_ }) 
+      => Rc::new(Lit{lit: FloatLit{float_value: -float_value.clone()}, type_: type_.clone()}),
+    //todo: negative of expressions
+    //but maybe that one is less of a big deal?
+
+    (Negate, Lit { lit: BoolLit{bool_value}, type_ }) 
+      => Rc::new(Lit { lit: BoolLit{bool_value: !bool_value.clone()}, type_: type_.clone()}),
+    (Negate, Typ { op, val, of, type_ }) 
+      => Rc::new(Typ{op: flip_t(op.clone()), val: val.clone(), of: of.clone(), type_: type_.clone()}),
+    (Negate, Uno { op, val, type_ }) => val.clone(),
+
+    (_, Con { con, left, right, type_ }) 
+      => Rc::new(Con { 
+        con  : con.clone(), 
+        left : evaluate_unop(unop, left.clone()), 
+        right: evaluate_unop(unop, right.clone()),
+        type_: type_.clone()}),
+
+    (Negate, Bin { op: BinOp::Equal, left, right, type_ }) 
+      => Rc::new(Bin{op: BinOp::NotEqual, left: left.clone(), right: right.clone(), type_: type_.clone()}),
+    (Negate, Bin { op: BinOp::NotEqual, left, right, type_ }) 
+      => Rc::new(Bin{op: BinOp::Equal, left: left.clone(), right: right.clone(), type_: type_.clone()}),
+    (Negate, Bin { op: BinOp::LessThan, left, right, type_ }) 
+      => Rc::new(Bin{op: BinOp::GreaterThanEqual, left: left.clone(), right: right.clone(), type_: type_.clone()}),
+    (Negate, Bin { op: BinOp::LessThanEqual, left, right, type_ }) 
+      => Rc::new(Bin{op: BinOp::GreaterThan, left: left.clone(), right: right.clone(), type_: type_.clone()}),
+    (Negate, Bin { op: BinOp::GreaterThan, left, right, type_ }) 
+      => Rc::new(Bin{op: BinOp::LessThanEqual, left: left.clone(), right: right.clone(), type_: type_.clone()}),
+    (Negate, Bin { op: BinOp::GreaterThanEqual, left, right, type_ }) 
+      => Rc::new(Bin{op: BinOp::LessThan, left: left.clone(), right: right.clone(), type_: type_.clone()}),  
+    _ => expression
+  }
+}
+
+
+fn flip_t(ty_op: TyOp) -> TyOp {
+  match ty_op{
+    TyOp::IsInstanceOf => TyOp::IsNotInstanceOf,
+    TyOp::IsNotInstanceOf => TyOp::IsInstanceOf,
+  }
 }
 
