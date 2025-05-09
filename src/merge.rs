@@ -129,8 +129,6 @@ impl<T> RExpr<T> where T: Clone {
       (Or             , _, _) 
         => Rc::new(RExpr::Bin{ op: bin_op, left: lhs, right: rhs, type_: BoolRuntimeType }),
       
-      // rest to be done at some other time :releved:
-      (Equal           , _, _) => Rc::new(RExpr::Bin{ op: bin_op, left: lhs, right: rhs, type_: BoolRuntimeType }),
       (NotEqual        , Lit { lit: IntLit { int_value: l }, .. }, Lit { lit: IntLit { int_value: r }, .. }) => Rc::new(Lit { lit: BoolLit { bool_value: l != r }, type_: BoolRuntimeType }),
       (LessThan        , Lit { lit: IntLit { int_value: l }, .. }, Lit { lit: IntLit { int_value: r }, .. }) => Rc::new(Lit { lit: BoolLit { bool_value: l < r }, type_: BoolRuntimeType }),
       (LessThanEqual   , Lit { lit: IntLit { int_value: l }, .. }, Lit { lit: IntLit { int_value: r }, .. }) => Rc::new(Lit { lit: BoolLit { bool_value: l <= r }, type_: BoolRuntimeType }),
@@ -216,6 +214,13 @@ impl<T> RExpr<T> where T: Clone {
       (Modulo, _, Lit { lit: IntLit { int_value: 1 }, .. }) => Rc::new(Lit { lit: IntLit { int_value: 0 }, type_: type_.clone() }),
       
       
+      // rest to be done at some other time :releved:
+      (Equal           , _, _) => Rc::new(RExpr::Bin{ op: bin_op, left: lhs, right: rhs, type_: BoolRuntimeType }),
+      (NotEqual           , _, _) => Rc::new(RExpr::Bin{ op: bin_op, left: lhs, right: rhs, type_: BoolRuntimeType }),
+      (LessThan        , _, _) => Rc::new(RExpr::Bin{ op: bin_op, left: lhs, right: rhs, type_ }),
+      (LessThanEqual   , _, _) => Rc::new(RExpr::Bin{ op: bin_op, left: lhs, right: rhs, type_ }),
+      (GreaterThan     , _, _) => Rc::new(RExpr::Bin{ op: bin_op, left: lhs, right: rhs, type_ }),
+      (GreaterThanEqual, _, _) => Rc::new(RExpr::Bin{ op: bin_op, left: lhs, right: rhs, type_ }),
 
       (Plus, _, _) => Rc::new(RExpr::Bin{ op: bin_op, left: lhs, right: rhs, type_ }),
       (Minus, _, _) => Rc::new(RExpr::Bin{ op: bin_op, left: lhs, right: rhs, type_ }),
