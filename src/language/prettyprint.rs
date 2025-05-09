@@ -370,7 +370,7 @@ impl<'a, D: DocAllocator<'a>> pretty::Pretty<'a, D> for &Expression {
                         formula.as_ref()
                     ],
             Expression::SymbolicRef { var, .. } => allocator.text(var.to_string()),
-            Expression::TypeExpr { texpr } => todo!(),
+            Expression::TypeExpr { texpr: _ } => todo!(),
         }
     }
 }

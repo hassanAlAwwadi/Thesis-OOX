@@ -117,7 +117,7 @@ impl Typeable for Expression {
             Ref { type_, .. } => type_,
             SymbolicRef { type_, .. } => type_,
             Conditional { type_, .. } => type_,
-            TypeExpr { texpr } => &RuntimeType::BoolRuntimeType,
+            TypeExpr { texpr: _ } => &RuntimeType::BoolRuntimeType,
         }
         .clone()
     }

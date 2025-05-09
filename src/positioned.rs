@@ -85,7 +85,7 @@ impl WithPosition for Expression {
             Expression::Ref { info, .. } => info,
             Expression::SymbolicRef { info, .. } => info,
             Expression::Conditional { info, .. } => info,
-            Expression::TypeExpr { texpr } => todo!(),
+            Expression::TypeExpr { texpr: _ } => todo!(),
         }
     }
 }
@@ -160,7 +160,7 @@ impl WithPosition for &Expression {
             Expression::Ref { info, .. } => *info,
             Expression::SymbolicRef { info, .. } => *info,
             Expression::Conditional { info, .. } => *info,
-            Expression::TypeExpr { texpr } => todo!(),
+            Expression::TypeExpr { texpr: _ } => todo!(),
         }
     }
 }

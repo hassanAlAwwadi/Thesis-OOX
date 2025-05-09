@@ -1754,7 +1754,7 @@ pub fn verify(
     let mut statistics: Statistics = Default::default();
 
     // Choose between heuristic function (with matching parameters)
-    let sym_exec = match options.heuristic {
+    let _sym_exec = match options.heuristic {
         Heuristic::DepthFirstSearch => heuristics::depth_first_search::sym_exec,
         Heuristic::RandomPath => heuristics::random_path::sym_exec,
         Heuristic::MinDist2Uncovered => heuristics::min_dist_to_uncovered::sym_exec,

@@ -1,13 +1,13 @@
 use std::{
-  cell::RefCell, collections::{HashMap, HashSet}, rc::Rc
+  cell::RefCell, collections::{HashMap}, rc::Rc
 };
 
-use itertools::{Either, Merge};
+use itertools::{Either};
 use slog::Logger;
 
 
 use crate::{
-  cfg::CFGStatement, exec::{constants, IdCounter, SymResult}, merge::{DynamicPointer, MergeEngine, MergeState, RExpr, TValue, TreeEngine, TreeState, SetEngine, SetState}, statistics::Statistics, symbol_table::SymbolTable, typeable::Typeable, Expression, Identifier, Invocation, Lhs, Options, Rhs, RuntimeType, Statement, TypeExpr
+  cfg::CFGStatement, exec::{constants, IdCounter, SymResult}, merge::{DynamicPointer, MergeEngine, MergeState, SetEngine}, statistics::Statistics, symbol_table::SymbolTable, typeable::Typeable, Expression, Identifier, Invocation, Lhs, Options, Rhs, RuntimeType, Statement, TypeExpr
 };
 
 use super::State;
@@ -27,14 +27,14 @@ pub(crate) fn sym_exec(
 
   let mut symbols = vec![];
   for (id, expr) in init.stack.current_stackframe().unwrap().params.iter() {
-    if let Expression::SymbolicVar { var, type_, info } = expr.as_ref(){
+    if let Expression::SymbolicVar { var, type_, info: _ } = expr.as_ref(){
       symbols.push((id.clone(), var.clone(), type_.clone()));
     }
     else{
       panic!("starting out with non symbolic values!?");
     }
   }
-  let mut state = engine.make_new_state(init.pc, Rc::new(Expression::TRUE), symbols);
+  let state = engine.make_new_state(init.pc, Rc::new(Expression::TRUE), symbols);
 
   return run(
     engine,
@@ -193,7 +193,7 @@ where T: MergeEngine, T::EValue: Clone {
               set_to_next_pc(&mut current, flows);
               paths.push((current, current_status));
             },
-            Statement::Assign { lhs, rhs, info } => {
+            Statement::Assign { lhs, rhs, info: _ } => {
               if let Rhs::RhsCall { invocation, .. } = rhs {
                   let nexts: &Vec<u64> = flows.get(&current.get_pointer()).unwrap_or_else( ||{ panic!("malformed graph") } );
                   assert_eq!(nexts.len(), 1);
@@ -420,7 +420,7 @@ where T: MergeEngine, T::EValue: Clone {
           },
           CFGStatement::While(expression, b) => {
 
-            if let(Some(flow)) = current.pop_dynamic_cf(){
+            if let Some(flow) = current.pop_dynamic_cf(){
               if let DynamicPointer::Whl(t, _) = flow{
                 if t == stmt_id{
                   //we've reintered the while loop, so we remove this one and readd it to the then branch
@@ -493,7 +493,7 @@ where T: MergeEngine, T::EValue: Clone {
             current.set_pointer(*l);
             paths.push((current, Status::Active()));
           },
-          CFGStatement::FunctionEntry { decl_name, method_name, argument_types } => {
+          CFGStatement::FunctionEntry { decl_name: _, method_name: _, argument_types: _ } => {
             set_to_next_pc(&mut current, flows);
             paths.push((current, Status::Active()));
           },
@@ -576,7 +576,7 @@ fn get_possible_function_heads(
   st: &SymbolTable, 
   funmap: &FTable) -> Vec<(Rc<Expression>, (u64, Vec<Identifier>))> {
   match invocation{
-    Invocation::InvokeMethod { lhs, rhs, arguments, resolved, info } => {
+    Invocation::InvokeMethod { lhs, rhs, arguments, resolved, info: _ } => {
       let arg_types: Vec<RuntimeType> = arguments.iter().map(|expr| {expr.as_ref().type_of()}).collect();
       let mut res= vec![];
 
@@ -589,7 +589,7 @@ fn get_possible_function_heads(
           res.push((Rc::new(Expression::TRUE), ptr));
         }
         else {
-          for (i, (c, m)) in resolved.iter(){
+          for (_i, (c, m)) in resolved.iter(){
             let cond = Rc::new(Expression::TypeExpr { texpr: TypeExpr::InstanceOf { 
               var: lhs.clone(), 
               rhs: RuntimeType::ReferenceRuntimeType { type_: c.name().clone() }, 
@@ -616,8 +616,8 @@ fn get_possible_function_heads(
       return res;
 
     },
-    Invocation::InvokeSuperMethod { rhs, arguments, resolved, info } => todo!(),
-    Invocation::InvokeConstructor { class_name, arguments, resolved, info } => {
+    Invocation::InvokeSuperMethod { rhs: _, arguments: _, resolved: _, info: _ } => todo!(),
+    Invocation::InvokeConstructor { class_name: _, arguments, resolved, info: _ } => {
       let arg_types: Vec<RuntimeType> = arguments.iter().map(|expr| {expr.as_ref().type_of()}).collect();
 
       let (i, m) = resolved.as_ref().map(AsRef::as_ref).unwrap();
@@ -630,7 +630,7 @@ fn get_possible_function_heads(
       let ptr= funmap.get(&(class_name, m.name.clone(), arg_types.clone())).unwrap().clone();
       return vec![(cond, ptr)];
     },
-    Invocation::InvokeSuperConstructor { arguments, resolved, info } => todo!(),
+    Invocation::InvokeSuperConstructor { arguments: _, resolved: _, info: _ } => todo!(),
   }
 }
 

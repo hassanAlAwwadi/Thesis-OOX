@@ -1,9 +1,9 @@
-use std::{fs, time::Instant};
+
 
 use clap::{Parser, Subcommand};
 use itertools::Itertools;
 use lib::{
-    insert_exceptional_clauses, mutate_program, parse_program, type_compilation_unit, verify, CompilationUnit, Heuristic, Identifier, Options, SourcePos, SymResult, SymbolTable, FILE_NAMES
+    insert_exceptional_clauses, parse_program, type_compilation_unit, verify, CompilationUnit, Heuristic, Options, SourcePos, SymResult, SymbolTable, FILE_NAMES
 };
 use pretty::BoxAllocator;
 
@@ -127,7 +127,7 @@ fn main() -> Result<(), String> {
         };
 
         let source_paths = vec!["./benchmark_programs/experiment_m/0.oox"];
-        let (sym_result_1, sym_result_2, statistics) =
+        let (sym_result_1, sym_result_2, _statistics) =
             verify(source_paths.as_slice(), class_name, method_name, options)?;
         println!("merging got result: {:?}, depth_first got result {:?}", sym_result_1, sym_result_2)
         /* 

@@ -390,7 +390,7 @@ fn mutate_expression(
             | Expression::SymbolicRef { .. }
             | Expression::SymbolicVar { .. }
             | Expression::Conditional { .. } => unreachable!("Cannot be reached during typing phase"),
-        Expression::TypeExpr { texpr } => todo!(),
+        Expression::TypeExpr { texpr: _ } => todo!(),
     }
 }
 

@@ -547,13 +547,13 @@ pub enum Rhs {
 
 impl Rhs {
     pub(crate) fn get_type(&self) -> RuntimeType{
-        match(self){
-            Rhs::RhsExpression { value, type_, info } => type_.clone(),
-            Rhs::RhsField { var, field, type_, info } => type_.clone(),
-            Rhs::RhsElem { var, index, type_, info } => type_.clone(),
-            Rhs::RhsCall { invocation, type_, info } => type_.clone(),
-            Rhs::RhsArray { array_type, sizes, type_, info } => type_.clone(),
-            Rhs::RhsCast { cast_type, var, info } => cast_type.clone().into(),
+        match self{
+            Rhs::RhsExpression { value: _, type_, info: _ } => type_.clone(),
+            Rhs::RhsField { var: _, field: _, type_, info: _ } => type_.clone(),
+            Rhs::RhsElem { var: _, index: _, type_, info: _ } => type_.clone(),
+            Rhs::RhsCall { invocation: _, type_, info: _ } => type_.clone(),
+            Rhs::RhsArray { array_type: _, sizes: _, type_, info: _ } => type_.clone(),
+            Rhs::RhsCast { cast_type, var: _, info: _ } => cast_type.clone().into(),
         }
     }
 }
@@ -561,14 +561,14 @@ impl Rhs {
 impl Into<RuntimeType> for NonVoidType{
     fn into(self) -> RuntimeType {
         match self{
-            NonVoidType::UIntType { info } => RuntimeType::UIntRuntimeType,
-            NonVoidType::IntType { info } => RuntimeType::IntRuntimeType,
-            NonVoidType::FloatType { info } => RuntimeType::FloatRuntimeType,
-            NonVoidType::BoolType { info } => RuntimeType::BoolRuntimeType,
-            NonVoidType::StringType { info } => RuntimeType::StringRuntimeType,
-            NonVoidType::CharType { info } => RuntimeType::CharRuntimeType,
-            NonVoidType::ReferenceType { identifier, info } => RuntimeType::ReferenceRuntimeType { type_: identifier },
-            NonVoidType::ArrayType { inner_type, info } => RuntimeType::ArrayRuntimeType { inner_type: Box::new(inner_type.deref().clone().into()) },
+            NonVoidType::UIntType { info: _ } => RuntimeType::UIntRuntimeType,
+            NonVoidType::IntType { info: _ } => RuntimeType::IntRuntimeType,
+            NonVoidType::FloatType { info: _ } => RuntimeType::FloatRuntimeType,
+            NonVoidType::BoolType { info: _ } => RuntimeType::BoolRuntimeType,
+            NonVoidType::StringType { info: _ } => RuntimeType::StringRuntimeType,
+            NonVoidType::CharType { info: _ } => RuntimeType::CharRuntimeType,
+            NonVoidType::ReferenceType { identifier, info: _ } => RuntimeType::ReferenceRuntimeType { type_: identifier },
+            NonVoidType::ArrayType { inner_type, info: _ } => RuntimeType::ArrayRuntimeType { inner_type: Box::new(inner_type.deref().clone().into()) },
         }
     }
 }
@@ -771,7 +771,7 @@ impl Expression {
             Expression::Ref { type_, .. } => type_.clone(),
             Expression::SymbolicRef { type_, .. } => type_.clone(),
             Expression::Conditional { type_, .. } => type_.clone(),
-            Expression::TypeExpr { texpr } => RuntimeType::BoolRuntimeType,
+            Expression::TypeExpr { texpr: _ } => RuntimeType::BoolRuntimeType,
         }
     }
 }
