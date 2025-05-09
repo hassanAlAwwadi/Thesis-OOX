@@ -2,12 +2,12 @@ use std::{
   cell::RefCell, collections::{HashMap, HashSet}, rc::Rc
 };
 
-use itertools::{Either};
+use itertools::{Either, Merge};
 use slog::Logger;
 
 
 use crate::{
-  cfg::CFGStatement, exec::{constants, IdCounter, SymResult}, merge::{DynamicPointer, RExpr, SValue, SetMergeEngine, SetState}, statistics::Statistics, symbol_table::SymbolTable, typeable::Typeable, Expression, Identifier, Invocation, Lhs, Options, Rhs, RuntimeType, Statement, TypeExpr
+  cfg::CFGStatement, exec::{constants, IdCounter, SymResult}, merge::{DynamicPointer, MergeEngine, MergeState, RExpr, TValue, TreeEngine, TreeState, SetEngine, SetState}, statistics::Statistics, symbol_table::SymbolTable, typeable::Typeable, Expression, Identifier, Invocation, Lhs, Options, Rhs, RuntimeType, Statement, TypeExpr
 };
 
 use super::State;
@@ -23,7 +23,7 @@ pub(crate) fn sym_exec(
   _entry_method: crate::cfg::MethodIdentifier,
   options: &Options,
 ) -> SymResult {
-  let mut engine = SetMergeEngine::new();
+  let mut engine: SetEngine = SetEngine::new();
 
   let mut symbols = vec![];
   for (id, expr) in init.stack.current_stackframe().unwrap().params.iter() {
@@ -60,9 +60,9 @@ struct MergeInfo{
 }
 
 type FTable = HashMap<(Identifier, Identifier, Vec<RuntimeType>), (u64, Vec<Identifier>)>;
-fn run(
-  engine: SetMergeEngine,
-  init_state: SetState ,
+fn run<T>(
+  engine: T,
+  init_state: T::State ,
   program: &HashMap<u64, CFGStatement>,
   flows: &HashMap<u64, Vec<u64>>,
   st: &SymbolTable,
@@ -71,7 +71,8 @@ fn run(
   _statistics: &mut Statistics,
   _entry_method: crate::cfg::MethodIdentifier,
   options: &Options,
-) -> SymResult {
+) -> SymResult 
+where T: MergeEngine, T::EValue: Clone {
   
 
   let mut function_entry_map: FTable  = HashMap::new();
@@ -96,7 +97,7 @@ fn run(
   }
   // states that are actively progressing
   // together with a reference to their parent and sibling
-  let mut paths: Vec<(SetState, Status)> = vec![];
+  let mut paths: Vec<(T::State, Status)> = vec![];
   let mut m_at_s_at: Vec<MergeInfo> = vec![];
   paths.push((init_state, Status::Active()));
 
@@ -135,9 +136,10 @@ fn run(
             m_at_s_at.push(p_merge_info);
           }
         }
+        continue;
       }
       else{
-        todo!("only path has gotten too long...")
+        return SymResult::Valid;
       }
     }
 
@@ -202,7 +204,7 @@ fn run(
                     .map(|expr|{(expr.get_type(), engine.eval_with(&current, expr.clone()))})
                     .collect();
                   current.push_stack();
-                  engine.insert_states_function_call(current,&vals, &mut constraints_target_pairs, &mut paths, &mut m_at_s_at, None, next);
+                  insert_states_function_call(&engine, current,&vals, &mut constraints_target_pairs, &mut paths, &mut m_at_s_at, None, next);
                 }
               else{
                 engine.assign_expr(&mut current, &lhs, &rhs);
@@ -221,7 +223,7 @@ fn run(
                 .map(|expr|{(expr.get_type(), engine.eval_with(&mut current, expr.clone()))})
                 .collect();
               current.push_stack();
-              engine.insert_states_function_call(current,&vals, &mut constraints_target_pairs, &mut paths, &mut m_at_s_at, None, next);
+              insert_states_function_call(&engine, current,&vals, &mut constraints_target_pairs, &mut paths, &mut m_at_s_at, None, next);
             },
             Statement::Assert { assertion, info } => {
               if engine.is_valid_for(&current, assertion.clone()) {
@@ -251,13 +253,32 @@ fn run(
               
             },
             Statement::Continue { info: _ } => {
-              todo!("pop stack until WHL, reset join point if needed");
-              set_to_next_pc(&mut current, flows);
+              let mut next: u64 = 0;
+              let mut still_searching = true;
+              while let Some(control) = current.pop_dynamic_cf() {
+                if let DynamicPointer::Whl(head, _) = control {
+                  still_searching = false;
+                  next = head;
+                  break; 
+                }
+              }
+              if still_searching {panic!("continue but outside of while loop")};
+              current.set_pointer(next);
               paths.push((current, current_status));
             },
+
             Statement::Break { info: _ } => {
-              todo!("pop stack until WHL, reset join point if needed");
-              set_to_next_pc(&mut current, flows);
+              let mut next: u64 = 0;
+              let mut still_searching = true;
+              while let Some(control) = current.pop_dynamic_cf() {
+                if let DynamicPointer::Whl(_, then) = control {
+                  still_searching = false;
+                  next = then;
+                  break; 
+                }
+              }
+              if still_searching { panic!("break but outside of while loop") };
+              current.set_pointer(next);
               paths.push((current, current_status));
             },
 
@@ -399,27 +420,20 @@ fn run(
           },
           CFGStatement::While(expression, b) => {
 
-            if let Some(dyn_ptr) = current.pop_dynamic_cf(){
-              if let DynamicPointer::Whl(head, _next) = dyn_ptr{
-                //we've been in this loop before
-                if head == stmt_id{
-                  // we reinsert this one in the then child
+            if let(Some(flow)) = current.pop_dynamic_cf(){
+              if let DynamicPointer::Whl(t, _) = flow{
+                if t == stmt_id{
+                  //we've reintered the while loop, so we remove this one and readd it to the then branch
                 }
                 else{
-                  // we haven't been in *this* while before
-                  // so we shouldn't have removed it :pensive:
-                  current.push_dynamic_cf(dyn_ptr);
+                  current.push_dynamic_cf(flow);
                 }
               }
               else{
-                // top isn't a while at all
-                // so we shouldn't have removed it
-                current.push_dynamic_cf(dyn_ptr);
+                current.push_dynamic_cf(flow);
               }
             }
-
             let (mut then_child, mut else_child) = engine.split_on(&current, expression.clone());
-            then_child.set_pointer(*b); 
 
             //get pointer to the next statement after the while
             let nexts : Vec<_> = flows
@@ -429,18 +443,23 @@ fn run(
               .filter(|next| *next != b)
               .collect();
 
-            assert!(nexts.len() == 1);
-            let next = nexts[0];
+            if let [head, then] = nexts.as_slice(){
+              let n_next = flows.get(then).unwrap()[0];
+              m_at_s_at.push(MergeInfo{ merge_at: n_next, dcf_size: current.get_dynamic_cf_size()});                     
+              paths.push((current, Status::Waiting()));
 
-            m_at_s_at.push(MergeInfo{ merge_at: *next, dcf_size: current.get_dynamic_cf_size()});                     
-            paths.push((current, Status::Waiting()));
 
-            else_child.set_pointer(*next);
-            paths.push((else_child, Status::Waiting()));
-            
-            then_child.push_dynamic_cf(DynamicPointer::Whl(stmt_id, *next));
-            paths.push((then_child, Status::Active() ));
+              then_child.set_pointer(**head); 
+              else_child.set_pointer(**then);
+              paths.push((else_child, Status::Active()));
+  
+              then_child.push_dynamic_cf(DynamicPointer::Whl(stmt_id, n_next));
+              paths.push((then_child, Status::Active()));
 
+            }
+            else{
+              panic!("strange pointers coming from while: {:?}", nexts);
+            }
           },
           CFGStatement::TryCatch(try_entry, try_exit, catch_entry, _catch_exit) => {
             current.set_pointer(*try_entry); 
@@ -504,54 +523,53 @@ fn run(
   
 }
 
-impl SetMergeEngine{
-  fn insert_states_function_call(
-    &self,
-    current: SetState,
-    values: &Vec<(RuntimeType, SValue)>,
-    constraints_target_pairs: &mut Vec<(Rc<Expression>, (u64, Vec<Identifier>))>,
-    paths: &mut Vec<(SetState, Status)>,
-    merges: &mut Vec<MergeInfo>,
-    return_var: Option<Lhs>,
-    return_ptr: u64) {
-      if constraints_target_pairs.len() <= 0 {
-        panic!("no function entry points found")
+fn insert_states_function_call<T>(
+  engine: &T,
+  current: T::State,
+  values: &Vec<(RuntimeType, T::EValue)>,
+  constraints_target_pairs: &mut Vec<(Rc<Expression>, (u64, Vec<Identifier>))>,
+  paths: &mut Vec<(T::State, Status)>,
+  merges: &mut Vec<MergeInfo>,
+  return_var: Option<Lhs>,
+  return_ptr: u64) where T:MergeEngine, T::EValue : Clone {
+    if constraints_target_pairs.len() <= 0 {
+      panic!("no function entry points found")
+    }
+
+    let mut head = current;
+    while let Some((expr, (entry, args))) = constraints_target_pairs.pop(){
+      
+      if constraints_target_pairs.len() > 0 {
+        merges.push(MergeInfo { merge_at: return_ptr, dcf_size: head.get_dynamic_cf_size() });
+      
+        let (mut left, right) = engine.split_on(&head, expr);
+
+        for (arg, (type_, val)) in args.iter().zip(values.iter()){
+          engine.assign_evaled(&mut left, &Lhs::LhsVar { var: arg.clone(), type_: type_.clone(), info: crate::SourcePos::UnknownPosition }, val.clone());
+        }
+        left.set_pointer(entry);
+        
+
+        left.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
+        paths.push((head, Status::Waiting()));
+        paths.push((left, Status::Active()));
+        head = right;
+  
       }
-
-      let mut head = current;
-      while let Some((expr, (entry, args))) = constraints_target_pairs.pop(){
-        
-        if constraints_target_pairs.len() > 0 {
-          merges.push(MergeInfo { merge_at: return_ptr, dcf_size: head.get_dynamic_cf_size() });
-        
-          let (mut left, right) = self.split_on(&head, expr);
-
-          for (arg, (type_, val)) in args.iter().zip(values.iter()){
-            self.assign_evaled(&mut left, &Lhs::LhsVar { var: arg.clone(), type_: type_.clone(), info: crate::SourcePos::UnknownPosition }, val.clone());
-          }
-          left.set_pointer(entry);
-          
-
-          left.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
-          paths.push((head, Status::Waiting()));
-          paths.push((left, Status::Active()));
-          head = right;
-    
+      // last iteration
+      else{
+        engine.add_assumption_to(&mut head, Either::Left(expr));
+        for (arg, (type_, val)) in args.iter().zip(values.iter()){
+          engine.assign_evaled(&mut head, &Lhs::LhsVar { var: arg.clone(), type_: type_.clone(), info: crate::SourcePos::UnknownPosition }, val.clone());
         }
-        // last iteration
-        else{
-          self.add_assumption_to(&mut head, Either::Left(expr));
-          for (arg, (type_, val)) in args.iter().zip(values.iter()){
-            self.assign_evaled(&mut head, &Lhs::LhsVar { var: arg.clone(), type_: type_.clone(), info: crate::SourcePos::UnknownPosition }, val.clone());
-          }
-          head.set_pointer(entry);
-          head.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
-          paths.push((head, Status::Active()));
-          break;
-        }
+        head.set_pointer(entry);
+        head.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
+        paths.push((head, Status::Active()));
+        break;
       }
     }
-}
+  }
+
 
 fn get_possible_function_heads(
   invocation: &Invocation, 
@@ -582,13 +600,11 @@ fn get_possible_function_heads(
             res.push((cond, ptr));
           }
         }
-        return res;
       }
       else{
         let classes = st.subclasses(lhs);
 
         for class in classes{
-          //there should be a way to do this without cloning arg_types
           let key = &(class.as_ref().name.clone(), rhs.clone(), arg_types.clone());
           let cond = Rc::new(Expression::TypeExpr { texpr: 
             TypeExpr::InstanceOf { var: lhs.clone(), rhs: RuntimeType::ReferenceRuntimeType { type_: class.name.clone() }, info: crate::SourcePos::UnknownPosition 
@@ -596,8 +612,8 @@ fn get_possible_function_heads(
           let ptr = funmap.get(key).unwrap().clone();
           res.push((cond, ptr));
         }
-        return res;
       }
+      return res;
 
     },
     Invocation::InvokeSuperMethod { rhs, arguments, resolved, info } => todo!(),
@@ -607,7 +623,7 @@ fn get_possible_function_heads(
 }
 
 
-fn set_to_next_pc(top_state: &mut SetState, flows: &HashMap<u64, Vec<u64>>) {
+fn set_to_next_pc<T>(top_state: &mut T, flows: &HashMap<u64, Vec<u64>>)  where T : MergeState{
     let nexts = flows.get(&top_state.get_pointer()).unwrap_or_else( ||{ panic!("malformed graph") } );
     assert_eq!(nexts.len(), 1);
     let next = nexts.last().unwrap().clone();

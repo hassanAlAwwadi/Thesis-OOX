@@ -141,7 +141,7 @@ fn eval_locally(
                 formula,
                 ..
             } => evaluate_quantifier(ors, &elem, &range, &domain, formula.clone(), state, en),
-            Expression::TypeExpr { texpr } => todo!(),
+        Expression::TypeExpr { .. } => unreachable!("not used in this implementation"),
     }
 }
 

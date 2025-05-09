@@ -111,7 +111,7 @@ enum BE {
 }
 
 #[derive(Clone)]
-enum AstNode<'ctx> {
+pub(crate) enum AstNode<'ctx> {
     Bool(Bool<'ctx>),
     Int(Int<'ctx>),
 }

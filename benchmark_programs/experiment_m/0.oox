@@ -1,106 +1,15 @@
 class Main {
-  static void main(bool p) {
-    int i   := 9;
-
-    if(p) {
-      i := 50;
-    }
-    else {
-      i := 80;
+  static void main(int i, int j) {
+    while( i > 0 ){
+      i := i - 10;
     }
 
-    if(p) {
-      i := 50;
-    }
-    else {
-      i := 80;
+    while (j > 0){
+      j := j - 10;
     }
 
-    if(p) {
-      i := 50;
-    }
-    else {
-      i := 80;
-    }
-
-    if(p) {
-      i := 50;
-    }
-    else {
-      i := 80;
-    }
-
-    if(p) {
-      i := 50;
-    }
-    else {
-      i := 80;
-    }
-
-    if(p) {
-      i := 50;
-    }
-    else {
-      i := 80;
-    }
-
-    if(p) {
-      i := 50;
-    }
-    else {
-      i := 80;
-    }
-
-    if(p) {
-      i := 50;
-    }
-    else {
-      i := 80;
-    }
-
-    if(p) {
-      i := 50;
-    }
-    else {
-      i := 80;
-    }
-
-    if(p) {
-      i := 50;
-    }
-    else {
-      i := 80;
-    }
-    if(p) {
-      i := 50;
-    }
-    else {
-      i := 80;
-    }
-    if(p) {
-      i := 50;
-    }
-    else {
-      i := 80;
-    }
-    if(p) {
-      i := 50;
-    }
-    else {
-      i := 80;
-    }
-    if(p) {
-      i := 50;
-    }
-    else {
-      i := 80;
-    }
-
-    bool qi := Main.q(i);
-    assert qi;
-  }
-
-  static bool q(int x){
-    return x < 100;
+    int z := i + j;
+    bool q := z <= 0;
+    assert q;
   }
 }

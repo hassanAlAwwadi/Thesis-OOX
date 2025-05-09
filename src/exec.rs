@@ -299,6 +299,16 @@ fn action(
         CFGStatement::Statement(Statement::Assert { assertion, .. }) => {
             let expression = prepare_assert_expression(state, assertion.clone(), en);
 
+            /*
+            println!("expr to eval: {:?}", expression);
+            for (frame) in state.stack.current_stackframe().iter(){
+                println!("printing stackframe");
+                for (k, v) in frame.params.clone(){
+                    println!("{:?}: {:?}", k, v);
+                }
+            }
+            */
+            
             let is_valid = eval_assertion(state, expression, en);
             if !is_valid {
                 return ActionResult::InvalidAssertion(assertion.get_position());

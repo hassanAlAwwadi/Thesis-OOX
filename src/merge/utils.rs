@@ -22,4 +22,10 @@ pub mod utils{
     }
     return left;
   }
+
+  pub fn hash_unit<T>(t: T) -> HashSet<T> where T: Eq, T: Hash{
+    let mut h = HashSet::new();
+    h.insert(t);
+    return h;
+  }  
 }
