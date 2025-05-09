@@ -61,7 +61,7 @@ struct MergeInfo{
 
 type FTable = HashMap<(Identifier, Identifier, Vec<RuntimeType>), (u64, Vec<Identifier>)>;
 fn run<T>(
-  engine: T,
+  mut engine: T,
   init_state: T::State ,
   program: &HashMap<u64, CFGStatement>,
   flows: &HashMap<u64, Vec<u64>>,
@@ -201,10 +201,10 @@ where T: MergeEngine, T::EValue: Clone {
                   let mut constraints_target_pairs = get_possible_function_heads(&invocation, st, &function_entry_map);
                   let next = nexts.last().unwrap().clone();
                   let vals = invocation.arguments().iter()
-                    .map(|expr|{(expr.get_type(), engine.eval_with(&current, expr.clone()))})
+                    .map(|expr|{(expr.get_type(), engine.eval_with(&mut current, expr.clone()))})
                     .collect();
                   current.push_stack();
-                  insert_states_function_call(&engine, current,&vals, &mut constraints_target_pairs, &mut paths, &mut m_at_s_at, None, next);
+                  insert_states_function_call(&mut engine, current,&vals, &mut constraints_target_pairs, &mut paths, &mut m_at_s_at, None, next);
                 }
               else{
                 engine.assign_expr(&mut current, &lhs, &rhs);
@@ -223,10 +223,10 @@ where T: MergeEngine, T::EValue: Clone {
                 .map(|expr|{(expr.get_type(), engine.eval_with(&mut current, expr.clone()))})
                 .collect();
               current.push_stack();
-              insert_states_function_call(&engine, current,&vals, &mut constraints_target_pairs, &mut paths, &mut m_at_s_at, None, next);
+              insert_states_function_call(&mut engine, current,&vals, &mut constraints_target_pairs, &mut paths, &mut m_at_s_at, None, next);
             },
             Statement::Assert { assertion, info } => {
-              if engine.is_valid_for(&current, assertion.clone()) {
+              if engine.is_valid_for(&mut current, assertion.clone()) {
                 set_to_next_pc(&mut current, flows);
                 paths.push((current, current_status));
                 continue;  
@@ -235,7 +235,7 @@ where T: MergeEngine, T::EValue: Clone {
             },
             Statement::Assume { assumption, info: _ } => {
               engine.add_assumption_to(&mut current, assumption.clone()); 
-              if engine.is_feasible(&current)  {
+              if engine.is_feasible(&mut current)  {
                 set_to_next_pc(&mut current, flows);
                 paths.push((current, current_status));
                 continue;  
@@ -306,7 +306,7 @@ where T: MergeEngine, T::EValue: Clone {
               
               current.set_pointer(return_pointer);
               if let Some(value) = return_value {
-                let v = engine.eval_with_r(&current,&value);
+                let v = engine.eval_with_r(&mut current,&value);
                 current.pop_stack();
 
                 if let Some(var) = return_var {
@@ -394,7 +394,7 @@ where T: MergeEngine, T::EValue: Clone {
           },
           
           CFGStatement::Ite(_, _, _, join) => {
-            let (mut then_child, mut else_child) = engine.split_on(&current, Rc::new(Expression::TRUE));
+            let (mut then_child, mut else_child) = engine.split_on(&mut current, Rc::new(Expression::TRUE));
 
             if let [left, right] = flows.get(&stmt_id).unwrap().as_slice(){
               //its possible the two branches don't have a join
@@ -433,7 +433,7 @@ where T: MergeEngine, T::EValue: Clone {
                 current.push_dynamic_cf(flow);
               }
             }
-            let (mut then_child, mut else_child) = engine.split_on(&current, expression.clone());
+            let (mut then_child, mut else_child) = engine.split_on(&mut current, expression.clone());
 
             //get pointer to the next statement after the while
             let nexts : Vec<_> = flows
@@ -524,7 +524,7 @@ where T: MergeEngine, T::EValue: Clone {
 }
 
 fn insert_states_function_call<T>(
-  engine: &T,
+  engine: &mut T,
   current: T::State,
   values: &Vec<(RuntimeType, T::EValue)>,
   constraints_target_pairs: &mut Vec<(Rc<Expression>, (u64, Vec<Identifier>))>,
@@ -542,7 +542,7 @@ fn insert_states_function_call<T>(
       if constraints_target_pairs.len() > 0 {
         merges.push(MergeInfo { merge_at: return_ptr, dcf_size: head.get_dynamic_cf_size() });
       
-        let (mut left, right) = engine.split_on(&head, expr);
+        let (mut left, right) = engine.split_on(&mut head, expr);
 
         for (arg, (type_, val)) in args.iter().zip(values.iter()){
           engine.assign_evaled(&mut left, &Lhs::LhsVar { var: arg.clone(), type_: type_.clone(), info: crate::SourcePos::UnknownPosition }, val.clone());
@@ -617,7 +617,19 @@ fn get_possible_function_heads(
 
     },
     Invocation::InvokeSuperMethod { rhs, arguments, resolved, info } => todo!(),
-    Invocation::InvokeConstructor { class_name, arguments, resolved, info } => todo!(),
+    Invocation::InvokeConstructor { class_name, arguments, resolved, info } => {
+      let arg_types: Vec<RuntimeType> = arguments.iter().map(|expr| {expr.as_ref().type_of()}).collect();
+
+      let (i, m) = resolved.as_ref().map(AsRef::as_ref).unwrap();
+      let class_name = i.name().clone();
+      let cond = Rc::new(Expression::TypeExpr { texpr: TypeExpr::InstanceOf { 
+        var: constants::this_str(), 
+        rhs: RuntimeType::ReferenceRuntimeType { type_: class_name.clone() }, 
+        info: crate::SourcePos::UnknownPosition 
+      }});
+      let ptr= funmap.get(&(class_name, m.name.clone(), arg_types.clone())).unwrap().clone();
+      return vec![(cond, ptr)];
+    },
     Invocation::InvokeSuperConstructor { arguments, resolved, info } => todo!(),
   }
 }
