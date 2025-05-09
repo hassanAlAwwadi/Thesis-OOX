@@ -1,9 +1,8 @@
-
-
 use clap::{Parser, Subcommand};
 use itertools::Itertools;
 use lib::{
-    insert_exceptional_clauses, parse_program, type_compilation_unit, verify, CompilationUnit, Heuristic, Options, SourcePos, SymResult, SymbolTable, FILE_NAMES
+    insert_exceptional_clauses, parse_program, type_compilation_unit, verify, CompilationUnit,
+    Heuristic, Options, SourcePos, SymResult, SymbolTable, FILE_NAMES,
 };
 use pretty::BoxAllocator;
 
@@ -74,7 +73,6 @@ enum Commands {
         /// When run as a benchmark, repeat for this often
         #[arg(long, default_value_t = 3)]
         benchmark_repeat: u64,
-
     },
     /// Parse and typecheck an OOX source file
     Check {
@@ -106,11 +104,11 @@ fn main() -> Result<(), String> {
         let k = 200;
         let quiet = false;
         let heuristic = Heuristic::PathMerging;
-        let visualize_heuristic= false;
+        let visualize_heuristic = false;
         let visualize_coverage = false;
         let time_budget = 900;
         let symbolic_array_size = 100;
-    
+
         let options = Options {
             k,
             quiet,
@@ -123,14 +121,17 @@ fn main() -> Result<(), String> {
             log_path: "log/log.txt",
             discard_logs: true,
             prune_path_z3: false,
-            local_solving_threshold: None
+            local_solving_threshold: None,
         };
 
         let source_paths = vec!["./benchmark_programs/experiment_m/0.oox"];
         let (sym_result_1, sym_result_2, _statistics) =
             verify(source_paths.as_slice(), class_name, method_name, options)?;
-        println!("merging got result: {:?}, depth_first got result {:?}", sym_result_1, sym_result_2)
-        /* 
+        println!(
+            "merging got result: {:?}, depth_first got result {:?}",
+            sym_result_1, sym_result_2
+        )
+        /*
         let result_text = result_text(sym_result_1, source_paths);
 
         if options.quiet && sym_result_1 != SymResult::Valid {
@@ -162,7 +163,7 @@ fn main() -> Result<(), String> {
                     / statistics.reachable_statements as f32)
                     * 100.0
             )
-            
+
         }
         */
     }

@@ -25,7 +25,10 @@ fn method_call_helper(
     method_name: &Identifier,
     st: &SymbolTable,
 ) -> Result<HashMap<Identifier, (Declaration, Rc<Method>)>, ResolveError> {
-    let decl = &st.declarations.get(decl_name).unwrap_or_else(|| panic!("Could not find {:?} declaration in symbol table", decl_name));
+    let decl = &st
+        .declarations
+        .get(decl_name)
+        .unwrap_or_else(|| panic!("Could not find {:?} declaration in symbol table", decl_name));
 
     // Check if class itself contains the method in question
     match decl {

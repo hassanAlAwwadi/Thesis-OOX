@@ -18,9 +18,9 @@ use super::{IdCounter, State, SymResult};
 
 pub mod depth_first_search;
 pub mod min_dist_to_uncovered;
+pub mod path_merging;
 pub mod random_path;
 pub mod round_robin;
-pub mod path_merging;
 
 type Cost = u64;
 pub type ProgramCounter = u64;

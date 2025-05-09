@@ -21,7 +21,7 @@ mod state_split;
 use crate::{
     cfg::{labelled_statements, CFGStatement, MethodIdentifier},
     concretization::{concretizations, find_symbolic_refs},
-    dsl::{equal, ite, negate, to_int_expr, and},
+    dsl::{and, equal, ite, negate, to_int_expr},
     exception_handler::{ExceptionHandlerEntry, ExceptionHandlerStack},
     exec::{
         eval::{evaluate, evaluate_as_int},
@@ -308,7 +308,7 @@ fn action(
                 }
             }
             */
-            
+
             let is_valid = eval_assertion(state, expression, en);
             if !is_valid {
                 return ActionResult::InvalidAssertion(assertion.get_position());
@@ -536,23 +536,23 @@ fn eval_assertion(state: &mut State, expression: Rc<Expression>, en: &mut impl E
                 symbolic_refs.len()
             );
 
-            let solve_with_z3_only = if let Some(local_solving_threshold) = en.options().local_solving_threshold {
-                // The number of combinations of each symbolic ref, which could be concretized.
-                // If this number is too large we leave all the work to Z3 which seems to be faster in practice.
-                // This explodes so hard we need 128 bit integer and it still overflows.
-                let n_combinations: u128 = state
-                    .alias_map
-                    .iter()
-                    .fold(Some(1_u128), |a, (_, refs)| {
-                        a.and_then(|a| a.checked_mul(refs.aliases().len() as u128))
-                    })
-                    .unwrap_or(u128::MAX); // limit overflow to max u128
+            let solve_with_z3_only =
+                if let Some(local_solving_threshold) = en.options().local_solving_threshold {
+                    // The number of combinations of each symbolic ref, which could be concretized.
+                    // If this number is too large we leave all the work to Z3 which seems to be faster in practice.
+                    // This explodes so hard we need 128 bit integer and it still overflows.
+                    let n_combinations: u128 = state
+                        .alias_map
+                        .iter()
+                        .fold(Some(1_u128), |a, (_, refs)| {
+                            a.and_then(|a| a.checked_mul(refs.aliases().len() as u128))
+                        })
+                        .unwrap_or(u128::MAX); // limit overflow to max u128
 
-                n_combinations > local_solving_threshold
-            } else {
-                true
-            };
-
+                    n_combinations > local_solving_threshold
+                } else {
+                    true
+                };
 
             if solve_with_z3_only {
                 // Solve through only Z3
@@ -1055,13 +1055,7 @@ fn execute_assign(state: &mut State, lhs: &Lhs, e: Rc<Expression>, en: &mut impl
                     remove_symbolic_null(&mut state.alias_map, &var);
                     let concrete_refs = &state.alias_map[var];
                     // dbg!(&var, &concrete_refs);
-                    write_field_symbolic_ref(
-                        &mut state.heap,
-                        &concrete_refs.aliases,
-                        field,
-                        o,
-                        e,
-                    );
+                    write_field_symbolic_ref(&mut state.heap, &concrete_refs.aliases, field, o, e);
                 }
                 Expression::Conditional {
                     guard,
@@ -1220,12 +1214,7 @@ fn exec_rhs_field(
             let concrete_refs = &state.alias_map[var];
             // dbg!(&alias_map);
             // dbg!(&heap);
-            read_field_symbolic_ref(
-                &mut state.heap,
-                &concrete_refs.aliases,
-                object,
-                field,
-            )
+            read_field_symbolic_ref(&mut state.heap, &concrete_refs.aliases, object, field)
         }
         _ => todo!("Expected reference here, found: {:?}", object),
     }
@@ -1407,7 +1396,6 @@ fn exec_assume(
                     }
                 }
             }
-
         }
         Either::Right(assumption) => {
             let type_guard_feasible = assume_type_guard(state, &assumption, en);
@@ -1495,7 +1483,11 @@ fn assume_type_guard(state: &mut State, type_guard: &TypeExpr, en: &mut impl Eng
                 .aliases
                 .retain(|alias| is_of_type_or_not(alias.as_ref(), rhs, not, en.symbol_table()));
 
-            !(alias_entry.aliases.is_empty() || alias_entry.aliases.iter().all(|e| *e.as_ref() == Expression::NULL))
+            !(alias_entry.aliases.is_empty()
+                || alias_entry
+                    .aliases
+                    .iter()
+                    .all(|e| *e.as_ref() == Expression::NULL))
         }
         Expression::Conditional {
             // Must not forget that it can also be a conditional in some cases and we need to split the state.
@@ -1564,7 +1556,7 @@ pub struct Options<'a> {
 
 impl Default for Options<'_> {
     fn default() -> Self {
-        // These settings are used during testing (by default). 
+        // These settings are used during testing (by default).
         // The default settings used when running from the CLI can be found in main.rs `Commands::Verify`
         Self {
             k: 40,
@@ -1616,12 +1608,13 @@ pub fn verify(
 
     for (file_number, path) in (0..).zip(paths.iter()) {
         let file_content = std::fs::read_to_string(path.as_ref()).map_err(|err| err.to_string())?;
-        let file_cu = parse_program(&file_content, file_number, false).map_err(|error| match error {
-            language::Error::ParseError(err) => err.to_string(),
-            language::Error::LexerError((line, col)) => {
-                format!("Lexer error at {}:{}:{}", path.to_string(), line, col)
-            }
-        })?;
+        let file_cu =
+            parse_program(&file_content, file_number, false).map_err(|error| match error {
+                language::Error::ParseError(err) => err.to_string(),
+                language::Error::LexerError((line, col)) => {
+                    format!("Lexer error at {}:{}:{}", path.to_string(), line, col)
+                }
+            })?;
 
         c = c.merge(file_cu);
     }
@@ -1661,10 +1654,10 @@ pub fn verify(
 
     let flows: HashMap<u64, Vec<u64>> = utils::group_by(flw.into_iter());
     println!("starting to print program");
-    for (i, stmt) in program.clone().into_iter().sorted_by_key(|(k, _)|{ *k }){
+    for (i, stmt) in program.clone().into_iter().sorted_by_key(|(k, _)| *k) {
         println!("{:?}: {:?}", i, stmt);
     }
-    for (s, e) in flows.clone().into_iter().sorted_by_key(|(k, _)|{ *k }){
+    for (s, e) in flows.clone().into_iter().sorted_by_key(|(k, _)| *k) {
         println!("{:?} -> {:?}", s, e);
     }
 
@@ -1723,7 +1716,7 @@ pub fn verify(
 
         builder.build().unwrap()
     };
-    
+
     info!(
         root_logger,
         "Starting verification of {}::{}", class_name, method_name
@@ -1759,13 +1752,13 @@ pub fn verify(
         Heuristic::RandomPath => heuristics::random_path::sym_exec,
         Heuristic::MinDist2Uncovered => heuristics::min_dist_to_uncovered::sym_exec,
         Heuristic::RoundRobinMD2URandomPath => heuristics::round_robin::sym_exec,
-        Heuristic::PathMerging              => heuristics::path_merging::sym_exec,
+        Heuristic::PathMerging => heuristics::path_merging::sym_exec,
     };
 
     let s2 = state.clone();
     let l2 = root_logger.clone();
     let now = Instant::now();
-    let sym_result_1 =  heuristics::path_merging::sym_exec(
+    let sym_result_1 = heuristics::path_merging::sym_exec(
         s2,
         &program,
         &flows,
@@ -1779,7 +1772,7 @@ pub fn verify(
     println!("merging took: {:?}", now.elapsed());
 
     let now = Instant::now();
-    let sym_result_2 =  heuristics::depth_first_search::sym_exec(
+    let sym_result_2 = heuristics::depth_first_search::sym_exec(
         state,
         &program,
         &flows,
@@ -1791,7 +1784,6 @@ pub fn verify(
         &options,
     );
     println!("depth first took: {:?}", now.elapsed());
-
 
     let reachability = reachability(entry_method, &program, &flows, &symbol_table);
     statistics.reachable_statements = reachability.len() as u32;
@@ -1814,8 +1806,6 @@ pub fn verify(
         std::fs::write("coverage_visualized.txt", contents).unwrap();
     }
 
-
-
     return Ok((sym_result_1, sym_result_2, statistics));
 }
 
@@ -1833,7 +1823,9 @@ fn sym_exec_of_absolute_simplest() {
 fn sym_exec_min() {
     let paths = vec!["./examples/psv/min.oox"];
     assert_eq!(
-        verify(&paths, "Foo", "min", Options::default_with_k(20)).unwrap().0,
+        verify(&paths, "Foo", "min", Options::default_with_k(20))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
 }
@@ -1842,7 +1834,9 @@ fn sym_exec_min() {
 fn sym_exec_method() {
     let paths = vec!["./examples/psv/method.oox"];
     assert_eq!(
-        verify(&paths, "Main", "min", Options::default_with_k(20)).unwrap().0,
+        verify(&paths, "Main", "min", Options::default_with_k(20))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
 }
@@ -1864,7 +1858,8 @@ fn sym_exec_div_by_n() {
             "divByN_invalid",
             Options::default_with_k(100)
         )
-        .unwrap().0,
+        .unwrap()
+        .0,
         SymResult::Invalid(SourcePos::new(73, 16, 0))
     );
 }
@@ -1873,7 +1868,9 @@ fn sym_exec_div_by_n() {
 fn sym_exec_nonstatic_function() {
     let paths = vec!["./examples/nonstatic_function.oox"];
     assert_eq!(
-        verify(&paths, "Main", "f", Options::default_with_k(20)).unwrap().0,
+        verify(&paths, "Main", "f", Options::default_with_k(20))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
 }
@@ -1882,7 +1879,9 @@ fn sym_exec_nonstatic_function() {
 fn sym_exec_this_method() {
     let paths = vec!["./examples/this_method.oox"];
     assert_eq!(
-        verify(&paths, "Main", "main", Options::default_with_k(30)).unwrap().0,
+        verify(&paths, "Main", "main", Options::default_with_k(30))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
 }
@@ -1891,7 +1890,9 @@ fn sym_exec_this_method() {
 fn sym_exec_linked_list1() {
     let paths = vec!["./examples/intLinkedList.oox"];
     assert_eq!(
-        verify(&paths, "Node", "test2", Options::default_with_k(90)).unwrap().0,
+        verify(&paths, "Node", "test2", Options::default_with_k(90))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
 }
@@ -1900,7 +1901,9 @@ fn sym_exec_linked_list1() {
 fn sym_exec_linked_list1_invalid() {
     let paths = vec!["./examples/intLinkedList.oox"];
     assert_eq!(
-        verify(&paths, "Node", "test2_invalid", Options::default_with_k(90)).unwrap().0,
+        verify(&paths, "Node", "test2_invalid", Options::default_with_k(90))
+            .unwrap()
+            .0,
         SymResult::Invalid(SourcePos::new(109, 16, 0))
     );
 }
@@ -1916,7 +1919,8 @@ fn sym_exec_linked_list3_invalid() {
             "test3_invalid1",
             Options::default_with_k(110)
         )
-        .unwrap().0,
+        .unwrap()
+        .0,
         SymResult::Invalid(SourcePos::new(141, 18, 0))
     );
 }
@@ -1925,7 +1929,9 @@ fn sym_exec_linked_list3_invalid() {
 fn sym_exec_linked_list4() {
     let paths = vec!["./examples/intLinkedList.oox"];
     assert_eq!(
-        verify(&paths, "Node", "test4", Options::default_with_k(90)).unwrap().0,
+        verify(&paths, "Node", "test4", Options::default_with_k(90))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
 }
@@ -1934,7 +1940,9 @@ fn sym_exec_linked_list4() {
 fn sym_exec_linked_list4_invalid() {
     let paths = vec!["./examples/intLinkedList.oox"];
     assert_eq!(
-        verify(&paths, "Node", "test4_invalid", Options::default_with_k(90)).unwrap().0,
+        verify(&paths, "Node", "test4_invalid", Options::default_with_k(90))
+            .unwrap()
+            .0,
         SymResult::Invalid(SourcePos::new(11, 21, 0))
     );
 }
@@ -1949,7 +1957,8 @@ fn sym_exec_linked_list4_if_problem() {
             "test4_if_problem",
             Options::default_with_k(90)
         )
-        .unwrap().0,
+        .unwrap()
+        .0,
         SymResult::Valid
     );
 }
@@ -1959,15 +1968,21 @@ fn sym_exec_exceptions1() {
     let paths = vec!["./examples/exceptions.oox"];
 
     assert_eq!(
-        verify(&paths, "Main", "test1", Options::default_with_k(20)).unwrap().0,
+        verify(&paths, "Main", "test1", Options::default_with_k(20))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
     assert_eq!(
-        verify(&paths, "Main", "test1_invalid", Options::default_with_k(20)).unwrap().0,
+        verify(&paths, "Main", "test1_invalid", Options::default_with_k(20))
+            .unwrap()
+            .0,
         SymResult::Invalid(SourcePos::new(15, 21, 0))
     );
     assert_eq!(
-        verify(&paths, "Main", "div", Options::default_with_k(30)).unwrap().0,
+        verify(&paths, "Main", "div", Options::default_with_k(30))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
 }
@@ -1977,11 +1992,15 @@ fn sym_exec_exceptions_m0() {
     let paths = vec!["./examples/exceptions.oox"];
 
     assert_eq!(
-        verify(&paths, "Main", "m0", Options::default_with_k(20)).unwrap().0,
+        verify(&paths, "Main", "m0", Options::default_with_k(20))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
     assert_eq!(
-        verify(&paths, "Main", "m0_invalid", Options::default_with_k(20)).unwrap().0,
+        verify(&paths, "Main", "m0_invalid", Options::default_with_k(20))
+            .unwrap()
+            .0,
         SymResult::Invalid(SourcePos::new(49, 17, 0))
     );
 }
@@ -1991,11 +2010,15 @@ fn sym_exec_exceptions_m1() {
     let paths = vec!["./examples/exceptions.oox"];
 
     assert_eq!(
-        verify(&paths, "Main", "m1", Options::default_with_k(20)).unwrap().0,
+        verify(&paths, "Main", "m1", Options::default_with_k(20))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
     assert_eq!(
-        verify(&paths, "Main", "m1_invalid", Options::default_with_k(20)).unwrap().0,
+        verify(&paths, "Main", "m1_invalid", Options::default_with_k(20))
+            .unwrap()
+            .0,
         SymResult::Invalid(SourcePos::new(68, 17, 0))
     );
 }
@@ -2005,7 +2028,9 @@ fn sym_exec_exceptions_m2() {
     let paths = vec!["./examples/exceptions.oox"];
 
     assert_eq!(
-        verify(&paths, "Main", "m2", Options::default_with_k(20)).unwrap().0,
+        verify(&paths, "Main", "m2", Options::default_with_k(20))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
 }
@@ -2015,15 +2040,21 @@ fn sym_exec_exceptions_m3() {
     let paths = vec!["./examples/exceptions.oox"];
 
     assert_eq!(
-        verify(&paths, "Main", "m3", Options::default_with_k(30)).unwrap().0,
+        verify(&paths, "Main", "m3", Options::default_with_k(30))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
     assert_eq!(
-        verify(&paths, "Main", "m3_invalid1", Options::default_with_k(30)).unwrap().0,
+        verify(&paths, "Main", "m3_invalid1", Options::default_with_k(30))
+            .unwrap()
+            .0,
         SymResult::Invalid(SourcePos::new(94, 17, 0))
     );
     assert_eq!(
-        verify(&paths, "Main", "m3_invalid2", Options::default_with_k(30)).unwrap().0,
+        verify(&paths, "Main", "m3_invalid2", Options::default_with_k(30))
+            .unwrap()
+            .0,
         SymResult::Invalid(SourcePos::new(102, 21, 0))
     );
 }
@@ -2033,11 +2064,15 @@ fn sym_exec_exceptions_null() {
     let paths = vec!["./examples/exceptions.oox"];
 
     assert_eq!(
-        verify(&paths, "Main", "nullExc1", Options::default_with_k(30)).unwrap().0,
+        verify(&paths, "Main", "nullExc1", Options::default_with_k(30))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
     assert_eq!(
-        verify(&paths, "Main", "nullExc2", Options::default_with_k(30)).unwrap().0,
+        verify(&paths, "Main", "nullExc2", Options::default_with_k(30))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
     // assert_eq!(verify_file(&file_content, "m3_invalid1", 30), SymResult::Invalid);
@@ -2049,35 +2084,51 @@ fn sym_exec_array1() {
     let paths = vec!["./examples/array/array1.oox"];
 
     assert_eq!(
-        verify(&paths, "Main", "foo", Options::default_with_k(50)).unwrap().0,
+        verify(&paths, "Main", "foo", Options::default_with_k(50))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
     assert_eq!(
-        verify(&paths, "Main", "foo_invalid", Options::default_with_k(50)).unwrap().0,
+        verify(&paths, "Main", "foo_invalid", Options::default_with_k(50))
+            .unwrap()
+            .0,
         SymResult::Invalid(SourcePos::new(33, 16, 0))
     );
     assert_eq!(
-        verify(&paths, "Main", "sort", Options::default_with_k(300)).unwrap().0,
+        verify(&paths, "Main", "sort", Options::default_with_k(300))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
     assert_eq!(
-        verify(&paths, "Main", "sort_invalid1", Options::default_with_k(50)).unwrap().0,
+        verify(&paths, "Main", "sort_invalid1", Options::default_with_k(50))
+            .unwrap()
+            .0,
         SymResult::Invalid(SourcePos::new(62, 17, 0))
     );
     assert_eq!(
-        verify(&paths, "Main", "max", Options::default_with_k(50)).unwrap().0,
+        verify(&paths, "Main", "max", Options::default_with_k(50))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
     assert_eq!(
-        verify(&paths, "Main", "max_invalid1", Options::default_with_k(50)).unwrap().0,
+        verify(&paths, "Main", "max_invalid1", Options::default_with_k(50))
+            .unwrap()
+            .0,
         SymResult::Invalid(SourcePos::new(104, 21, 0))
     );
     assert_eq!(
-        verify(&paths, "Main", "max_invalid2", Options::default_with_k(50)).unwrap().0,
+        verify(&paths, "Main", "max_invalid2", Options::default_with_k(50))
+            .unwrap()
+            .0,
         SymResult::Invalid(SourcePos::new(120, 17, 0))
     );
     assert_eq!(
-        verify(&paths, "Main", "exists_valid", Options::default_with_k(50)).unwrap().0,
+        verify(&paths, "Main", "exists_valid", Options::default_with_k(50))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
     // assert_eq!(verify_file(&file_content, "exists_invalid1", 50), SymResult::Invalid);
@@ -2088,7 +2139,8 @@ fn sym_exec_array1() {
             "exists_invalid2",
             Options::default_with_k(50)
         )
-        .unwrap().0,
+        .unwrap()
+        .0,
         SymResult::Invalid(SourcePos::new(160, 17, 0))
     );
     assert_eq!(
@@ -2098,7 +2150,8 @@ fn sym_exec_array1() {
             "array_creation1",
             Options::default_with_k(50)
         )
-        .unwrap().0,
+        .unwrap()
+        .0,
         SymResult::Valid
     );
     assert_eq!(
@@ -2108,7 +2161,8 @@ fn sym_exec_array1() {
             "array_creation2",
             Options::default_with_k(50)
         )
-        .unwrap().0,
+        .unwrap()
+        .0,
         SymResult::Valid
     );
     assert_eq!(
@@ -2118,7 +2172,8 @@ fn sym_exec_array1() {
             "array_creation_invalid",
             Options::default_with_k(50)
         )
-        .unwrap().0,
+        .unwrap()
+        .0,
         SymResult::Invalid(SourcePos::new(193, 17, 0))
     );
 }
@@ -2128,19 +2183,27 @@ fn sym_exec_array2() {
     let paths = vec!["./examples/array/array2.oox"];
 
     assert_eq!(
-        verify(&paths, "Main", "foo1", Options::default_with_k(50)).unwrap().0,
+        verify(&paths, "Main", "foo1", Options::default_with_k(50))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
     assert_eq!(
-        verify(&paths, "Main", "foo1_invalid", Options::default_with_k(50)).unwrap().0,
+        verify(&paths, "Main", "foo1_invalid", Options::default_with_k(50))
+            .unwrap()
+            .0,
         SymResult::Invalid(SourcePos::new(37, 15, 0))
     );
     assert_eq!(
-        verify(&paths, "Main", "foo2_invalid", Options::default_with_k(50)).unwrap().0,
+        verify(&paths, "Main", "foo2_invalid", Options::default_with_k(50))
+            .unwrap()
+            .0,
         SymResult::Invalid(SourcePos::new(51, 18, 0))
     );
     assert_eq!(
-        verify(&paths, "Main", "sort", Options::default_with_k(100)).unwrap().0,
+        verify(&paths, "Main", "sort", Options::default_with_k(100))
+            .unwrap()
+            .0,
         SymResult::Valid
     );
 }
@@ -2271,7 +2334,8 @@ fn sym_exec_polymorphic() {
             "main",
             options
         )
-        .unwrap().0,
+        .unwrap()
+        .0,
         SymResult::Valid
     );
 }
@@ -2287,7 +2351,8 @@ fn benchmark_col_25() {
             "test",
             options
         )
-        .unwrap().0,
+        .unwrap()
+        .0,
         SymResult::Invalid(SourcePos::new(359, 21, 0))
     );
 }
@@ -2303,7 +2368,8 @@ fn benchmark_col_25_symbolic() {
             "test_symbolic",
             options
         )
-        .unwrap().0,
+        .unwrap()
+        .0,
         SymResult::Invalid(SourcePos::new(402, 21, 0))
     );
 }
@@ -2319,7 +2385,8 @@ fn benchmark_col_25_test3() {
             "test3",
             options
         )
-        .unwrap().0,
+        .unwrap()
+        .0,
         SymResult::Valid
     );
 }
@@ -2335,7 +2402,8 @@ fn any_linked_list() {
             "test2",
             options
         )
-        .unwrap().0,
+        .unwrap()
+        .0,
         SymResult::Valid
     );
 }
@@ -2345,7 +2413,9 @@ fn supertest() {
     let k = 50;
     let options = Options::default_with_k(k);
     assert_eq!(
-        verify(&["./examples/supertest.oox"], "Main", "test", options).unwrap().0,
+        verify(&["./examples/supertest.oox"], "Main", "test", options)
+            .unwrap()
+            .0,
         SymResult::Valid
     )
 }
@@ -2361,7 +2431,8 @@ fn multiple_constructors() {
             "test",
             options
         )
-        .unwrap().0,
+        .unwrap()
+        .0,
         SymResult::Valid
     )
 }
@@ -2371,11 +2442,12 @@ fn arrays3() {
     let k = 50;
     let options = Options::default_with_k(k);
     assert_eq!(
-        verify(&["./examples/array/array3.oox"], "Main", "test", options).unwrap().0,
+        verify(&["./examples/array/array3.oox"], "Main", "test", options)
+            .unwrap()
+            .0,
         SymResult::Valid
     )
 }
-
 
 #[test]
 fn idk() {
@@ -2396,6 +2468,5 @@ fn idk() {
                  "./benchmark_programs/experiment2/defects4j/Compress/Compress_3/oox/Main.oox", 
     ];
 
-    
     verify(path, "Main", "test_symbolic", Options::default_with_k(1000)).unwrap();
 }

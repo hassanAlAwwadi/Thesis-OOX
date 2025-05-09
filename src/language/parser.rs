@@ -21,16 +21,18 @@ use super::lexer::*;
 mod interface;
 
 /// Main entrypoint for parsing a program.
-/// 
+///
 /// `without_assumptions` will not insert assumptions, useful for generating mutations.
 pub fn parse(tokens: &[Token], without_assumptions: bool) -> Result<CompilationUnit, pom::Error> {
     (program(without_assumptions) - end()).parse(tokens)
 }
 
 fn program<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, CompilationUnit> {
-    declaration(without_assumptions).repeat(0..).map(|members| CompilationUnit {
-        members: members.into_iter().collect(),
-    })
+    declaration(without_assumptions)
+        .repeat(0..)
+        .map(|members| CompilationUnit {
+            members: members.into_iter().collect(),
+        })
 }
 
 fn declaration<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Declaration> {
@@ -51,7 +53,10 @@ fn declaration<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Declarati
         )
     });
 
-    class | interface(without_assumptions).map(Rc::new).map(Declaration::Interface)
+    class
+        | interface(without_assumptions)
+            .map(Rc::new)
+            .map(Declaration::Interface)
 }
 
 fn member<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, DeclarationMember> {
@@ -71,7 +76,13 @@ fn field<'a>() -> Parser<'a, Token<'a>, DeclarationMember> {
 pub(crate) fn method<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, DeclarationMember> {
     let is_static = keyword("static").opt().map(|x| x.is_some());
 
-    (is_static + type_() + identifier() + parameters() + specification() + body(without_assumptions)).map(
+    (is_static
+        + type_()
+        + identifier()
+        + parameters()
+        + specification()
+        + body(without_assumptions))
+    .map(
         |(((((is_static, return_type), name), params), specification), body)| {
             DeclarationMember::Method(
                 Method {
@@ -116,11 +127,13 @@ fn constructor<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Declarati
 }
 
 fn body<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Statement> {
-    (punct("{") * statement(without_assumptions).opt() - punct("}")).map(|s| s.unwrap_or(Statement::Skip))
+    (punct("{") * statement(without_assumptions).opt() - punct("}"))
+        .map(|s| s.unwrap_or(Statement::Skip))
 }
 
 fn constructor_body<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Statement> {
-    (punct("{") * statement(without_assumptions).opt() - punct("}")).map(|s| s.unwrap_or(Statement::Skip))
+    (punct("{") * statement(without_assumptions).opt() - punct("}"))
+        .map(|s| s.unwrap_or(Statement::Skip))
 }
 
 pub fn statement<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Statement> {
@@ -183,7 +196,8 @@ pub fn statement<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Stateme
     );
 
     let while_ = (keyword("while") * punct("(") * expression() - punct(")")
-        + ((punct("{") * call(move || statement(without_assumptions)).opt() - punct("}")) | call(move|| statement(without_assumptions)).map(Some)))
+        + ((punct("{") * call(move || statement(without_assumptions)).opt() - punct("}"))
+            | call(move || statement(without_assumptions)).map(Some)))
     .map(move |(guard, body)| create_while(Rc::new(guard), body, without_assumptions));
 
     let continue_ = (keyword("continue") - punct(";")).map(|t| Statement::Continue {
@@ -192,13 +206,12 @@ pub fn statement<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Stateme
     let break_ = (keyword("break") - punct(";")).map(|t| Statement::Break {
         info: t.get_position(),
     });
-    let return_ =
-        (keyword("return") + expression().map(Rc::new).opt() - punct(";")).map(|(return_token, expression)| {
-            Statement::Return {
-                expression,
-                info: return_token.get_position(),
-            }
-        });
+    let return_ = (keyword("return") + expression().map(Rc::new).opt() - punct(";")).map(
+        |(return_token, expression)| Statement::Return {
+            expression,
+            info: return_token.get_position(),
+        },
+    );
     let throw = (keyword("throw") * literal() - punct(";")).map(|x| {
         if let Expression::Lit {
             lit: Lit::StringLit { string_value },
@@ -218,7 +231,10 @@ pub fn statement<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Stateme
         + call(move || statement(without_assumptions))
         + punct("}")
             * keyword("catch")
-            * (punct("{") * call(move || statement(without_assumptions)).opt().map(|s| s.unwrap_or(Statement::Skip))
+            * (punct("{")
+                * call(move || statement(without_assumptions))
+                    .opt()
+                    .map(|s| s.unwrap_or(Statement::Skip))
                 - punct("}")))
     .map(|((try_token, try_body), catch_body)| Statement::Try {
         try_body: Box::new(try_body),
@@ -246,24 +262,26 @@ pub fn statement<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Stateme
         | throw
         | try_
         | block;
-    (p_statement + (call(move || statement(without_assumptions))).opt()).map(|(stmt, other_statement)| {
-        if let Some(other_statement) = other_statement {
-            return match stmt {
-                Statement::Seq { stat1, stat2 } => Statement::Seq {
-                    stat1,
-                    stat2: Box::new(Statement::Seq {
-                        stat1: stat2,
+    (p_statement + (call(move || statement(without_assumptions))).opt()).map(
+        |(stmt, other_statement)| {
+            if let Some(other_statement) = other_statement {
+                return match stmt {
+                    Statement::Seq { stat1, stat2 } => Statement::Seq {
+                        stat1,
+                        stat2: Box::new(Statement::Seq {
+                            stat1: stat2,
+                            stat2: Box::new(other_statement),
+                        }),
+                    },
+                    _ => Statement::Seq {
+                        stat1: Box::new(stmt),
                         stat2: Box::new(other_statement),
-                    }),
-                },
-                _ => Statement::Seq {
-                    stat1: Box::new(stmt),
-                    stat2: Box::new(other_statement),
-                },
-            };
-        }
-        stmt
-    })
+                    },
+                };
+            }
+            stmt
+        },
+    )
 }
 
 /// Edge case for class_cast which inserts the exceptional clause here.
@@ -301,7 +319,9 @@ fn ite<'a>(without_assumptions: bool) -> Parser<'a, Token<'a>, Statement> {
                 | (punct("{") * punct("}")).map(|_| Statement::Skip)
                 | call(move || statement(without_assumptions))))
         .opt())
-    .map(move |((guard, true_body), false_body)| create_ite(guard, true_body, false_body, without_assumptions));
+    .map(move |((guard, true_body), false_body)| {
+        create_ite(guard, true_body, false_body, without_assumptions)
+    });
 
     ite
 }
@@ -317,8 +337,12 @@ fn create_ite(
     without_assumptions: bool,
 ) -> Statement {
     if without_assumptions {
-        Statement::Ite { guard: guard.clone(), true_body: Box::new(true_body), false_body: Box::new(false_body.unwrap_or(Statement::Skip)), info: guard.get_position() }
-
+        Statement::Ite {
+            guard: guard.clone(),
+            true_body: Box::new(true_body),
+            false_body: Box::new(false_body.unwrap_or(Statement::Skip)),
+            info: guard.get_position(),
+        }
     } else {
         Statement::Ite {
             guard: guard.clone(),
@@ -343,7 +367,11 @@ fn create_ite(
     }
 }
 
-fn create_while(guard: Rc<Expression>, body: Option<Statement>, without_assumptions: bool) -> Statement {
+fn create_while(
+    guard: Rc<Expression>,
+    body: Option<Statement>,
+    without_assumptions: bool,
+) -> Statement {
     if let Some(body) = body {
         if without_assumptions {
             Statement::While {
@@ -370,7 +398,6 @@ fn create_while(guard: Rc<Expression>, body: Option<Statement>, without_assumpti
                 }),
             }
         }
-        
     } else {
         Statement::Skip
     }
@@ -1322,7 +1349,7 @@ mod tests {
         let as_ref = tokens.as_slice();
         //dbg!(as_ref);
         let _c = program(WITHOUT_ASSUMPTIONS).parse(&as_ref).unwrap(); // should not panic;
-                                                    //dbg!(c);
+                                                                       //dbg!(c);
     }
 
     #[test]
@@ -1332,8 +1359,10 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         //dbg!(as_ref);
-        let _c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref).unwrap(); // should not panic;
-                                                                //dbg!(c);
+        let _c = (statement(WITHOUT_ASSUMPTIONS) - end())
+            .parse(&as_ref)
+            .unwrap(); // should not panic;
+                       //dbg!(c);
     }
 
     #[test]
@@ -1373,8 +1402,10 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         //dbg!(as_ref);
-        let _c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref).unwrap(); // should not panic;
-                                                                //dbg!(c);
+        let _c = (statement(WITHOUT_ASSUMPTIONS) - end())
+            .parse(&as_ref)
+            .unwrap(); // should not panic;
+                       //dbg!(c);
     }
 
     #[test]
@@ -1390,8 +1421,10 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         //dbg!(&as_ref);
-        let _c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref).unwrap(); // should not panic;
-                                                                //dbg!(c);
+        let _c = (statement(WITHOUT_ASSUMPTIONS) - end())
+            .parse(&as_ref)
+            .unwrap(); // should not panic;
+                       //dbg!(c);
     }
 
     #[test]
@@ -1405,8 +1438,10 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         dbg!(&as_ref);
-        let _c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref).unwrap(); // should not panic;
-                                                                // let c = (type_expr() - end()).parse(&as_ref).unwrap(); // should not panic;
+        let _c = (statement(WITHOUT_ASSUMPTIONS) - end())
+            .parse(&as_ref)
+            .unwrap(); // should not panic;
+                       // let c = (type_expr() - end()).parse(&as_ref).unwrap(); // should not panic;
     }
 
     #[test]
@@ -1428,8 +1463,10 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         //dbg!(as_ref);
-        let _c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref).unwrap(); // should not panic;
-                                                                //dbg!(c);
+        let _c = (statement(WITHOUT_ASSUMPTIONS) - end())
+            .parse(&as_ref)
+            .unwrap(); // should not panic;
+                       //dbg!(c);
     }
 
     #[test]
@@ -1594,7 +1631,9 @@ mod tests {
         let tokens = tokens(file_content, 0).unwrap();
         let as_ref = tokens.as_slice();
         // dbg!(as_ref);
-        let _c = (statement(WITHOUT_ASSUMPTIONS) - end()).parse(&as_ref).unwrap();
+        let _c = (statement(WITHOUT_ASSUMPTIONS) - end())
+            .parse(&as_ref)
+            .unwrap();
         // dbg!(&c);
     }
 

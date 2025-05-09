@@ -1,4 +1,7 @@
-use criterion::{criterion_group, criterion_main, Criterion, SamplingMode, BenchmarkGroup, measurement::{Measurement}};
+use criterion::{
+    criterion_group, criterion_main, measurement::Measurement, BenchmarkGroup, Criterion,
+    SamplingMode,
+};
 use lib::{verify, Options};
 
 fn options() -> Options<'static> {
@@ -18,7 +21,7 @@ fn options() -> Options<'static> {
     }
 }
 
-fn experiment1<'a, M: Measurement>(c: &'a mut Criterion<M>) -> BenchmarkGroup<'a, M>{
+fn experiment1<'a, M: Measurement>(c: &'a mut Criterion<M>) -> BenchmarkGroup<'a, M> {
     let options = options();
     let mut group = c.benchmark_group("experiment1");
     group.sample_size(10);
@@ -65,7 +68,6 @@ fn experiment1<'a, M: Measurement>(c: &'a mut Criterion<M>) -> BenchmarkGroup<'a
     });
     group
 }
-
 
 criterion_group!(benches, experiment1);
 criterion_main!(benches);

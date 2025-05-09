@@ -25,10 +25,10 @@ mod positioned;
 mod symbol_table;
 mod typing;
 
-mod statistics;
-mod mutation;
 mod merge;
+mod mutation;
 mod state;
+mod statistics;
 mod unique_supply;
 pub use language::*;
 
@@ -48,4 +48,3 @@ pub use symbol_table::SymbolTable;
 pub use mutation::mutate_program;
 
 pub static FILE_NAMES: Mutex<Vec<String>> = Mutex::new(vec![]);
-

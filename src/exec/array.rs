@@ -69,8 +69,7 @@ pub(crate) fn exec_array_construction(
     assert!(sizes.len() == 1, "Support for only 1D arrays");
     // int[][] a = new int[10][10];
 
-    let size = evaluate_as_int(state, sizes[0].clone(), en)
-        .expect_right("no symbolic array sizes");
+    let size = evaluate_as_int(state, sizes[0].clone(), en).expect_right("no symbolic array sizes");
 
     let array = (0..size)
         .map(|_| Rc::new(array_type.default()))

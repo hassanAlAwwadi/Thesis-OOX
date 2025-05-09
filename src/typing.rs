@@ -1,4 +1,3 @@
-use std::rc::Rc;
 /// Type analysis of an OOX abstract syntax tree
 ///
 /// The input is an abstract syntax tree (CompilationUnit) with (most) of its types set to UnknownType.
@@ -6,7 +5,8 @@ use std::rc::Rc;
 /// If type incorrect, a TypeError is returned instead.
 ///
 /// Also any method invocations in the bodies of the methods are resolved, by assigning a reference to the invoked method(s).
-use std::{collections::HashMap};
+use std::collections::HashMap;
+use std::rc::Rc;
 
 use itertools::Either;
 use queues::IsQueue;
@@ -722,128 +722,132 @@ fn type_expression(
 ) -> Result<Rc<Expression>, TypeError> {
     let expr = match expression.as_ref().clone() {
         Expression::Forall {
-                        elem,
-                        range,
-                        domain,
-                        formula,
-                        info,
-                        ..
-            } => {
-                let array = env.get_var_type(&domain)?;
-                let inner_type = array.get_inner_array_type().ok_or(unification_error(
-                    RuntimeType::ARRAYRuntimeType,
-                    array,
-                    info,
-                ))?;
-                let mut env = env.clone();
+            elem,
+            range,
+            domain,
+            formula,
+            info,
+            ..
+        } => {
+            let array = env.get_var_type(&domain)?;
+            let inner_type = array.get_inner_array_type().ok_or(unification_error(
+                RuntimeType::ARRAYRuntimeType,
+                array,
+                info,
+            ))?;
+            let mut env = env.clone();
 
-                env.declare_var(elem.clone(), inner_type)?;
-                env.declare_var(range.clone(), RuntimeType::IntRuntimeType)?;
-                let formula = type_expression(formula.into(), &mut env, st)?;
-                matches_type(formula.as_ref(), RuntimeType::BoolRuntimeType, st)?;
+            env.declare_var(elem.clone(), inner_type)?;
+            env.declare_var(range.clone(), RuntimeType::IntRuntimeType)?;
+            let formula = type_expression(formula.into(), &mut env, st)?;
+            matches_type(formula.as_ref(), RuntimeType::BoolRuntimeType, st)?;
 
-                Expression::Forall {
-                    type_: RuntimeType::BoolRuntimeType,
-                    elem,
-                    range,
-                    domain,
-                    formula,
-                    info,
-                }
-            }
-        Expression::Exists {
+            Expression::Forall {
+                type_: RuntimeType::BoolRuntimeType,
                 elem,
                 range,
                 domain,
                 formula,
                 info,
-                ..
-            } => {
-                let array = env.get_var_type(&domain)?;
-                let inner_type = array.get_inner_array_type().ok_or(unification_error(
-                    RuntimeType::ARRAYRuntimeType,
-                    array,
-                    info,
-                ))?;
-                let mut env = env.clone();
-
-                env.declare_var(elem.clone(), inner_type)?;
-                env.declare_var(range.clone(), RuntimeType::IntRuntimeType)?;
-                let formula = type_expression(formula.into(), &mut env, st)?;
-                matches_type(formula.as_ref(), RuntimeType::BoolRuntimeType, st)?;
-
-                Expression::Exists {
-                    type_: RuntimeType::BoolRuntimeType,
-                    elem,
-                    range,
-                    domain,
-                    formula,
-                    info,
-                }
             }
-        Expression::BinOp {
-                bin_op,
-                lhs,
-                rhs,
+        }
+        Expression::Exists {
+            elem,
+            range,
+            domain,
+            formula,
+            info,
+            ..
+        } => {
+            let array = env.get_var_type(&domain)?;
+            let inner_type = array.get_inner_array_type().ok_or(unification_error(
+                RuntimeType::ARRAYRuntimeType,
+                array,
                 info,
-                ..
-            } => {
-                let lhs = type_expression(lhs, env, st)?;
-                let rhs = type_expression(rhs, env, st)?;
-                let type_ = type_binop(bin_op, &lhs, &rhs, st)?;
-                Expression::BinOp {
-                    bin_op,
-                    lhs: lhs.into(),
-                    rhs: rhs.into(),
-                    type_,
-                    info,
-                }
+            ))?;
+            let mut env = env.clone();
+
+            env.declare_var(elem.clone(), inner_type)?;
+            env.declare_var(range.clone(), RuntimeType::IntRuntimeType)?;
+            let formula = type_expression(formula.into(), &mut env, st)?;
+            matches_type(formula.as_ref(), RuntimeType::BoolRuntimeType, st)?;
+
+            Expression::Exists {
+                type_: RuntimeType::BoolRuntimeType,
+                elem,
+                range,
+                domain,
+                formula,
+                info,
             }
+        }
+        Expression::BinOp {
+            bin_op,
+            lhs,
+            rhs,
+            info,
+            ..
+        } => {
+            let lhs = type_expression(lhs, env, st)?;
+            let rhs = type_expression(rhs, env, st)?;
+            let type_ = type_binop(bin_op, &lhs, &rhs, st)?;
+            Expression::BinOp {
+                bin_op,
+                lhs: lhs.into(),
+                rhs: rhs.into(),
+                type_,
+                info,
+            }
+        }
         Expression::UnOp {
-                un_op, value, info, ..
-            } => {
-                let value = type_expression(value, env, st)?;
-                let type_ = match un_op {
-                    UnOp::Negative => {
-                        matches_type(value.as_ref(), RuntimeType::NUMRuntimeType, st)?;
-                        value.type_of()
-                    }
-                    UnOp::Negate => {
-                        matches_type(value.as_ref(), RuntimeType::BoolRuntimeType, st)?;
-                        RuntimeType::BoolRuntimeType
-                    }
-                };
-                Expression::UnOp {
-                    un_op,
-                    value: value.into(),
-                    type_,
-                    info,
+            un_op, value, info, ..
+        } => {
+            let value = type_expression(value, env, st)?;
+            let type_ = match un_op {
+                UnOp::Negative => {
+                    matches_type(value.as_ref(), RuntimeType::NUMRuntimeType, st)?;
+                    value.type_of()
                 }
+                UnOp::Negate => {
+                    matches_type(value.as_ref(), RuntimeType::BoolRuntimeType, st)?;
+                    RuntimeType::BoolRuntimeType
+                }
+            };
+            Expression::UnOp {
+                un_op,
+                value: value.into(),
+                type_,
+                info,
             }
+        }
         Expression::Var { var, info, .. } => {
-                let type_ = env.get_var_type(&var)?;
-                Expression::Var { var, type_, info }
-            }
+            let type_ = env.get_var_type(&var)?;
+            Expression::Var { var, type_, info }
+        }
         Expression::SymbolicVar { .. } => unreachable!("Symbolic variable in analysis phase"),
         Expression::Lit { lit, info, .. } => {
-                let type_ = lit.type_of();
-                Expression::Lit { lit, type_, info }
-            }
+            let type_ = lit.type_of();
+            Expression::Lit { lit, type_, info }
+        }
         Expression::SizeOf { var, info, .. } => {
-                let type_ = env.get_var_type(&var)?;
-                let var_expr = Expression::Var { var: var.clone(), type_, info: info };
-                matches_type(var_expr, RuntimeType::ARRAYRuntimeType, st)?;
-                Expression::SizeOf {
-                    var,
-                    type_: RuntimeType::IntRuntimeType,
-                    info,
-                }
-            },
-        Expression::Ref { ref_, info, .. } => Expression::Ref {
-                ref_,
-                type_: RuntimeType::REFRuntimeType,
+            let type_ = env.get_var_type(&var)?;
+            let var_expr = Expression::Var {
+                var: var.clone(),
+                type_,
+                info: info,
+            };
+            matches_type(var_expr, RuntimeType::ARRAYRuntimeType, st)?;
+            Expression::SizeOf {
+                var,
+                type_: RuntimeType::IntRuntimeType,
                 info,
-            },
+            }
+        }
+        Expression::Ref { ref_, info, .. } => Expression::Ref {
+            ref_,
+            type_: RuntimeType::REFRuntimeType,
+            info,
+        },
         Expression::SymbolicRef { .. } => unreachable!("Symbolic object in analysis phase"),
         Expression::Conditional { .. } => unreachable!("Ite in analysis phase"),
         Expression::TypeExpr { .. } => unreachable!("expr(type_expr) in analysis phase"),

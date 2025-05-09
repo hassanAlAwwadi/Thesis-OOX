@@ -1,5 +1,8 @@
-use criterion::{criterion_group, criterion_main, Criterion, SamplingMode, BenchmarkGroup, measurement::{Measurement}};
-use lib::{verify, Options, Heuristic};
+use criterion::{
+    criterion_group, criterion_main, measurement::Measurement, BenchmarkGroup, Criterion,
+    SamplingMode,
+};
+use lib::{verify, Heuristic, Options};
 
 fn options() -> Options<'static> {
     Options {
@@ -57,19 +60,21 @@ fn experiment3<'a, M: Measurement>(c: &'a mut Criterion<M>) -> BenchmarkGroup<'a
     });
 
     options.heuristic = Heuristic::RoundRobinMD2URandomPath;
-    group.bench_function("Collections 25 --heuristic Round Robin MD2U & Random Path", |b| {
-        b.iter(|| {
-            verify(
-                &["./benchmark_programs/experiment2/defects4j/collections_25.oox"],
-                "Main",
-                "test_symbolic",
-                options,
-            )
-        })
-    });
+    group.bench_function(
+        "Collections 25 --heuristic Round Robin MD2U & Random Path",
+        |b| {
+            b.iter(|| {
+                verify(
+                    &["./benchmark_programs/experiment2/defects4j/collections_25.oox"],
+                    "Main",
+                    "test_symbolic",
+                    options,
+                )
+            })
+        },
+    );
     group
 }
-
 
 criterion_group!(benches, experiment3);
 criterion_main!(benches);

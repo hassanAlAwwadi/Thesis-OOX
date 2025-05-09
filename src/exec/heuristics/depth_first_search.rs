@@ -1,4 +1,8 @@
-use std::{cell::RefCell, collections::{HashMap, BTreeMap}, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap},
+    rc::Rc,
+};
 
 use slog::Logger;
 

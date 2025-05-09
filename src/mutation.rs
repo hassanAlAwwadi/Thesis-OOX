@@ -118,12 +118,19 @@ fn operators() -> Vec<(&'static str, MutationOperator)> {
     ]
 }
 
-pub fn mutate_program(compilation_unit: &CompilationUnit, exclude_methods: &[(Identifier, Identifier)]) -> Vec<(String, CompilationUnit)> {
+pub fn mutate_program(
+    compilation_unit: &CompilationUnit,
+    exclude_methods: &[(Identifier, Identifier)],
+) -> Vec<(String, CompilationUnit)> {
     operators()
         .into_iter()
         .map(|(name, mutation)| {
             (0..)
-                .zip(mutate_compilation_unit(mutation, compilation_unit, exclude_methods))
+                .zip(mutate_compilation_unit(
+                    mutation,
+                    compilation_unit,
+                    exclude_methods,
+                ))
                 .map(move |(i, compilation_unit)| (format!("{}{}", name, i), compilation_unit))
         })
         .flatten()
@@ -133,7 +140,7 @@ pub fn mutate_program(compilation_unit: &CompilationUnit, exclude_methods: &[(Id
 fn mutate_compilation_unit(
     mutation: MutationOperator,
     compilation_unit: &CompilationUnit,
-    exclude_methods: &[(Identifier, Identifier)]
+    exclude_methods: &[(Identifier, Identifier)],
 ) -> Vec<CompilationUnit> {
     let mutated_members = mutate_declarations(mutation, &compilation_unit.members, exclude_methods);
 
@@ -146,7 +153,7 @@ fn mutate_compilation_unit(
 fn mutate_declarations(
     mutation: MutationOperator,
     declarations: &Vec<Declaration>,
-    exclude_methods: &[(Identifier, Identifier)]
+    exclude_methods: &[(Identifier, Identifier)],
 ) -> Vec<Vec<Declaration>> {
     (0..)
         .zip(declarations)
@@ -165,7 +172,11 @@ fn mutate_declarations(
         .collect()
 }
 
-fn mutate_declaration(mutation: MutationOperator, declaration: &Declaration, exclude_methods: &[(Identifier, Identifier)]) -> Vec<Declaration> {
+fn mutate_declaration(
+    mutation: MutationOperator,
+    declaration: &Declaration,
+    exclude_methods: &[(Identifier, Identifier)],
+) -> Vec<Declaration> {
     match declaration {
         Declaration::Class(class) => (0..)
             .zip(&class.members)
@@ -220,17 +231,21 @@ fn mutate_declaration_member(
     mutation: MutationOperator,
     member: &DeclarationMember,
     decl_name: Identifier,
-    exclude_methods: &[(Identifier, Identifier)]
+    exclude_methods: &[(Identifier, Identifier)],
 ) -> Vec<DeclarationMember> {
     match member {
-        DeclarationMember::Constructor(method) => mutate_method(mutation, method, decl_name, exclude_methods)
-            .into_iter()
-            .map(|method| DeclarationMember::Constructor(method))
-            .collect(),
-        DeclarationMember::Method(method) => mutate_method(mutation, method, decl_name, exclude_methods)
-            .into_iter()
-            .map(|method| DeclarationMember::Method(method))
-            .collect(),
+        DeclarationMember::Constructor(method) => {
+            mutate_method(mutation, method, decl_name, exclude_methods)
+                .into_iter()
+                .map(|method| DeclarationMember::Constructor(method))
+                .collect()
+        }
+        DeclarationMember::Method(method) => {
+            mutate_method(mutation, method, decl_name, exclude_methods)
+                .into_iter()
+                .map(|method| DeclarationMember::Method(method))
+                .collect()
+        }
         DeclarationMember::Field { .. } => vec![],
     }
 }
@@ -239,13 +254,15 @@ fn mutate_interface_member(
     mutation: MutationOperator,
     member: &InterfaceMember,
     decl_name: Identifier,
-    exclude_methods: &[(Identifier, Identifier)]
+    exclude_methods: &[(Identifier, Identifier)],
 ) -> Vec<InterfaceMember> {
     match member {
-        InterfaceMember::DefaultMethod(method) => mutate_method(mutation, method, decl_name, exclude_methods)
-            .into_iter()
-            .map(|method| InterfaceMember::DefaultMethod(method))
-            .collect(),
+        InterfaceMember::DefaultMethod(method) => {
+            mutate_method(mutation, method, decl_name, exclude_methods)
+                .into_iter()
+                .map(|method| InterfaceMember::DefaultMethod(method))
+                .collect()
+        }
         InterfaceMember::AbstractMethod(method) => {
             vec![InterfaceMember::AbstractMethod(method.clone())]
         }
@@ -256,7 +273,7 @@ fn mutate_method(
     mutation: MutationOperator,
     method: &Method,
     decl_name: Identifier,
-    exclude_methods: &[(Identifier, Identifier)]
+    exclude_methods: &[(Identifier, Identifier)],
 ) -> Vec<Rc<Method>> {
     if exclude_methods.contains(&(decl_name.clone(), method.name.clone())) {
         return vec![];
@@ -295,101 +312,101 @@ fn mutate_expression(
     let info = Default::default();
     match expression {
         Expression::BinOp {
-                        bin_op,
-                        lhs,
-                        rhs,
-                        type_,
-                        ..
-            } => {
-                let bin_ops =
-                    apply_binop(mutation, *bin_op)
-                        .into_iter()
-                        .map(|bin_op| Expression::BinOp {
-                            bin_op,
-                            lhs: lhs.clone(),
-                            rhs: rhs.clone(),
-                            type_: type_.clone(),
-                            info,
-                        });
-                let lhss = mutate_expression(mutation, lhs, env)
+            bin_op,
+            lhs,
+            rhs,
+            type_,
+            ..
+        } => {
+            let bin_ops =
+                apply_binop(mutation, *bin_op)
                     .into_iter()
-                    .map(|lhs| Expression::BinOp {
-                        bin_op: *bin_op,
-                        lhs: lhs.into(),
+                    .map(|bin_op| Expression::BinOp {
+                        bin_op,
+                        lhs: lhs.clone(),
                         rhs: rhs.clone(),
                         type_: type_.clone(),
                         info,
                     });
-                let rhss = mutate_expression(mutation, rhs, env)
-                    .into_iter()
-                    .map(|rhs| Expression::BinOp {
-                        bin_op: *bin_op,
-                        lhs: lhs.clone(),
-                        rhs: rhs.into(),
-                        type_: type_.clone(),
-                        info,
-                    });
-
-                bin_ops.chain(lhss).chain(rhss).collect()
-            }
-        Expression::UnOp {
-                un_op,
-                value,
-                type_,
-                ..
-            } => {
-                let un_ops = apply_unop(mutation, *un_op)
-                    .into_iter()
-                    .flatten()
-                    .map(|un_op| Expression::UnOp {
-                        un_op,
-                        value: value.clone(),
-                        type_: type_.clone(),
-                        info,
-                    });
-                let values = mutate_expression(mutation, value, env)
-                    .into_iter()
-                    .map(|value| Expression::UnOp {
-                        un_op: *un_op,
-                        value: value.into(),
-                        type_: type_.clone(),
-                        info,
-                    });
-                un_ops.chain(values).collect()
-            }
-        Expression::Var { var, type_, .. } => apply_var(mutation, var.clone(), env)
+            let lhss = mutate_expression(mutation, lhs, env)
                 .into_iter()
-                .map(|var| Expression::Var {
-                    var,
+                .map(|lhs| Expression::BinOp {
+                    bin_op: *bin_op,
+                    lhs: lhs.into(),
+                    rhs: rhs.clone(),
                     type_: type_.clone(),
                     info,
-                })
-                .collect(),
+                });
+            let rhss = mutate_expression(mutation, rhs, env)
+                .into_iter()
+                .map(|rhs| Expression::BinOp {
+                    bin_op: *bin_op,
+                    lhs: lhs.clone(),
+                    rhs: rhs.into(),
+                    type_: type_.clone(),
+                    info,
+                });
+
+            bin_ops.chain(lhss).chain(rhss).collect()
+        }
+        Expression::UnOp {
+            un_op,
+            value,
+            type_,
+            ..
+        } => {
+            let un_ops = apply_unop(mutation, *un_op)
+                .into_iter()
+                .flatten()
+                .map(|un_op| Expression::UnOp {
+                    un_op,
+                    value: value.clone(),
+                    type_: type_.clone(),
+                    info,
+                });
+            let values = mutate_expression(mutation, value, env)
+                .into_iter()
+                .map(|value| Expression::UnOp {
+                    un_op: *un_op,
+                    value: value.into(),
+                    type_: type_.clone(),
+                    info,
+                });
+            un_ops.chain(values).collect()
+        }
+        Expression::Var { var, type_, .. } => apply_var(mutation, var.clone(), env)
+            .into_iter()
+            .map(|var| Expression::Var {
+                var,
+                type_: type_.clone(),
+                info,
+            })
+            .collect(),
         Expression::Lit { lit, type_, .. } => {
-                let lits = apply_lit(mutation, lit.clone())
-                    .into_iter()
-                    .map(|lit| Expression::Lit {
-                        lit,
-                        type_: type_.clone(),
-                        info,
-                    });
-                lits.collect()
-            }
+            let lits = apply_lit(mutation, lit.clone())
+                .into_iter()
+                .map(|lit| Expression::Lit {
+                    lit,
+                    type_: type_.clone(),
+                    info,
+                });
+            lits.collect()
+        }
         Expression::SizeOf { var, type_, .. } => {
-                let vars = apply_var(mutation, var.clone(), env)
-                    .into_iter()
-                    .map(|var| Expression::SizeOf {
-                        var,
-                        type_: type_.clone(),
-                        info: info.clone(),
-                    });
-                vars.collect()
-            }
+            let vars = apply_var(mutation, var.clone(), env)
+                .into_iter()
+                .map(|var| Expression::SizeOf {
+                    var,
+                    type_: type_.clone(),
+                    info: info.clone(),
+                });
+            vars.collect()
+        }
         Expression::Forall { .. } | Expression::Exists { .. } => vec![],
         Expression::Ref { .. }
-            | Expression::SymbolicRef { .. }
-            | Expression::SymbolicVar { .. }
-            | Expression::Conditional { .. } => unreachable!("Cannot be reached during typing phase"),
+        | Expression::SymbolicRef { .. }
+        | Expression::SymbolicVar { .. }
+        | Expression::Conditional { .. } => unreachable!("Cannot be reached during typing phase"),
         Expression::TypeExpr { texpr: _ } => todo!(),
     }
 }
@@ -565,7 +582,7 @@ fn mutate_rhs(mutation: MutationOperator, rhs: &Rhs, env: &mut Environment) -> V
                 });
 
             vars.collect()
-        },
+        }
     }
 }
 

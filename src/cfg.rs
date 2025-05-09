@@ -112,7 +112,12 @@ fn member_cfg(
     }
 }
 
-fn label_constructor(class_name: Identifier, member: &DeclarationMember, method: &Rc<Method>, i: &mut u64) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
+fn label_constructor(
+    class_name: Identifier,
+    member: &DeclarationMember,
+    method: &Rc<Method>,
+    i: &mut u64,
+) -> (Vec<(u64, CFGStatement)>, Vec<(u64, u64)>) {
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
     let mut v = Vec::new();
     v.push((
@@ -205,7 +210,7 @@ fn label_method(
         },
     ));
     v.append(&mut statement_cfg(&method.body.borrow(), i));
-    
+
     let exit_label: u64 = *i;
     *i += 1;
     v.push((
@@ -239,27 +244,26 @@ fn label_method(
 }
 
 fn statement_cfg(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)> {
-
     let mut labelled_statements: Vec<(u64, CFGStatement)> = vec![];
     match statement {
         Statement::Seq { stat1, stat2 } => {
             let mut v = vec![];
             let seq_l = *i;
-            
+
             *i += 1;
             let s1_l = *i;
             let mut v1 = &mut statement_cfg(stat1.as_ref(), i);
-            
+
             *i += 1;
             let s2_l = *i;
             let mut v2 = &mut statement_cfg(stat2.as_ref(), i);
 
             let (_, ite) = v1.first_mut().unwrap();
-            
-            if let CFGStatement::Ite(c, l, r, _) = ite{
+
+            if let CFGStatement::Ite(c, l, r, _) = ite {
                 let next = init(v2.first().unwrap());
 
-                *ite =  CFGStatement::Ite(c.clone(), l.clone(), r.clone(), Some(next));
+                *ite = CFGStatement::Ite(c.clone(), l.clone(), r.clone(), Some(next));
             }
             v.append(&mut v1);
             v.append(&mut v2);
@@ -279,7 +283,10 @@ fn statement_cfg(statement: &Statement, i: &mut u64) -> Vec<(u64, CFGStatement)>
             v.append(&mut statement_cfg(true_body.as_ref(), i));
             let i_false = *i;
             v.append(&mut statement_cfg(false_body.as_ref(), i));
-            labelled_statements.push((ite_l, CFGStatement::Ite(guard.clone(), i_true, i_false, None)));
+            labelled_statements.push((
+                ite_l,
+                CFGStatement::Ite(guard.clone(), i_true, i_false, None),
+            ));
             labelled_statements.append(&mut v);
         }
         Statement::While { guard, body, .. } => {
@@ -450,7 +457,7 @@ fn r#final((l, stmt): &(u64, CFGStatement), all_smts: &Vec<(u64, CFGStatement)>)
             unreachable!("Seq is not a CFGStatement")
         }
         CFGStatement::Statement(s) => unreachable!("{:?} is not a CFGStatement", s),
-        CFGStatement::Ite(_, s1, s2,_ ) => {
+        CFGStatement::Ite(_, s1, s2, _) => {
             let mut final_s1 = r#final(&(*s1, lookup(*s1, all_smts)), all_smts);
             let mut final_s2 = r#final(&(*s2, lookup(*s2, all_smts)), all_smts);
             final_s1.append(&mut final_s2);

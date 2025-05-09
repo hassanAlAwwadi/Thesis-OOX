@@ -4,7 +4,7 @@
 //! A reference of a heapvalue can be seen as the adress or unique identifier.
 //!
 
-use std::{rc::Rc};
+use std::rc::Rc;
 
 use crate::exec::ImHashMap;
 use crate::{Expression, Identifier, Reference, RuntimeType};

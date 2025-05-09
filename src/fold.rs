@@ -103,7 +103,7 @@ where
                 type_,
                 info,
             } => Self::fold_cond(guard, true_, false_, type_),
-            Expression::TypeExpr { .. } => todo!()
+            Expression::TypeExpr { .. } => todo!(),
         }
     }
 }

@@ -11,7 +11,9 @@ fn instance_of() {
             "A",
             "test1",
             options
-        ).unwrap().0,
+        )
+        .unwrap()
+        .0,
         SymResult::Valid
     );
 
@@ -21,7 +23,9 @@ fn instance_of() {
             "A",
             "test1_invalid",
             options
-        ).unwrap().0,
+        )
+        .unwrap()
+        .0,
         SymResult::Invalid(SourcePos::new(7, 27, 0))
     );
 
@@ -31,7 +35,9 @@ fn instance_of() {
             "A",
             "test1b_invalid",
             options
-        ).unwrap().0,
+        )
+        .unwrap()
+        .0,
         SymResult::Invalid(SourcePos::new(23, 20, 0))
     );
 
@@ -41,7 +47,9 @@ fn instance_of() {
             "A",
             "test2",
             options
-        ).unwrap().0,
+        )
+        .unwrap()
+        .0,
         SymResult::Valid
     );
 
@@ -51,7 +59,9 @@ fn instance_of() {
             "A",
             "test3_invalid",
             options
-        ).unwrap().0,
+        )
+        .unwrap()
+        .0,
         SymResult::Invalid(SourcePos::new(51, 20, 0))
     );
 
@@ -61,7 +71,9 @@ fn instance_of() {
             "A",
             "test3a",
             options
-        ).unwrap().0,
+        )
+        .unwrap()
+        .0,
         SymResult::Valid
     );
 
@@ -71,7 +83,9 @@ fn instance_of() {
             "A",
             "test3b",
             options
-        ).unwrap().0,
+        )
+        .unwrap()
+        .0,
         SymResult::Valid
     );
 
@@ -103,7 +117,9 @@ fn class_cast() {
             "X1",
             "test1",
             options
-        ).unwrap().0,
+        )
+        .unwrap()
+        .0,
         SymResult::Valid
     );
 
@@ -113,7 +129,9 @@ fn class_cast() {
             "X1",
             "test1a",
             options
-        ).unwrap().0,
+        )
+        .unwrap()
+        .0,
         SymResult::Valid
     );
 
@@ -123,7 +141,9 @@ fn class_cast() {
             "X1",
             "test1a_invalid",
             options
-        ).unwrap().0,
+        )
+        .unwrap()
+        .0,
         SymResult::Invalid(SourcePos::new(37, 21, 0))
     );
 
@@ -133,7 +153,9 @@ fn class_cast() {
             "X1",
             "test1b_invalid",
             options
-        ).unwrap().0,
+        )
+        .unwrap()
+        .0,
         SymResult::Invalid(SourcePos::new(45, 21, 0))
     );
 }
