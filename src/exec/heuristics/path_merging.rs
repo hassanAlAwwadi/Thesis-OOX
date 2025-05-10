@@ -6,7 +6,7 @@ use slog::Logger;
 use crate::{
     cfg::CFGStatement,
     exec::{constants, IdCounter, SymResult},
-    merge::{DynamicPointer, MergeEngine, MergeState, SetEngine},
+    merge::{DynamicPointer, MergeEngine, MergeState, SetEngine, TreeEngine},
     statistics::Statistics,
     symbol_table::SymbolTable,
     typeable::Typeable,
@@ -25,9 +25,8 @@ pub(crate) fn sym_exec(
     statistics: &mut Statistics,
     _entry_method: crate::cfg::MethodIdentifier,
     options: &Options,
+    abstraction: bool,
 ) -> SymResult {
-    let mut engine: SetEngine = SetEngine::new();
-
     let mut symbols = vec![];
     for (id, expr) in init.stack.current_stackframe().unwrap().params.iter() {
         if let Expression::SymbolicVar {
@@ -41,20 +40,38 @@ pub(crate) fn sym_exec(
             panic!("starting out with non symbolic values!?");
         }
     }
-    let state = engine.make_new_state(init.pc, Rc::new(Expression::TRUE), symbols);
 
-    return run(
-        engine,
-        state,
-        program,
-        flows,
-        st,
-        root_logger,
-        path_counter,
-        statistics,
-        _entry_method,
-        options,
-    );
+    if abstraction {
+        let mut engine = SetEngine::new();
+        let state = engine.make_new_state(init.pc, Rc::new(Expression::TRUE), symbols);
+        return run(
+            engine,
+            state,
+            program,
+            flows,
+            st,
+            root_logger,
+            path_counter,
+            statistics,
+            _entry_method,
+            options,
+        );
+    } else {
+        let mut engine = TreeEngine::new();
+        let state = engine.make_new_state(init.pc, Rc::new(Expression::TRUE), symbols);
+        return run(
+            engine,
+            state,
+            program,
+            flows,
+            st,
+            root_logger,
+            path_counter,
+            statistics,
+            _entry_method,
+            options,
+        );
+    };
 }
 
 enum Status {

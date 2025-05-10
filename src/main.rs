@@ -101,7 +101,7 @@ enum Commands {
 
 fn main() -> Result<(), String> {
     if let Some((class_name, method_name)) = Some(("Main", "main")) {
-        let k = 200;
+        let k = 15;
         let quiet = false;
         let heuristic = Heuristic::PathMerging;
         let visualize_heuristic = false;
@@ -125,12 +125,11 @@ fn main() -> Result<(), String> {
         };
 
         let source_paths = vec!["./benchmark_programs/experiment_m/0.oox"];
-        let (sym_result_1, sym_result_2, _statistics) =
+        let (raw_result, tree_result, set_result, statistics) =
             verify(source_paths.as_slice(), class_name, method_name, options)?;
-        println!(
-            "merging got result: {:?}, depth_first got result {:?}",
-            sym_result_1, sym_result_2
-        )
+        println!("raw_result: {:?}", raw_result);
+        println!("tree_result: {:?}", tree_result);
+        println!("set_result: {:?}", set_result);
         /*
         let result_text = result_text(sym_result_1, source_paths);
 

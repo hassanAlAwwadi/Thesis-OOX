@@ -1596,7 +1596,7 @@ pub fn verify(
     class_name: &str,
     method_name: &str,
     options: Options,
-) -> std::result::Result<(SymResult, SymResult, Statistics), Error> {
+) -> std::result::Result<(SymResult, SymResult, SymResult, Statistics), Error> {
     if !options.quiet {
         println!("Starting up");
     }
@@ -1653,6 +1653,8 @@ pub fn verify(
     // dbg!(&program);
 
     let flows: HashMap<u64, Vec<u64>> = utils::group_by(flw.into_iter());
+
+    /*
     println!("starting to print program");
     for (i, stmt) in program.clone().into_iter().sorted_by_key(|(k, _)| *k) {
         println!("{:?}: {:?}", i, stmt);
@@ -1660,6 +1662,7 @@ pub fn verify(
     for (s, e) in flows.clone().into_iter().sorted_by_key(|(k, _)| *k) {
         println!("{:?} -> {:?}", s, e);
     }
+    */
 
     // dbg!(&flows);
     let argument_types = initial_method
@@ -1746,33 +1749,38 @@ pub fn verify(
     let path_counter = Rc::new(RefCell::new(IdCounter::new(0)));
     let mut statistics: Statistics = Default::default();
 
-    // Choose between heuristic function (with matching parameters)
-    let _sym_exec = match options.heuristic {
-        Heuristic::DepthFirstSearch => heuristics::depth_first_search::sym_exec,
-        Heuristic::RandomPath => heuristics::random_path::sym_exec,
-        Heuristic::MinDist2Uncovered => heuristics::min_dist_to_uncovered::sym_exec,
-        Heuristic::RoundRobinMD2URandomPath => heuristics::round_robin::sym_exec,
-        Heuristic::PathMerging => heuristics::path_merging::sym_exec,
-    };
-
-    let s2 = state.clone();
-    let l2 = root_logger.clone();
     let now = Instant::now();
-    let sym_result_1 = heuristics::path_merging::sym_exec(
-        s2,
+    let tree_result = heuristics::path_merging::sym_exec(
+        state.clone(),
         &program,
         &flows,
         &symbol_table,
-        l2,
+        root_logger.clone(),
         path_counter.clone(),
         &mut statistics,
         entry_method.clone(),
         &options,
+        false,
     );
-    println!("merging took: {:?}", now.elapsed());
+    println!("merging without abstraction took: {:?}", now.elapsed());
 
     let now = Instant::now();
-    let sym_result_2 = heuristics::depth_first_search::sym_exec(
+    let set_result = heuristics::path_merging::sym_exec(
+        state.clone(),
+        &program,
+        &flows,
+        &symbol_table,
+        root_logger.clone(),
+        path_counter.clone(),
+        &mut statistics,
+        entry_method.clone(),
+        &options,
+        true,
+    );
+    println!("merging with abstraction took: {:?}", now.elapsed());
+
+    let now = Instant::now();
+    let raw_result = heuristics::depth_first_search::sym_exec(
         state,
         &program,
         &flows,
@@ -1806,7 +1814,7 @@ pub fn verify(
         std::fs::write("coverage_visualized.txt", contents).unwrap();
     }
 
-    return Ok((sym_result_1, sym_result_2, statistics));
+    return Ok((raw_result, tree_result, set_result, statistics));
 }
 
 #[test]

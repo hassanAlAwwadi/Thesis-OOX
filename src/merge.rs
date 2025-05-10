@@ -36,7 +36,7 @@ pub(crate) enum TyOp {
 // at least it would be resolved, if we didn't have symbols :pensive:
 // or quantifiers, which are unhandled for now
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Debug)]
-pub(crate) enum RExpr<T> {
+pub(crate) enum RExpr {
     Lit {
         lit: Lit,
         type_: RuntimeType,
@@ -51,36 +51,29 @@ pub(crate) enum RExpr<T> {
     },
     Bin {
         op: BinOp,
-        left: Rc<RExpr<T>>,
-        right: Rc<RExpr<T>>,
+        left: Rc<RExpr>,
+        right: Rc<RExpr>,
         type_: RuntimeType,
     },
     Typ {
         op: TyOp,
-        val: Rc<RExpr<T>>,
+        val: Rc<RExpr>,
         of: RuntimeType,
         type_: RuntimeType,
     },
     Uno {
         op: UnOp,
-        val: Rc<RExpr<T>>,
+        val: Rc<RExpr>,
         type_: RuntimeType,
     },
     Con {
-        con: Rc<RExpr<T>>,
-        left: Rc<RExpr<T>>,
-        right: Rc<RExpr<T>>,
-        type_: RuntimeType,
-    },
-    Pur {
-        pur: T,
+        con: Rc<RExpr>,
+        left: Rc<RExpr>,
+        right: Rc<RExpr>,
         type_: RuntimeType,
     },
 }
-impl<T> RExpr<T>
-where
-    T: Clone,
-{
+impl RExpr {
     fn get_type(&self) -> RuntimeType {
         match self {
             RExpr::Lit { type_, .. } => type_.clone(),
@@ -90,7 +83,6 @@ where
             RExpr::Typ { type_, .. } => type_.clone(),
             RExpr::Uno { type_, .. } => type_.clone(),
             RExpr::Con { type_, .. } => type_.clone(),
-            RExpr::Pur { type_, .. } => type_.clone(),
         }
     }
 
@@ -146,6 +138,45 @@ where
         use RExpr::*;
 
         match (bin_op, lhs.as_ref(), rhs.as_ref()) {
+            (
+                _,
+                Con {
+                    con: p,
+                    left: v,
+                    right: w,
+                    ..
+                },
+                Con {
+                    con: q,
+                    left: x,
+                    right: y,
+                    ..
+                },
+            ) => {
+                if Rc::ptr_eq(p, q) {
+                    return Rc::new(Con {
+                        con: p.clone(),
+                        left: Self::evaluate_binop(bin_op, v.clone(), x.clone(), type_.clone()),
+                        right: Self::evaluate_binop(bin_op, w.clone(), y.clone(), type_.clone()),
+                        type_: type_.clone(),
+                    });
+                } else {
+                    return Rc::new(Bin {
+                        op: bin_op,
+                        left: lhs.clone(),
+                        right: rhs.clone(),
+                        type_: type_.clone(),
+                    });
+                }
+            }
+            (
+                Implies,
+                Lit {
+                    lit: BoolLit { bool_value: true },
+                    ..
+                },
+                _,
+            ) => rhs,
             (
                 Implies,
                 Lit {
@@ -759,8 +790,23 @@ where
             }),
         }
     }
-    fn evaluate_tyop(_ty_op: TyOp, _value: Rc<Self>, _of_this_type: RuntimeType) -> Rc<Self> {
-        todo!();
+    fn evaluate_tyop(ty_op: TyOp, value: Rc<Self>, _of_this_type: RuntimeType) -> Rc<Self> {
+        let t = value.get_type();
+        let x = match ty_op {
+            TyOp::IsInstanceOf => RExpr::Lit {
+                lit: Lit::BoolLit {
+                    bool_value: t == _of_this_type,
+                },
+                type_: RuntimeType::BoolRuntimeType,
+            },
+            TyOp::IsNotInstanceOf => RExpr::Lit {
+                lit: Lit::BoolLit {
+                    bool_value: t != _of_this_type,
+                },
+                type_: RuntimeType::BoolRuntimeType,
+            },
+        };
+        return Rc::new(x);
     }
 
     fn evaluate_unop(unop: UnOp, expression: Rc<Self>) -> Rc<Self> {
@@ -1071,12 +1117,11 @@ where
                 let right = Self::expr_to_bool(right.clone(), context, bmemory, imemory);
                 return cond.ite(&left, &right);
             }
-            RExpr::Pur { pur: _, type_: _ } => panic!("resolve pure before calling"),
         }
     }
 
     fn expr_to_int<'a>(
-        clone: Rc<RExpr<T>>,
+        clone: Rc<RExpr>,
         context: &'a Context,
         bmemory: &mut HashMap<Identifier, Bool<'a>>,
         imemory: &mut HashMap<Identifier, Int<'a>>,
@@ -1156,11 +1201,10 @@ where
                 let right = Self::expr_to_int(right.clone(), context, bmemory, imemory);
                 return cond.ite(&left, &right);
             }
-            RExpr::Pur { pur: _, type_: _ } => panic!("resolve pure before calling"),
         }
     }
 
-    fn as_string(self: Rc<Self>, f: impl Clone + Fn(T) -> String) -> String {
+    fn as_string(self: Rc<Self>) -> String {
         match self.as_ref() {
             RExpr::Lit { lit, type_: _ } => match lit {
                 Lit::IntLit { int_value } => format!("{}", int_value),
@@ -1185,73 +1229,73 @@ where
             } => match op {
                 BinOp::Implies => format!(
                     "({} => {})",
-                    left.clone().as_string(f.clone()),
-                    right.clone().as_string(f.clone())
+                    left.clone().as_string(),
+                    right.clone().as_string()
                 ),
                 BinOp::And => format!(
                     "({} && {})",
-                    left.clone().as_string(f.clone()),
-                    right.clone().as_string(f.clone())
+                    left.clone().as_string(),
+                    right.clone().as_string()
                 ),
                 BinOp::Or => format!(
                     "({} || {})",
-                    left.clone().as_string(f.clone()),
-                    right.clone().as_string(f.clone())
+                    left.clone().as_string(),
+                    right.clone().as_string()
                 ),
                 BinOp::Equal => format!(
                     "({} == {})",
-                    left.clone().as_string(f.clone()),
-                    right.clone().as_string(f.clone())
+                    left.clone().as_string(),
+                    right.clone().as_string()
                 ),
                 BinOp::NotEqual => format!(
                     "({} != {})",
-                    left.clone().as_string(f.clone()),
-                    right.clone().as_string(f.clone())
+                    left.clone().as_string(),
+                    right.clone().as_string()
                 ),
                 BinOp::LessThan => format!(
                     "({} < {})",
-                    left.clone().as_string(f.clone()),
-                    right.clone().as_string(f.clone())
+                    left.clone().as_string(),
+                    right.clone().as_string()
                 ),
                 BinOp::LessThanEqual => format!(
                     "({} <= {})",
-                    left.clone().as_string(f.clone()),
-                    right.clone().as_string(f.clone())
+                    left.clone().as_string(),
+                    right.clone().as_string()
                 ),
                 BinOp::GreaterThan => format!(
                     "({} > {})",
-                    left.clone().as_string(f.clone()),
-                    right.clone().as_string(f.clone())
+                    left.clone().as_string(),
+                    right.clone().as_string()
                 ),
                 BinOp::GreaterThanEqual => format!(
                     "({} >= {})",
-                    left.clone().as_string(f.clone()),
-                    right.clone().as_string(f.clone())
+                    left.clone().as_string(),
+                    right.clone().as_string()
                 ),
                 BinOp::Plus => format!(
                     "({} + {})",
-                    left.clone().as_string(f.clone()),
-                    right.clone().as_string(f.clone())
+                    left.clone().as_string(),
+                    right.clone().as_string()
                 ),
                 BinOp::Minus => format!(
                     "({} - {})",
-                    left.clone().as_string(f.clone()),
-                    right.clone().as_string(f.clone())
+                    left.clone().as_string(),
+                    right.clone().as_string()
                 ),
                 BinOp::Multiply => format!(
                     "({} * {})",
-                    left.clone().as_string(f.clone()),
-                    right.clone().as_string(f.clone())
+                    left.clone().as_string(),
+                    right.clone().as_string()
                 ),
                 BinOp::Divide => format!(
                     "({} / {})",
-                    left.clone().as_string(f.clone()),
-                    right.clone().as_string(f.clone())
+                    left.clone().as_string(),
+                    right.clone().as_string()
                 ),
                 BinOp::Modulo => format!(
                     "({} % {})",
-                    left.clone().as_string(f.clone()),
-                    right.clone().as_string(f.clone())
+                    left.clone().as_string(),
+                    right.clone().as_string()
                 ),
             },
             RExpr::Typ {
@@ -1261,17 +1305,15 @@ where
                 type_: _,
             } => match op {
                 TyOp::IsInstanceOf => {
-                    format!("({} instanceof {})", val.clone().as_string(f.clone()), of)
+                    format!("({} instanceof {})", val.clone().as_string(), of)
                 }
-                TyOp::IsNotInstanceOf => format!(
-                    "({} not instanceof {})",
-                    val.clone().as_string(f.clone()),
-                    of
-                ),
+                TyOp::IsNotInstanceOf => {
+                    format!("({} not instanceof {})", val.clone().as_string(), of)
+                }
             },
             RExpr::Uno { op, val, type_: _ } => match op {
-                UnOp::Negate => format!("!{}", val.clone().as_string(f.clone())),
-                UnOp::Negative => format!("-{}", val.clone().as_string(f.clone())),
+                UnOp::Negate => format!("!{}", val.clone().as_string()),
+                UnOp::Negative => format!("-{}", val.clone().as_string()),
             },
             RExpr::Con {
                 con,
@@ -1279,12 +1321,11 @@ where
                 right,
                 type_: _,
             } => {
-                let con_str = con.clone().as_string(f.clone());
-                let left_str = left.clone().as_string(f.clone());
-                let right_str = right.clone().as_string(f.clone());
+                let con_str = con.clone().as_string();
+                let left_str = left.clone().as_string();
+                let right_str = right.clone().as_string();
                 format!("({} ? {} : {})", con_str, left_str, right_str)
             }
-            RExpr::Pur { pur, type_: _ } => f(pur.clone()),
         }
     }
 
@@ -1405,9 +1446,9 @@ pub trait MergeState {
     fn merge_part(&mut self, left: Self) -> ();
 }
 
-pub(crate) type SValue = HashSet<Rc<RExpr<()>>>;
+pub(crate) type SValue = HashSet<Rc<RExpr>>;
 type SStack = Vec<HashMap<Identifier, SValue>>;
-type SHeap = HashMap<i64, HashSet<RHeapValue<RExpr<()>>>>;
+type SHeap = HashMap<i64, HashSet<RHeapValue<RExpr>>>;
 
 pub mod svalue {
     use super::*;
@@ -1976,17 +2017,8 @@ impl MergeEngine for SetEngine {
         let result = solver.check();
 
         // Check satisfiability
-        if let z3::SatResult::Sat = result {
-            //println!("Model: {:?}", solver.get_model());
-            //println!("proof: {:?}", solver.get_proof());
-            solver.pop(1);
-            return true;
-        } else {
-            //println!("Model: {:?}", solver.get_model());
-            //println!("proof: {:?}", solver.get_proof());
-            solver.pop(1);
-            return false;
-        }
+        solver.pop(1);
+        return matches!(result, z3::SatResult::Sat);
     }
     fn is_valid_for(&self, state: &SetState, expr: Rc<Expression>) -> bool {
         /*
@@ -2025,19 +2057,12 @@ impl MergeEngine for SetEngine {
         let constraint = premise.implies(&conclusion);
         let constraint = constraint.not();
 
+        // Check satisfiability
         solver.assert(&constraint);
         let result = solver.check();
 
-        // Check satisfiability
-        if let z3::SatResult::Sat = result {
-            println!("Model: {:?}", solver.get_model());
-            solver.pop(1);
-            return false;
-        } else {
-            println!("Model: {:?}", solver.get_model());
-            solver.pop(1);
-            return true;
-        }
+        solver.pop(1);
+        return matches!(result, z3::SatResult::Unsat);
     }
 
     fn add_assumption_to(
@@ -2136,16 +2161,15 @@ impl MergeState for SetState {
 pub(crate) enum Tree<C, T> {
     Leaf(T),
     Node {
-        left: (C, Rc<Tree<C, T>>),
-        right: (C, Rc<Tree<C, T>>),
+        con: C,
+        left: Rc<Tree<C, T>>,
+        right: Rc<Tree<C, T>>,
     },
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub(crate) struct ITValue(Rc<Tree<TValue, TValue>>);
-pub(crate) type TValue = Rc<RExpr<ITValue>>;
+pub(crate) type TValue = Rc<RExpr>;
 type TStack = Vec<HashMap<Identifier, TValue>>;
-type THeap = HashMap<i64, Rc<Tree<Rc<RExpr<ITValue>>, RHeapValue<RExpr<ITValue>>>>>;
+type THeap = HashMap<i64, Rc<Tree<Rc<RExpr>, RHeapValue<RExpr>>>>;
 
 pub mod tvalue {
     use super::*;
@@ -2165,6 +2189,8 @@ pub(crate) struct TreeState {
     stack: TStack,
     heap: THeap,
     dynamic_cont: Vec<DynamicPointer>,
+    split: Option<Rc<RExpr>>,
+    left: bool,
 }
 pub(crate) struct TreeEngine {
     supply: i64,
@@ -2217,6 +2243,13 @@ impl MergeState for TreeState {
     }
 
     fn merge_full(&mut self, left: Self, right: Self) -> () {
+        let (left, right) = if left.left {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        let split = self.split.clone().unwrap();
+        self.split = None;
         assert_eq!(self.stack.len(), left.stack.len());
         assert_eq!(self.stack.len(), right.stack.len());
         assert_eq!(left.pointer, right.pointer);
@@ -2241,21 +2274,28 @@ impl MergeState for TreeState {
         let paired = left.stack.into_iter().zip(right.stack);
 
         self.heap = union_with(left.heap, right.heap, |v, w| {
+            if Rc::ptr_eq(&v, &w) {
+                return v;
+            }
             let ntree = Tree::Node {
-                left: (lc.clone(), v),
-                right: (rc.clone(), w),
+                con: split.clone(),
+                left: v,
+                right: w,
             };
             Rc::new(ntree)
         });
         self.stack = paired
             .map(|(frame_1, frame_2)| {
                 union_with(frame_1, frame_2, |v, w| {
+                    if Rc::ptr_eq(&v, &w) {
+                        return v;
+                    }
+
                     let t = v.get_type();
-                    Rc::new(RExpr::Pur {
-                        pur: ITValue(Rc::new(Tree::Node {
-                            left: (lc.clone(), Rc::new(Tree::Leaf(v))),
-                            right: (rc.clone(), Rc::new(Tree::Leaf(w))),
-                        })),
+                    Rc::new(RExpr::Con {
+                        con: split.clone(),
+                        left: v,
+                        right: w,
                         type_: t,
                     })
                 })
@@ -2264,6 +2304,7 @@ impl MergeState for TreeState {
     }
 
     fn merge_part(&mut self, left: Self) -> () {
+        self.split = None;
         self.pointer = left.pointer;
         self.path_length = left.path_length;
         self.unq_constr = RExpr::evaluate_binop(
@@ -2309,6 +2350,8 @@ impl MergeEngine for TreeEngine {
             stack: vec![hashmap],
             heap: HashMap::new(),
             dynamic_cont: vec![],
+            split: None,
+            left: false,
         };
 
         let constr = self.eval_with(&mut temp, expr);
@@ -2330,7 +2373,7 @@ impl MergeEngine for TreeEngine {
         );
         let constrs: TValue = self.eval_with(state, expr.clone());
         let negates = self.eval_with(state, Expression::not(expr));
-
+        state.split = Some(constrs.clone());
         let left = TreeState {
             path_length: state.path_length,
             pointer: state.pointer,
@@ -2339,6 +2382,8 @@ impl MergeEngine for TreeEngine {
             stack: state.stack.clone(),
             heap: state.heap.clone(),
             dynamic_cont: state.dynamic_cont.clone(),
+            split: None,
+            left: true,
         };
         let right = TreeState {
             path_length: state.path_length,
@@ -2348,6 +2393,8 @@ impl MergeEngine for TreeEngine {
             stack: state.stack.clone(),
             heap: state.heap.clone(),
             dynamic_cont: state.dynamic_cont.clone(),
+            split: None,
+            left: false,
         };
 
         return (left, right);
@@ -2384,50 +2431,9 @@ impl MergeEngine for TreeEngine {
                 type_: _,
                 info: _,
             } => {
-                let _stack = state.stack.last().unwrap();
-                let reference = self.eval_with(state, var.clone());
-                if let RExpr::Ref { ptr, type_ } = reference.as_ref() {
-                    let tree = state.heap.get(&ptr).unwrap();
-                    let tree = Tree::map(tree.clone(), |heap_value| {
-                        if let RHeapValue::ObjectValue { fields, type_: _ } = heap_value {
-                            fields.get(field).unwrap().clone()
-                        } else {
-                            panic!(
-                                "Expected an object value in the heap, but got {:?}",
-                                heap_value
-                            )
-                        }
-                    });
-                    return Rc::new(RExpr::Pur {
-                        pur: ITValue(tree),
-                        type_: type_.clone(),
-                    });
-                } else if let RExpr::Pur { pur, type_ } = reference.as_ref() {
-                    let tree = pur.0.clone();
-                    let fields = Tree::flat_map(tree, |obj| {
-                        if let RExpr::Ref { ptr, type_: _ } = obj.as_ref() {
-                            let value = state.heap.get(&ptr).unwrap();
-                            Tree::map(value.clone(), |heap_value| {
-                                if let RHeapValue::ObjectValue { fields, type_: _ } = heap_value {
-                                    fields.get(field).unwrap().clone()
-                                } else {
-                                    panic!(
-                                        "Expected an object value in the heap, but got {:?}",
-                                        heap_value
-                                    );
-                                }
-                            })
-                        } else {
-                            panic!("Expected a reference, but got {:?}", obj);
-                        }
-                    });
-                    return Rc::new(RExpr::Pur {
-                        pur: ITValue(fields),
-                        type_: type_.clone(),
-                    });
-                } else {
-                    panic!("Expected a reference, but got {:?}", reference);
-                }
+                let var = self.eval_with(state, var.clone());
+                let field = get_field_from_var(var, field.clone(), state);
+                return field;
             }
             Rhs::RhsElem {
                 var,
@@ -2435,131 +2441,10 @@ impl MergeEngine for TreeEngine {
                 type_: _,
                 info: _,
             } => {
-                let _stack = state.stack.last().unwrap();
-                let reference = self.eval_with(state, var.clone());
+                let var = self.eval_with(state, var.clone());
                 let index = self.eval_with(state, index.clone());
-                match index.as_ref() {
-                    RExpr::Lit {
-                        lit: Lit::IntLit { int_value },
-                        ..
-                    } => {
-                        let index = *int_value as usize;
-                        match reference.as_ref() {
-                            RExpr::Ref { ptr, type_ } => {
-                                let tree = state.heap.get(&ptr).unwrap();
-                                let tree = Tree::map(tree.clone(), |heap_value| {
-                                    if let RHeapValue::ArrayValue { elements, type_: _ } =
-                                        heap_value
-                                    {
-                                        elements[index].clone()
-                                    } else {
-                                        panic!(
-                                            "Expected an array value in the heap, but got {:?}",
-                                            heap_value
-                                        )
-                                    }
-                                });
-                                return Rc::new(RExpr::Pur {
-                                    pur: ITValue(tree),
-                                    type_: type_.clone(),
-                                });
-                            }
-                            RExpr::Pur { pur, type_ } => {
-                                let tree = pur.0.clone();
-                                let elements = Tree::flat_map(tree, |arr| {
-                                    if let RExpr::Ref { ptr, type_: _ } = arr.as_ref() {
-                                        let value = state.heap.get(&ptr).unwrap();
-                                        Tree::map(value.clone(), |heap_value| {
-                                            if let RHeapValue::ArrayValue { elements, type_: _ } =
-                                                heap_value
-                                            {
-                                                elements[index].clone()
-                                            } else {
-                                                panic!("Expected an array value in the heap, but got {:?}", heap_value);
-                                            }
-                                        })
-                                    } else {
-                                        panic!("Expected a reference, but got {:?}", arr);
-                                    }
-                                });
-                                return Rc::new(RExpr::Pur {
-                                    pur: ITValue(elements),
-                                    type_: type_.clone(),
-                                });
-                            }
-                            _ => panic!(
-                                "Expected an integer literal for array index, but got {:?}",
-                                index
-                            ),
-                        }
-                    }
-                    RExpr::Pur { pur, type_ } => {
-                        let tree = pur.0.clone();
-                        let tree = Tree::flat_map(tree, |index| {
-                            let index = if let RExpr::Lit {
-                                lit: Lit::IntLit { int_value },
-                                ..
-                            } = index.as_ref()
-                            {
-                                *int_value as usize
-                            } else {
-                                panic!(
-                                    "Expected an integer literal for array index, but got {:?}",
-                                    index
-                                );
-                            };
-                            match reference.as_ref() {
-                                RExpr::Ref { ptr, type_: _ } => {
-                                    let tree = state.heap.get(&ptr).unwrap();
-                                    let tree = Tree::map(tree.clone(), |heap_value| {
-                                        if let RHeapValue::ArrayValue { elements, type_: _ } =
-                                            heap_value
-                                        {
-                                            elements[index].clone()
-                                        } else {
-                                            panic!(
-                                                "Expected an array value in the heap, but got {:?}",
-                                                heap_value
-                                            )
-                                        }
-                                    });
-                                    return tree;
-                                }
-                                RExpr::Pur { pur, type_: _ } => {
-                                    let tree = pur.0.clone();
-                                    let elements = Tree::flat_map(tree, |arr| {
-                                        if let RExpr::Ref { ptr, type_: _ } = arr.as_ref() {
-                                            let value = state.heap.get(&ptr).unwrap();
-                                            Tree::map(value.clone(), |heap_value| {
-                                                if let RHeapValue::ArrayValue {
-                                                    elements,
-                                                    type_: _,
-                                                } = heap_value
-                                                {
-                                                    elements[index].clone()
-                                                } else {
-                                                    panic!("Expected an array value in the heap, but got {:?}", heap_value);
-                                                }
-                                            })
-                                        } else {
-                                            panic!("Expected a reference, but got {:?}", arr);
-                                        }
-                                    });
-                                    return elements;
-                                }
-                                _ => panic!("Expected an reference but got {:?}", reference),
-                            }
-                        });
-                        return Rc::new(RExpr::Pur {
-                            pur: ITValue(tree),
-                            type_: type_.clone(),
-                        });
-                    }
-                    _ => panic!(
-                        "Expected an integer literal for array index, but got {:?}",
-                        index
-                    ),
-                }
+                let elem = get_elem_from_var(var, index, state);
+                return elem;
             }
             Rhs::RhsArray {
                 array_type,
@@ -2571,43 +2456,7 @@ impl MergeEngine for TreeEngine {
                 let size = sizes[0].clone();
                 let sizes = self.eval_with(state, size);
                 let new_ref = self.next_reference_id();
-                let heap_value = match sizes.as_ref() {
-                    RExpr::Lit {
-                        lit: Lit::IntLit { int_value },
-                        ..
-                    } => {
-                        let size = *int_value as usize;
-                        Rc::new(Tree::Leaf(RHeapValue::ArrayValue {
-                            elements: vec![RExpr::default(array_type); size],
-                            type_: array_type.clone().into(),
-                        }))
-                    }
-                    RExpr::Pur { pur, type_: _ } => {
-                        let tree = pur.0.clone();
-                        Tree::map(tree, |size| {
-                            let size = if let RExpr::Lit {
-                                lit: Lit::IntLit { int_value },
-                                ..
-                            } = size.as_ref()
-                            {
-                                *int_value as usize
-                            } else {
-                                panic!(
-                                    "Expected an integer literal for array index, but got {:?}",
-                                    size
-                                );
-                            };
-                            RHeapValue::ArrayValue {
-                                elements: vec![RExpr::default(array_type); size],
-                                type_: array_type.clone().into(),
-                            }
-                        })
-                    }
-                    _ => panic!(
-                        "Expected an integer literal for array size, but got {:?}",
-                        sizes
-                    ),
-                };
+                let heap_value = create_array_of_size(sizes, array_type, type_);
 
                 state.heap.insert(new_ref, heap_value);
                 return Rc::new(RExpr::Ref {
@@ -2831,10 +2680,69 @@ impl MergeEngine for TreeEngine {
     }
 
     fn is_feasible(&self, _state: &Self::State) -> bool {
-        return true;
+        let mut config = Config::new();
+        config.set_proof_generation(true);
+        let context: Context = Context::new(&config);
+        let mut bmemory = HashMap::new();
+        let mut imemory = HashMap::new();
+        let solver = Solver::new(&context);
+        solver.push();
+
+        let constr = RExpr::expr_to_bool(
+            RExpr::evaluate_binop(
+                BinOp::And,
+                _state.hed_constr.clone(),
+                _state.unq_constr.clone(),
+                RuntimeType::BoolRuntimeType,
+            ),
+            &context,
+            &mut bmemory,
+            &mut imemory,
+        );
+
+        solver.assert(&constr);
+        let result = solver.check();
+
+        solver.pop(1);
+        matches!(result, z3::SatResult::Sat)
     }
-    fn is_valid_for(&self, _state: &Self::State, _expr: Rc<Expression>) -> bool {
-        return true;
+    fn is_valid_for(&self, state: &Self::State, expr: Rc<Expression>) -> bool {
+        /*
+        if let Some(last_frame) = state.stack.last() {
+            for (key, value) in last_frame {
+            println!("Key: {:?}, value: {:?}", key, value.clone().as_string());
+            }
+        } else {
+            println!("Stack is empty");
+        }
+        */
+        let mut config = Config::new();
+        config.set_proof_generation(true);
+        let context: Context = Context::new(&config);
+        let mut bmemory = HashMap::new();
+        let mut imemory = HashMap::new();
+        let solver = Solver::new(&context);
+        solver.push();
+
+        let premise = RExpr::evaluate_binop(
+            BinOp::And,
+            state.hed_constr.clone(),
+            state.unq_constr.clone(),
+            RuntimeType::BoolRuntimeType,
+        );
+        //println!("premise: {:?}", premise.clone().as_string());
+        let premise = RExpr::expr_to_bool(premise, &context, &mut bmemory, &mut imemory);
+
+        let conclusion = self.eval_with(state, expr);
+        //println!("conclusion: {:?}", conclusion.clone().as_string());
+        let conclusion = RExpr::expr_to_bool(conclusion, &context, &mut bmemory, &mut imemory);
+
+        let constraint = premise.implies(&conclusion);
+        let constraint = constraint.not();
+        solver.assert(&constraint);
+        let result = solver.check();
+        solver.pop(1);
+        matches!(result, z3::SatResult::Unsat)
     }
 
     fn add_assumption_to(
@@ -2853,6 +2761,135 @@ impl MergeEngine for TreeEngine {
     }
 }
 
+fn get_elem_from_var(var: Rc<RExpr>, index: Rc<RExpr>, state: &mut TreeState) -> Rc<RExpr> {
+    match index.as_ref() {
+        RExpr::Lit {
+            lit: Lit::IntLit { int_value },
+            type_: _,
+        } => {
+            let index = *int_value as usize;
+            return get_elem_from_var_at(var, index, state);
+        }
+        RExpr::Con {
+            con,
+            left,
+            right,
+            type_: _,
+        } => {
+            let left_tree = get_elem_from_var(var.clone(), left.clone(), state);
+            let right_tree = get_elem_from_var(var.clone(), right.clone(), state);
+            return Rc::new(RExpr::Con {
+                con: con.clone(),
+                left: left_tree,
+                right: right_tree,
+                type_: left.get_type(),
+            });
+        }
+        _ => panic!(
+            "Expected an integer literal for array index, but got {:?}",
+            index
+        ),
+    }
+}
+
+fn get_elem_from_var_at(var: Rc<RExpr>, index: usize, state: &mut TreeState) -> Rc<RExpr> {
+    match var.as_ref() {
+        RExpr::Ref { ptr, type_: _ } => {
+            let heap_value = state.heap.get(ptr).unwrap();
+            let elem = Tree::<Rc<RExpr>, _>::to_cond(heap_value.clone(), |obj| {
+                if let RHeapValue::ArrayValue { elements, type_ } = obj {
+                    if index < elements.len() {
+                        return elements[index].clone();
+                    } else {
+                        panic!(
+                            "Index {} out of bounds for array of size {}",
+                            index,
+                            elements.len()
+                        );
+                    }
+                } else {
+                    panic!("Expected an array value in the heap, but got {:?}", obj);
+                }
+            });
+            return elem;
+        }
+        RExpr::Con {
+            con,
+            left,
+            right,
+            type_: _,
+        } => {
+            let left_tree = get_elem_from_var_at(left.clone(), index, state);
+            let right_tree = get_elem_from_var_at(right.clone(), index, state);
+            return Rc::new(RExpr::Con {
+                con: con.clone(),
+                left: left_tree,
+                right: right_tree,
+                type_: left.get_type(),
+            });
+        }
+        _ => panic!("Expected a reference, but got {:?}", var),
+    }
+}
+
+fn get_field_from_var(var: Rc<RExpr>, clone: Identifier, state: &TreeState) -> Rc<RExpr> {
+    match var.as_ref() {
+        RExpr::Ref { ptr, type_: _ } => {
+            let heap_value = state.heap.get(ptr).unwrap();
+            let field = Tree::<Rc<RExpr>, _>::to_cond(heap_value.clone(), |obj| {
+                if let RHeapValue::ObjectValue { fields, type_ } = obj {
+                    if let Some(value) = fields.get(&clone) {
+                        return value.clone();
+                    } else {
+                        panic!("Field {} not found in object", clone);
+                    }
+                } else {
+                    panic!("Expected an object value in the heap, but got {:?}", obj);
+                }
+            });
+            return field;
+        }
+        _ => panic!("Expected a reference, but got {:?}", var),
+    }
+}
+
+fn create_array_of_size(
+    sizes: Rc<RExpr>,
+    inner: &NonVoidType,
+    outer: &RuntimeType,
+) -> Rc<Tree<Rc<RExpr>, RHeapValue<RExpr>>> {
+    match sizes.as_ref() {
+        RExpr::Lit {
+            lit: Lit::IntLit { int_value },
+            type_: _,
+        } => {
+            let mut elements = vec![RExpr::default(&inner); int_value.clone() as usize];
+            return Rc::new(Tree::Leaf(RHeapValue::ArrayValue {
+                elements,
+                type_: outer.clone(),
+            }));
+        }
+        RExpr::Con {
+            con,
+            left,
+            right,
+            type_,
+        } => {
+            let left_tree = create_array_of_size(left.clone(), inner, outer);
+            let right_tree = create_array_of_size(right.clone(), inner, outer);
+            Rc::new(Tree::Node {
+                con: con.clone(),
+                left: left_tree,
+                right: right_tree,
+            })
+        }
+        _ => panic!(
+            "Expected an integer literal for array size, but got {:?}",
+            sizes
+        ),
+    }
+}
+
 impl<C, T> Tree<C, T> {
     fn map<F, R>(tree: Rc<Self>, f: F) -> Rc<Tree<C, R>>
     where
@@ -2863,11 +2900,13 @@ impl<C, T> Tree<C, T> {
         match tree.as_ref() {
             Tree::Leaf(value) => Rc::new(Tree::Leaf(f(value.clone()))),
             Tree::Node {
-                left: (p, l),
-                right: (q, r),
+                con: p,
+                left: l,
+                right: r,
             } => Rc::new(Tree::Node {
-                left: (p.clone(), Self::map(l.clone(), f.clone())),
-                right: (q.clone(), Self::map(r.clone(), f)),
+                con: p.clone(),
+                left: Self::map(l.clone(), f.clone()),
+                right: Self::map(r.clone(), f),
             }),
         }
     }
@@ -2881,12 +2920,30 @@ impl<C, T> Tree<C, T> {
         match tree.as_ref() {
             Tree::Leaf(value) => f(value.clone()),
             Tree::Node {
-                left: (p, l),
-                right: (q, r),
+                con: p,
+                left: l,
+                right: r,
             } => Rc::new(Tree::Node {
-                left: (p.clone(), Self::flat_map(l.clone(), f.clone())),
-                right: (q.clone(), Self::flat_map(r.clone(), f)),
+                con: p.clone(),
+                left: Self::flat_map(l.clone(), f.clone()),
+                right: Self::flat_map(r.clone(), f),
             }),
+        }
+    }
+
+    fn to_cond(tree: Rc<Tree<Rc<RExpr>, T>>, f: impl Fn(&T) -> Rc<RExpr> + Clone) -> Rc<RExpr> {
+        match tree.as_ref() {
+            Tree::Leaf(value) => return f(value),
+            Tree::Node { con, left, right } => {
+                let left = Self::to_cond(left.clone(), f.clone());
+                let right = Self::to_cond(right.clone(), f);
+                return Rc::new(RExpr::Con {
+                    con: con.clone(),
+                    left: left.clone(),
+                    right: right.clone(),
+                    type_: left.get_type(),
+                });
+            }
         }
     }
 }
