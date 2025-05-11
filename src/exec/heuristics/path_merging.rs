@@ -1,16 +1,10 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use itertools::Either;
+use itertools::{izip, Either};
 use slog::Logger;
 
 use crate::{
-    cfg::CFGStatement,
-    exec::{constants, IdCounter, SymResult},
-    merge::{DynamicPointer, MergeEngine, MergeState, SetEngine, TreeEngine},
-    statistics::Statistics,
-    symbol_table::SymbolTable,
-    typeable::Typeable,
-    Expression, Identifier, Invocation, Lhs, Options, Rhs, RuntimeType, Statement, TypeExpr,
+    cfg::CFGStatement, exec::{constants, IdCounter, SymResult}, merge::{DynamicPointer, MergeEngine, MergeState, SetEngine, TreeEngine}, positioned::WithPosition, statistics::Statistics, symbol_table::SymbolTable, typeable::Typeable, Expression, Identifier, Invocation, Lhs, Options, Rhs, RuntimeType, Statement, TypeExpr
 };
 
 use super::State;
@@ -71,6 +65,7 @@ pub(crate) fn sym_exec(
             _entry_method,
             options,
         );
+
     };
 }
 
@@ -84,7 +79,7 @@ struct MergeInfo {
     dcf_size: usize,
 }
 
-type FTable = HashMap<(Identifier, Identifier, Vec<RuntimeType>), (u64, Vec<Identifier>)>;
+type FTable = HashMap<(Identifier, Identifier, Vec<RuntimeType>), (u64, Vec<Identifier>, Rc<Expression>)>;
 fn run<T>(
     mut engine: T,
     init_state: T::State,
@@ -113,17 +108,52 @@ where
             let method_name = method_name.clone();
             let class = st.get_class(decl_name).unwrap();
 
-            let mut arg_names = vec![];
+            let mut arg_namess = vec![];
+            let mut reqs = vec![];
             for imp in class.members.clone() {
                 if let Some(method) = imp.method() {
                     if method.name.eq(&method_name) {
-                        arg_names = method.params.iter().map(|par| par.name.clone()).collect();
+                        let arg_names = method.params.iter().map(|par| par.name.clone()).collect();
+                        let req = if let Some((l,r)) = method.requires().clone(){
+                            if let Some(t) = r{
+                                let t = match t{
+                                    TypeExpr::InstanceOf { var, rhs, info } 
+                                        => Rc::new(Expression::TypeExpr {
+                                            texpr: TypeExpr::InstanceOf {
+                                                var: var.clone(),
+                                                rhs: rhs.clone(),
+                                                info: info.clone(),
+                                            },
+                                        }),
+                                    TypeExpr::NotInstanceOf { var, rhs, info } 
+                                        => Rc::new(Expression::TypeExpr {
+                                            texpr: TypeExpr::NotInstanceOf {
+                                                var: var.clone(),
+                                                rhs: rhs.clone(),
+                                                info: info.clone(),
+                                            },
+                                        }),
+                                };
+                                Expression::and(l.clone(), t)
+                            }
+                            else{
+                                l.clone()
+                            }
+                        }
+                        else{
+                            Rc::new(Expression::TRUE)
+                        };
+                        arg_namess.push(arg_names);
+                        reqs.push(req);
                     }
                 }
             }
 
             let key = (decl_name.clone(), method_name, argument_types.clone());
-            function_entry_map.insert(key, (entry.clone(), arg_names));
+            for (arg_names, req) in izip!(arg_namess, reqs) {
+                let entry = (entry.clone(), arg_names, req);
+                function_entry_map.insert(key.clone(), entry);
+            }
         }
     }
     // states that are actively progressing
@@ -134,6 +164,7 @@ where
 
     while let Some((mut current, current_status)) = paths.pop() {
         if current.path_length() > options.k {
+
             if let Some(merge_info) = m_at_s_at.pop() {
                 //merge info present, so our sibling must be one
                 //behind us and our parent two behind us
@@ -176,7 +207,7 @@ where
 
         // we have reached our join point
         if let Some(MergeInfo { merge_at, dcf_size }) = m_at_s_at.pop() {
-            if stmt_id == merge_at {
+            if stmt_id == merge_at && current.get_dynamic_cf_size() == dcf_size {
                 let (sibling, sib_status) = paths.pop().unwrap();
                 if let Status::Active() = sib_status {
                     // our sibling still needs to do stuff, so we let push it to the top of the stack
@@ -200,7 +231,8 @@ where
             }
         }
 
-        match program.get(&stmt_id) {
+        let stmt = program.get(&stmt_id);
+        match stmt {
             None => panic!("malformed graph"),
             Some(statatement) => {
                 match statatement {
@@ -221,6 +253,7 @@ where
                                     .get(&current.get_pointer())
                                     .unwrap_or_else(|| panic!("malformed graph"));
                                 assert_eq!(nexts.len(), 1);
+                                
 
                                 let mut constraints_target_pairs = get_possible_function_heads(
                                     &invocation,
@@ -246,7 +279,7 @@ where
                                     &mut constraints_target_pairs,
                                     &mut paths,
                                     &mut m_at_s_at,
-                                    None,
+                                    Some(lhs.clone()),
                                     next,
                                 );
                             } else {
@@ -323,9 +356,10 @@ where
                             let mut next: u64 = 0;
                             let mut still_searching = true;
                             while let Some(control) = current.pop_dynamic_cf() {
-                                if let DynamicPointer::Whl(head, _) = control {
+                                if let DynamicPointer::Whl(head, then) = control {
                                     still_searching = false;
                                     next = head;
+                                    current.push_dynamic_cf(DynamicPointer::Whl(head, then));
                                     break;
                                 }
                             }
@@ -376,7 +410,11 @@ where
                             }
 
                             if still_searching {
-                                panic!("broken control flow in return statement");
+                                //guess we're at the end of it all :relieved:
+                                //its possible there are still other states that have split
+                                //but would never merge
+                                //so we wait for now :relieved:
+                                continue;
                             }
 
                             current.set_pointer(return_pointer);
@@ -482,26 +520,60 @@ where
                         ),
                     },
 
-                    CFGStatement::Ite(_, _, _, join) => {
+                    CFGStatement::Ite(cond, _, _, join) => {
+                        let cond = cond.clone().either(|s| s, |t| Rc::new(Expression::TypeExpr { texpr: t }));
                         let (mut then_child, mut else_child) =
-                            engine.split_on(&mut current, Rc::new(Expression::TRUE));
+                            engine.split_on(&mut current, cond);
 
                         if let [left, right] = flows.get(&stmt_id).unwrap().as_slice() {
                             //its possible the two branches don't have a join
-                            //a possibility conjured by a twisted mind for sure
-                            //we ignore this for now
-                            let join = join.unwrap();
-
+                            if let Some(join) = join{
+                                m_at_s_at.push(MergeInfo {
+                                    merge_at: join.clone(),
+                                    dcf_size: current.get_dynamic_cf_size(),
+                                });
+                            }
+                            else{
+                                //not always wrong
+                                //possible we have something like this:
+                                // fn f() {
+                                //     if (true) { foo ()}
+                                //     else { bar ()}
+                                // }
+                                // were the two branches are not joined
+                                match current.pop_dynamic_cf() {
+                                    Some(DynamicPointer::Ret(return_i, return_value)) => {
+                                        m_at_s_at.push(MergeInfo {
+                                            merge_at: return_i,
+                                            dcf_size: current.get_dynamic_cf_size(),
+                                        });
+                                        current.push_dynamic_cf(DynamicPointer::Ret(return_i, return_value));
+                                    }
+                                    Some(DynamicPointer::Whl(whl, next)) => {
+                                        m_at_s_at.push(MergeInfo {
+                                            merge_at: next,
+                                            dcf_size: current.get_dynamic_cf_size(),
+                                        });
+                                        current.push_dynamic_cf(DynamicPointer::Whl(whl, next));
+                                    }
+                                    Some(DynamicPointer::Thr(try_catch, next)) => {
+                                        m_at_s_at.push(MergeInfo {
+                                            merge_at: next,
+                                            dcf_size: current.get_dynamic_cf_size(),
+                                        });
+                                        current.push_dynamic_cf(DynamicPointer::Thr(try_catch, next));
+                                    }
+                                    None => {
+                                        //no dynamic control flow, so we don't need to do anything
+                                        //these two branches while finish seperately, can only happen if we branch
+                                        //at the start of main()
+                                    }
+                                }
+                            };
                             then_child.set_pointer(*left);
-
                             else_child.set_pointer(*right);
 
-                            m_at_s_at.push(MergeInfo {
-                                merge_at: join,
-                                dcf_size: current.get_dynamic_cf_size(),
-                            });
                             paths.push((current, Status::Waiting()));
-
                             paths.push((else_child, Status::Active()));
                             paths.push((then_child, Status::Active()));
                         } else {
@@ -583,12 +655,41 @@ where
                         paths.push((current, Status::Active()));
                     }
                     CFGStatement::FunctionEntry {
-                        decl_name: _,
-                        method_name: _,
-                        argument_types: _,
+                        decl_name,
+                        method_name,
+                        argument_types,
                     } => {
-                        set_to_next_pc(&mut current, flows);
-                        paths.push((current, Status::Active()));
+                        let k = (decl_name.clone(), method_name.clone(), argument_types.clone());
+                        let (_,_,req) = function_entry_map.get(&k).unwrap();
+                        if current.path_length() == 1 {
+                            //we're at the start of the function, so we need to add our assumptions
+                            engine.add_assumption_to(&mut current, Either::Left(req.clone()));
+                            if engine.is_feasible(&mut current) {
+                                set_to_next_pc(&mut current, flows);
+                                paths.push((current, current_status));
+                                continue;
+                            }
+
+                            if let Some(_) = m_at_s_at.pop() {
+                                //merge info present, so our sibling must be one
+                                //behind us and our parent two behind us
+                                let (sibling, _) = paths.pop().unwrap();
+                                let (mut parent, _) = paths.pop().unwrap();
+
+                                parent.merge_part(sibling);
+                                paths.push((parent, Status::Active()));
+                            }
+
+                        }
+                        else{
+                            //its not an assumption, its a requirement... 
+                            if engine.is_valid_for(&mut current, req.clone()) {
+                                set_to_next_pc(&mut current, flows);
+                                paths.push((current, current_status));
+                                continue;
+                            }
+                            return SymResult::Invalid(req.get_position());
+                        }
                     }
                     CFGStatement::FunctionExit {
                         decl_name: _,
@@ -602,13 +703,22 @@ where
                         match next {
                             None => {
                                 //guess we're at the end of it all :relieved:
-                                return SymResult::Valid;
+                                //its possible there are still other states that have split
+                                //but would never merge
+                                //so we wait for now :relieved:
                             }
                             Some(DynamicPointer::Ret(return_i, None)) => {
                                 current.set_pointer(return_i);
                                 paths.push((current, Status::Active()));
                             }
-                            _ => panic!("strange end of function state"),
+                            Some(dyn_) =>{ 
+                                println!("unexpected dynamic control flow: {:?}", dyn_);
+                                while let Some(dyn_) = current.pop_dynamic_cf(){
+                                    println!("and: {:?}", dyn_);
+
+                                }
+                                panic!("unexpected dynamic control flow")
+                            },
                         }
                     }
                 }
@@ -635,8 +745,11 @@ fn insert_states_function_call<T>(
     if constraints_target_pairs.len() <= 0 {
         panic!("no function entry points found")
     }
+    
 
     let mut head = current;
+    let mut must_push = true;
+
     while let Some((expr, (entry, args))) = constraints_target_pairs.pop() {
         if constraints_target_pairs.len() > 0 {
             merges.push(MergeInfo {
@@ -644,7 +757,13 @@ fn insert_states_function_call<T>(
                 dcf_size: head.get_dynamic_cf_size(),
             });
 
-            let (mut left, right) = engine.split_on(&mut head, expr);
+            let (mut left, mut right) = engine.split_on(&mut head, expr);
+            
+            if must_push {
+                left.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
+                right.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
+                must_push = false;
+            }
 
             for (arg, (type_, val)) in args.iter().zip(values.iter()) {
                 engine.assign_evaled(
@@ -659,7 +778,6 @@ fn insert_states_function_call<T>(
             }
             left.set_pointer(entry);
 
-            left.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
             paths.push((head, Status::Waiting()));
             paths.push((left, Status::Active()));
             head = right;
@@ -678,8 +796,13 @@ fn insert_states_function_call<T>(
                     val.clone(),
                 );
             }
+
+            if must_push {
+                head.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
+                must_push = false;
+            }
+
             head.set_pointer(entry);
-            head.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
             paths.push((head, Status::Active()));
             break;
         }
@@ -712,7 +835,7 @@ fn get_possible_function_heads(
                         .get(&(c.name().clone(), m.name.clone(), arg_types.clone()))
                         .unwrap()
                         .clone();
-                    res.push((Rc::new(Expression::TRUE), ptr));
+                    res.push((Rc::new(Expression::TRUE), (ptr.0, ptr.1)));
                 } else {
                     for (_i, (c, m)) in resolved.iter() {
                         let cond = Rc::new(Expression::TypeExpr {
@@ -729,7 +852,7 @@ fn get_possible_function_heads(
                             .get(&(c.name().clone(), m.name.clone(), arg_types.clone()))
                             .unwrap()
                             .clone();
-                        res.push((cond, ptr));
+                        res.push((cond, (ptr.0, ptr.1)));
                     }
                 }
             } else {
@@ -747,7 +870,7 @@ fn get_possible_function_heads(
                         },
                     });
                     let ptr = funmap.get(key).unwrap().clone();
-                    res.push((cond, ptr));
+                    res.push((cond, (ptr.0, ptr.1)));
                 }
             }
             return res;
@@ -784,7 +907,7 @@ fn get_possible_function_heads(
                 .get(&(class_name, m.name.clone(), arg_types.clone()))
                 .unwrap()
                 .clone();
-            return vec![(cond, ptr)];
+            return vec![(cond, (ptr.0, ptr.1))];
         }
         Invocation::InvokeSuperConstructor {
             arguments: _,

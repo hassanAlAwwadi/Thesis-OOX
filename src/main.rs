@@ -103,17 +103,24 @@ enum Commands {
 }
 
 fn main() -> Result<(), String> {
+    
     if let Some((class_name, method_name)) = Some(("Main", "main")) {
-        let quiet = false;
+        let quiet = true;
         let heuristic = Heuristic::PathMerging;
         let visualize_heuristic = false;
         let visualize_coverage = false;
         let time_budget = 900;
         let symbolic_array_size = 100;
+        
+        //let source_paths = vec!["examples/psv/fib.oox"];
         let source_paths = vec!["benchmark_programs/experiment_m/0.oox"];
-        for i in 1..16 {
+
+        println!("results:");
+        println!("k, rawresult, rawspeed, treeresult, treespeed, setresult, setspeed");
+ 
+        for i in 1..41 {
             let options = Options {
-                k: 10,
+                k: i*10,
                 quiet,
                 with_exceptional_clauses: true,
                 heuristic,
@@ -128,17 +135,9 @@ fn main() -> Result<(), String> {
             };
             let (raw_r, tree_r, set_r, _, raw_d, tree_d, set_d) =
                 verify(&source_paths, class_name, method_name, options.clone())?;
+            println!("{:?}, {:?}, {:?}, {:?}, {:?}, {:?}, {:?}", i*10, raw_r, raw_d.as_millis(), tree_r, tree_d.as_millis(), set_r, set_d.as_millis());
 
-            println!("k: {}", i * 10);
-            println!("unmerged   result: {:?}", raw_r);
-            println!("unmerged   time: {:?}", raw_d);
-            println!("merged     result: {:?}", tree_r);
-            println!("merged     time: {:?}", tree_d);
-            println!("abstracted result: {:?}", set_r);
-            println!("abstracted time: {:?}", set_d);
-            println!("-------------------------------------");
         }
-        println!("-------------------------------------");
 
         /*
         let result_text = result_text(sym_result_1, source_paths);

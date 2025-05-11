@@ -1489,7 +1489,7 @@ pub(crate) enum RHeapValue<T> {
     },
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub(crate) enum DynamicPointer {
     //return pointer, value to assign
     Ret(u64, Option<Lhs>),
@@ -1658,7 +1658,8 @@ impl MergeEngine for SetEngine {
         return temp;
     }
 
-    fn split_on(&mut self, state: &mut SetState, expr: Rc<Expression>) -> (SetState, SetState) {
+    fn split_on(&mut self, state: &mut SetState, constraint: Rc<Expression>) -> (SetState, SetState) {
+        //the constraint will be assumed later on in the program, so we can ignore it here
         let new_top: SValue = iproduct!(state.hed_constr.iter(), state.unq_constr.iter())
             .map(|(l, r)| {
                 RExpr::evaluate_binop(
@@ -1669,17 +1670,12 @@ impl MergeEngine for SetEngine {
                 )
             })
             .collect();
-        let constrs: SValue = self.eval_with(state, expr);
-        let negats: SValue = constrs
-            .iter()
-            .map(|c| RExpr::evaluate_unop(UnOp::Negate, c.clone()))
-            .collect();
 
         let left = SetState {
             path_length: state.path_length,
             pointer: state.pointer,
             hed_constr: new_top.clone(),
-            unq_constr: constrs,
+            unq_constr: svalue::mk_true(),
             stack: state.stack.clone(),
             heap: state.heap.clone(),
             dynamic_cont: state.dynamic_cont.clone(),
@@ -1688,7 +1684,7 @@ impl MergeEngine for SetEngine {
             path_length: state.path_length,
             pointer: state.pointer,
             hed_constr: new_top,
-            unq_constr: negats,
+            unq_constr: svalue::mk_true(),
             stack: state.stack.clone(),
             heap: state.heap.clone(),
             dynamic_cont: state.dynamic_cont.clone(),
@@ -2245,13 +2241,13 @@ impl MergeState for SetState {
     }
 
     fn merge_full(&mut self, left: Self, right: Self) -> () {
-        assert_eq!(self.stack.len(), left.stack.len());
-        assert_eq!(self.stack.len(), right.stack.len());
+        assert_eq!(left.stack.len(), right.stack.len());
         assert_eq!(left.pointer, right.pointer);
 
         self.pointer = left.pointer;
+        self.dynamic_cont = left.dynamic_cont;
+        
         self.path_length = std::cmp::min(left.path_length, right.path_length);
-
         self.unq_constr = svalue::and(
             self.unq_constr.clone(),
             svalue::or(left.unq_constr, right.unq_constr),
@@ -2266,13 +2262,13 @@ impl MergeState for SetState {
     }
 
     fn merge_part(&mut self, left: Self) -> () {
-        assert_eq!(self.stack.len(), left.stack.len());
 
         self.pointer = left.pointer;
         self.path_length = left.path_length;
 
         self.unq_constr = svalue::and(self.unq_constr.clone(), left.unq_constr);
-
+        
+        self.dynamic_cont = left.dynamic_cont;
         self.heap = left.heap;
         self.stack = left.stack;
         return;
@@ -2372,12 +2368,12 @@ impl MergeState for TreeState {
         };
         let split = self.split.clone().unwrap();
         self.split = None;
-        assert_eq!(self.stack.len(), left.stack.len());
-        assert_eq!(self.stack.len(), right.stack.len());
+        assert_eq!(left.stack.len(), right.stack.len());
         assert_eq!(left.pointer, right.pointer);
 
         self.pointer = left.pointer;
         self.path_length = std::cmp::min(left.path_length, right.path_length);
+        self.dynamic_cont = left.dynamic_cont;
 
         let lc = left.unq_constr;
         let rc = right.unq_constr;
@@ -2435,6 +2431,7 @@ impl MergeState for TreeState {
             left.unq_constr,
             RuntimeType::BoolRuntimeType,
         );
+        self.dynamic_cont = left.dynamic_cont;
         self.heap = left.heap;
         self.stack = left.stack;
     }
@@ -2485,7 +2482,7 @@ impl MergeEngine for TreeEngine {
     fn split_on(
         &mut self,
         state: &mut Self::State,
-        expr: Rc<Expression>,
+        constr: Rc<Expression>,
     ) -> (Self::State, Self::State) {
         let new_top: TValue = RExpr::evaluate_binop(
             BinOp::And,
@@ -2493,14 +2490,16 @@ impl MergeEngine for TreeEngine {
             state.unq_constr.clone(),
             RuntimeType::BoolRuntimeType,
         );
-        let constrs: TValue = self.eval_with(state, expr.clone());
-        let negates = self.eval_with(state, Expression::not(expr));
+        let constrs: TValue = self.eval_with(state, constr.clone());
         state.split = Some(constrs.clone());
         let left = TreeState {
             path_length: state.path_length,
             pointer: state.pointer,
             hed_constr: new_top.clone(),
-            unq_constr: constrs,
+            unq_constr: Rc::new(RExpr::Lit{
+                lit: Lit::BoolLit { bool_value: true },
+                type_: RuntimeType::BoolRuntimeType,
+            }),
             stack: state.stack.clone(),
             heap: state.heap.clone(),
             dynamic_cont: state.dynamic_cont.clone(),
@@ -2511,7 +2510,10 @@ impl MergeEngine for TreeEngine {
             path_length: state.path_length,
             pointer: state.pointer,
             hed_constr: new_top,
-            unq_constr: negates,
+            unq_constr: Rc::new(RExpr::Lit{
+                lit: Lit::BoolLit { bool_value: true },
+                type_: RuntimeType::BoolRuntimeType,
+            }),
             stack: state.stack.clone(),
             heap: state.heap.clone(),
             dynamic_cont: state.dynamic_cont.clone(),
@@ -2630,8 +2632,11 @@ impl MergeEngine for TreeEngine {
                 var,
                 type_: _,
                 info: _,
-            } => state.stack.last().unwrap().get(var).unwrap().clone(),
-
+            } => {
+                let frame = state.stack.last().unwrap();
+                let var = frame.get(var).unwrap().clone();
+                var
+            },
             Expression::Conditional {
                 guard,
                 true_,

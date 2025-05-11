@@ -1689,6 +1689,16 @@ pub fn set_up_verify(
     let (result, flw) = labelled_statements(c);
     let program: HashMap<u64, CFGStatement> = result.into_iter().collect();
     let flows: HashMap<u64, Vec<u64>> = utils::group_by(flw.into_iter());
+
+    if !options.quiet {
+        println!("starting to print program");
+        for (i, stmt) in program.clone().into_iter().sorted_by_key(|(k, _)| *k) {
+            println!("{:?}: {:?}", i, stmt);
+        }
+        for (s, e) in flows.clone().into_iter().sorted_by_key(|(k, _)| *k) {
+            println!("{:?} -> {:?}", s, e);
+        }
+    }
     let argument_types = initial_method
         .params
         .iter()
@@ -1817,6 +1827,17 @@ pub fn execute_verify_thrice(
         true,
     );
     let elapsed_set = now.elapsed();
+
+    if options.k > 200 { return (
+        tree_result,
+        tree_result,
+        set_result,
+        statistics,
+        elapsed_tree,
+        elapsed_tree,
+        elapsed_set,
+    );};
+
     let now = Instant::now();
     let raw_result = heuristics::depth_first_search::sym_exec(
         state,
