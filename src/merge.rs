@@ -3,6 +3,9 @@ use itertools::Either;
 use itertools::iproduct;
 use ordered_float::NotNan;
 use utils::utils::{hash_unit, union, union_with};
+use z3::ast::Array;
+use z3::ast::Datatype;
+use z3::Sort;
 
 use crate::typeable::Typeable;
 
@@ -37,35 +40,47 @@ pub(crate) enum TyOp {
 // or quantifiers, which are unhandled for now
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Debug)]
 pub(crate) enum RExpr {
+    //literal
     Lit {
         lit: Lit,
         type_: RuntimeType,
     },
+    //symbolic literal
     Sym {
         id: Identifier,
         type_: RuntimeType,
     },
+    //symbolic reference
+    SRf {
+        ptr: i64,
+        type_: RuntimeType,
+    },
+    //reference to a variable
     Ref {
         ptr: i64,
         type_: RuntimeType,
     },
+    //binary operation
     Bin {
         op: BinOp,
         left: Rc<RExpr>,
         right: Rc<RExpr>,
         type_: RuntimeType,
     },
+    //type operation
     Typ {
         op: TyOp,
         val: Rc<RExpr>,
         of: RuntimeType,
         type_: RuntimeType,
     },
+    //unary operation
     Uno {
         op: UnOp,
         val: Rc<RExpr>,
         type_: RuntimeType,
     },
+    //constructor
     Con {
         con: Rc<RExpr>,
         left: Rc<RExpr>,
@@ -78,6 +93,7 @@ impl RExpr {
         match self {
             RExpr::Lit { type_, .. } => type_.clone(),
             RExpr::Sym { type_, .. } => type_.clone(),
+            RExpr::SRf { type_, .. } => type_.clone(),
             RExpr::Ref { type_, .. } => type_.clone(),
             RExpr::Bin { type_, .. } => type_.clone(),
             RExpr::Typ { type_, .. } => type_.clone(),
@@ -188,14 +204,6 @@ impl RExpr {
                 lit: BoolLit { bool_value: true },
                 type_: BoolRuntimeType,
             }),
-            (
-                Implies,
-                Lit {
-                    lit: BoolLit { bool_value: true },
-                    ..
-                },
-                _,
-            ) => rhs,
             (
                 Implies,
                 _,
@@ -932,278 +940,6 @@ impl RExpr {
         }
     }
 
-    fn expr_to_bool<'a>(
-        expr: Rc<Self>,
-        context: &'a Context,
-        bmemory: &mut HashMap<Identifier, Bool<'a>>,
-        imemory: &mut HashMap<Identifier, Int<'a>>,
-    ) -> Bool<'a> {
-        match expr.as_ref() {
-            RExpr::Lit { lit, type_: _ } => match lit {
-                Lit::BoolLit { bool_value } => Bool::from_bool(context, *bool_value),
-                _ => panic!("Expected a boolean literal, but got {:?}", lit),
-            },
-            RExpr::Sym { id, type_ } => {
-                if let Some(ast) = bmemory.get(id) {
-                    return ast.clone();
-                } else {
-                    let ast = match type_ {
-                        RuntimeType::BoolRuntimeType => Bool::new_const(&context, id.as_str()),
-                        _ => panic!("Expected a boolean type, but got {:?}", type_),
-                    };
-                    bmemory.insert(id.clone(), ast.clone());
-                    return ast;
-                }
-            }
-            RExpr::Ref { ptr: _, type_: _ } => unreachable!("this one really should not be here"),
-            RExpr::Bin {
-                op,
-                left,
-                right,
-                type_: _,
-            } => match op {
-                BinOp::Implies => {
-                    let left = Self::expr_to_bool(left.clone(), context, bmemory, imemory);
-                    let right = Self::expr_to_bool(right.clone(), context, bmemory, imemory);
-                    return Bool::implies(&left, &right);
-                }
-                BinOp::And => {
-                    let left = Self::expr_to_bool(left.clone(), context, bmemory, imemory);
-                    let right = Self::expr_to_bool(right.clone(), context, bmemory, imemory);
-                    return Bool::and(context, &[&left, &right]);
-                }
-                BinOp::Or => {
-                    let left = Self::expr_to_bool(left.clone(), context, bmemory, imemory);
-                    let right = Self::expr_to_bool(right.clone(), context, bmemory, imemory);
-                    return Bool::or(context, &[&left, &right]);
-                }
-                BinOp::Equal => {
-                    let ltype = left.get_type();
-                    let rtype = right.get_type();
-                    assert!(ltype == rtype, "Expected the same type for both sides of the equality, but got {:?} and {:?}", ltype, rtype);
-                    match ltype {
-                        RuntimeType::BoolRuntimeType => {
-                            let left = Self::expr_to_bool(left.clone(), context, bmemory, imemory);
-                            let right =
-                                Self::expr_to_bool(right.clone(), context, bmemory, imemory);
-                            return left._eq(&right);
-                        }
-                        RuntimeType::IntRuntimeType => {
-                            let left = Self::expr_to_int(left.clone(), context, bmemory, imemory);
-                            let right = Self::expr_to_int(right.clone(), context, bmemory, imemory);
-                            return left._eq(&right);
-                        }
-                        _ => panic!(
-                            "Expected a boolean or integer type for equality, but got {:?}",
-                            ltype
-                        ),
-                    }
-                }
-                BinOp::NotEqual => {
-                    let ltype = left.get_type();
-                    let rtype = right.get_type();
-                    assert!(ltype == rtype, "Expected the same type for both sides of the equality, but got {:?} and {:?}", ltype, rtype);
-                    match ltype {
-                        RuntimeType::BoolRuntimeType => {
-                            let left = Self::expr_to_bool(left.clone(), context, bmemory, imemory);
-                            let right =
-                                Self::expr_to_bool(right.clone(), context, bmemory, imemory);
-                            return left._eq(&right).not();
-                        }
-                        RuntimeType::IntRuntimeType => {
-                            let left = Self::expr_to_int(left.clone(), context, bmemory, imemory);
-                            let right = Self::expr_to_int(right.clone(), context, bmemory, imemory);
-                            return left._eq(&right).not();
-                        }
-                        _ => panic!(
-                            "Expected a boolean or integer type for equality, but got {:?}",
-                            ltype
-                        ),
-                    }
-                }
-                BinOp::LessThan => {
-                    let ltype = left.get_type();
-                    let rtype = right.get_type();
-                    assert!(ltype == rtype, "Expected the same type for both sides of the equality, but got {:?} and {:?}", ltype, rtype);
-                    match ltype {
-                        RuntimeType::IntRuntimeType => {
-                            let left: Int<'_> =
-                                Self::expr_to_int(left.clone(), context, bmemory, imemory);
-                            let right: Int<'_> =
-                                Self::expr_to_int(right.clone(), context, bmemory, imemory);
-                            return left.lt(&right);
-                        }
-                        _ => panic!("Expected a integer type for lt, but got {:?}", ltype),
-                    }
-                }
-                BinOp::LessThanEqual => {
-                    let ltype = left.get_type();
-                    let rtype = right.get_type();
-                    assert!(ltype == rtype, "Expected the same type for both sides of the equality, but got {:?} and {:?}", ltype, rtype);
-                    match ltype {
-                        RuntimeType::IntRuntimeType => {
-                            let left: Int<'_> =
-                                Self::expr_to_int(left.clone(), context, bmemory, imemory);
-                            let right: Int<'_> =
-                                Self::expr_to_int(right.clone(), context, bmemory, imemory);
-                            return left.le(&right);
-                        }
-                        _ => panic!("Expected a integer type for lt, but got {:?}", ltype),
-                    }
-                }
-                BinOp::GreaterThan => {
-                    let ltype = left.get_type();
-                    let rtype = right.get_type();
-                    assert!(ltype == rtype, "Expected the same type for both sides of the equality, but got {:?} and {:?}", ltype, rtype);
-                    match ltype {
-                        RuntimeType::IntRuntimeType => {
-                            let left: Int<'_> =
-                                Self::expr_to_int(left.clone(), context, bmemory, imemory);
-                            let right: Int<'_> =
-                                Self::expr_to_int(right.clone(), context, bmemory, imemory);
-                            return left.gt(&right);
-                        }
-                        _ => panic!("Expected a integer type for lt, but got {:?}", ltype),
-                    }
-                }
-                BinOp::GreaterThanEqual => {
-                    let ltype = left.get_type();
-                    let rtype = right.get_type();
-                    assert!(ltype == rtype, "Expected the same type for both sides of the equality, but got {:?} and {:?}", ltype, rtype);
-                    match ltype {
-                        RuntimeType::IntRuntimeType => {
-                            let left: Int<'_> =
-                                Self::expr_to_int(left.clone(), context, bmemory, imemory);
-                            let right: Int<'_> =
-                                Self::expr_to_int(right.clone(), context, bmemory, imemory);
-                            return left.ge(&right);
-                        }
-                        _ => panic!("Expected a integer type for lt, but got {:?}", ltype),
-                    }
-                }
-                _ => panic!("Expected a boolean binop, but got {:?}", op),
-            },
-            RExpr::Typ {
-                op,
-                val,
-                of,
-                type_: _,
-            } => {
-                let _type = val.get_type();
-                match op {
-                    TyOp::IsInstanceOf => {
-                        return Bool::from_bool(context, _type == *of);
-                    }
-                    TyOp::IsNotInstanceOf => {
-                        return Bool::from_bool(context, _type != *of);
-                    }
-                }
-            }
-            RExpr::Uno { op, val, type_: _ } => match op {
-                UnOp::Negate => {
-                    let val = Self::expr_to_bool(val.clone(), context, bmemory, imemory);
-                    return val.not();
-                }
-                UnOp::Negative => panic!("expected a negate, but got a negative of number"),
-            },
-            RExpr::Con {
-                con,
-                left,
-                right,
-                type_: _,
-            } => {
-                let cond = Self::expr_to_bool(con.clone(), context, bmemory, imemory);
-                let left = Self::expr_to_bool(left.clone(), context, bmemory, imemory);
-                let right = Self::expr_to_bool(right.clone(), context, bmemory, imemory);
-                return cond.ite(&left, &right);
-            }
-        }
-    }
-
-    fn expr_to_int<'a>(
-        clone: Rc<RExpr>,
-        context: &'a Context,
-        bmemory: &mut HashMap<Identifier, Bool<'a>>,
-        imemory: &mut HashMap<Identifier, Int<'a>>,
-    ) -> Int<'a> {
-        match clone.as_ref() {
-            RExpr::Lit { lit, type_: _ } => match lit {
-                Lit::IntLit { int_value } => Int::from_i64(context, *int_value),
-                _ => panic!("Expected an integer literal, but got {:?}", lit),
-            },
-            RExpr::Sym { id, type_ } => {
-                if let Some(ast) = imemory.get(id) {
-                    return ast.clone();
-                } else {
-                    let ast = match type_ {
-                        RuntimeType::IntRuntimeType => Int::new_const(&context, id.as_str()),
-                        _ => panic!("Expected a integer  type, but got {:?}", type_),
-                    };
-                    imemory.insert(id.clone(), ast.clone());
-                    return ast;
-                }
-            }
-            RExpr::Ref { ptr: _, type_: _ } => unreachable!("this one really should not be here"),
-            RExpr::Bin {
-                op,
-                left,
-                right,
-                type_: _,
-            } => match op {
-                BinOp::Plus => {
-                    let left = Self::expr_to_int(left.clone(), context, bmemory, imemory);
-                    let right = Self::expr_to_int(right.clone(), context, bmemory, imemory);
-                    return left + right;
-                }
-                BinOp::Minus => {
-                    let left = Self::expr_to_int(left.clone(), context, bmemory, imemory);
-                    let right = Self::expr_to_int(right.clone(), context, bmemory, imemory);
-                    return left - right;
-                }
-                BinOp::Multiply => {
-                    let left = Self::expr_to_int(left.clone(), context, bmemory, imemory);
-                    let right = Self::expr_to_int(right.clone(), context, bmemory, imemory);
-                    return left * right;
-                }
-                BinOp::Divide => {
-                    let left = Self::expr_to_int(left.clone(), context, bmemory, imemory);
-                    let right = Self::expr_to_int(right.clone(), context, bmemory, imemory);
-                    return left / right;
-                }
-                BinOp::Modulo => {
-                    let left = Self::expr_to_int(left.clone(), context, bmemory, imemory);
-                    let right = Self::expr_to_int(right.clone(), context, bmemory, imemory);
-                    return left.modulo(&right);
-                }
-                _ => panic!("Expected a integer binop, but got {:?}", op),
-            },
-            RExpr::Typ {
-                op: _,
-                val: _,
-                of: _,
-                type_: _,
-            } => panic!("this one should not be here"),
-            RExpr::Uno { op, val, type_: _ } => match op {
-                UnOp::Negate => panic!("expected a negative, but got a negate of bool"),
-                UnOp::Negative => {
-                    let val = Self::expr_to_int(val.clone(), context, bmemory, imemory);
-                    return Int::from_i64(context, 0) - val;
-                }
-            },
-            RExpr::Con {
-                con,
-                left,
-                right,
-                type_: _,
-            } => {
-                let cond = Self::expr_to_bool(con.clone(), context, bmemory, imemory);
-                let left = Self::expr_to_int(left.clone(), context, bmemory, imemory);
-                let right = Self::expr_to_int(right.clone(), context, bmemory, imemory);
-                return cond.ite(&left, &right);
-            }
-        }
-    }
-
     fn as_string(self: Rc<Self>) -> String {
         match self.as_ref() {
             RExpr::Lit { lit, type_: _ } => match lit {
@@ -1219,7 +955,10 @@ impl RExpr {
                 format!("${}", id)
             }
             RExpr::Ref { ptr, type_: _ } => {
-                format!("${}", ptr)
+                format!("&{}", ptr)
+            }
+            RExpr::SRf { ptr, type_: _ } => {
+                format!("$&{}", ptr)
             }
             RExpr::Bin {
                 op,
@@ -1356,6 +1095,387 @@ impl RExpr {
     }
 }
 
+struct Z3Builder<'a, F, G> {
+    bmemory: HashMap<Identifier, Bool<'a>>,
+    imemory: HashMap<Identifier, Int<'a>>,
+    amemory: HashMap<i64, Array<'a>>,
+    rmemory: HashMap<i64, Datatype<'a>>,
+    get_arr: F,
+    get_ref: G,
+}
+
+impl<'a, F, G> Z3Builder<'a, F, G> {
+    fn new(f: F, g: G) -> Self {
+        Z3Builder {
+            bmemory: HashMap::new(),
+            imemory: HashMap::new(),
+            amemory: HashMap::new(),
+            rmemory: HashMap::new(),
+            get_arr: f,
+            get_ref: g,
+        }
+    }
+    fn expr_to_bool(self: &mut Self, expr: Rc<RExpr>, context: &'a Context) -> Bool<'a>
+    where
+        F: Clone + Fn(&i64, &'a Context) -> Array<'a>,
+        G: Clone + Fn(&i64, &'a Context) -> Datatype<'a>,
+    {
+        match expr.as_ref() {
+            RExpr::Lit { lit, type_: _ } => match lit {
+                Lit::BoolLit { bool_value } => Bool::from_bool(context, *bool_value),
+                _ => panic!("Expected a boolean literal, but got {:?}", lit),
+            },
+            RExpr::Sym { id, type_ } => {
+                if let Some(ast) = self.bmemory.get(id) {
+                    return ast.clone();
+                } else {
+                    let ast = match type_ {
+                        RuntimeType::BoolRuntimeType => Bool::new_const(&context, id.as_str()),
+                        _ => panic!("Expected a boolean type, but got {:?}", type_),
+                    };
+                    self.bmemory.insert(id.clone(), ast.clone());
+                    return ast;
+                }
+            }
+            RExpr::Ref { ptr: _, type_: _ } => unreachable!("this one really should not be here"),
+            RExpr::SRf { ptr: _, type_: _ } => unreachable!("this one really should not be here"),
+            RExpr::Bin {
+                op,
+                left,
+                right,
+                type_: _,
+            } => match op {
+                BinOp::Implies => {
+                    let left = self.expr_to_bool(left.clone(), context);
+                    let right = self.expr_to_bool(right.clone(), context);
+                    return Bool::implies(&left, &right);
+                }
+                BinOp::And => {
+                    let left = self.expr_to_bool(left.clone(), context);
+                    let right = self.expr_to_bool(right.clone(), context);
+                    return Bool::and(context, &[&left, &right]);
+                }
+                BinOp::Or => {
+                    let left = self.expr_to_bool(left.clone(), context);
+                    let right = self.expr_to_bool(right.clone(), context);
+                    return Bool::or(context, &[&left, &right]);
+                }
+                BinOp::Equal => {
+                    let ltype = left.get_type();
+                    let rtype = right.get_type();
+                    assert!(ltype == rtype, "Expected the same type for both sides of the equality, but got {:?} and {:?}", ltype, rtype);
+                    match ltype {
+                        RuntimeType::BoolRuntimeType => {
+                            let left = self.expr_to_bool(left.clone(), context);
+                            let right = self.expr_to_bool(right.clone(), context);
+                            return left._eq(&right);
+                        }
+                        RuntimeType::IntRuntimeType => {
+                            let left = self.expr_to_int(left.clone(), context);
+                            let right = self.expr_to_int(right.clone(), context);
+                            return left._eq(&right);
+                        }
+                        RuntimeType::ARRAYRuntimeType => {
+                            let left = self.expr_to_array(left.clone(), context);
+                            let right = self.expr_to_array(right.clone(), context);
+                            return left._eq(&right);
+                        }
+                        RuntimeType::ReferenceRuntimeType { type_, .. } => {
+                            let left = self.expr_to_ref(left.clone(), context);
+                            let right = self.expr_to_ref(right.clone(), context);
+                            return left._eq(&right);
+                        }
+                        _ => panic!(
+                            "Expected a boolean or integer type for equality, but got {:?}",
+                            ltype
+                        ),
+                    }
+                }
+                BinOp::NotEqual => {
+                    let ltype = left.get_type();
+                    let rtype = right.get_type();
+                    assert!(ltype == rtype, "Expected the same type for both sides of the equality, but got {:?} and {:?}", ltype, rtype);
+                    match ltype {
+                        RuntimeType::BoolRuntimeType => {
+                            let left = self.expr_to_bool(left.clone(), context);
+                            let right = self.expr_to_bool(right.clone(), context);
+                            return left._eq(&right).not();
+                        }
+                        RuntimeType::IntRuntimeType => {
+                            let left = self.expr_to_int(left.clone(), context);
+                            let right = self.expr_to_int(right.clone(), context);
+                            return left._eq(&right).not();
+                        }
+                        _ => panic!(
+                            "Expected a boolean or integer type for equality, but got {:?}",
+                            ltype
+                        ),
+                    }
+                }
+                BinOp::LessThan => {
+                    let ltype = left.get_type();
+                    let rtype = right.get_type();
+                    assert!(ltype == rtype, "Expected the same type for both sides of the equality, but got {:?} and {:?}", ltype, rtype);
+                    match ltype {
+                        RuntimeType::IntRuntimeType => {
+                            let left: Int<'_> = self.expr_to_int(left.clone(), context);
+                            let right: Int<'_> = self.expr_to_int(right.clone(), context);
+                            return left.lt(&right);
+                        }
+                        _ => panic!("Expected a integer type for lt, but got {:?}", ltype),
+                    }
+                }
+                BinOp::LessThanEqual => {
+                    let ltype = left.get_type();
+                    let rtype = right.get_type();
+                    assert!(ltype == rtype, "Expected the same type for both sides of the equality, but got {:?} and {:?}", ltype, rtype);
+                    match ltype {
+                        RuntimeType::IntRuntimeType => {
+                            let left: Int<'_> = self.expr_to_int(left.clone(), context);
+                            let right: Int<'_> = self.expr_to_int(right.clone(), context);
+                            return left.le(&right);
+                        }
+                        _ => panic!("Expected a integer type for lt, but got {:?}", ltype),
+                    }
+                }
+                BinOp::GreaterThan => {
+                    let ltype = left.get_type();
+                    let rtype = right.get_type();
+                    assert!(ltype == rtype, "Expected the same type for both sides of the equality, but got {:?} and {:?}", ltype, rtype);
+                    match ltype {
+                        RuntimeType::IntRuntimeType => {
+                            let left: Int<'_> = self.expr_to_int(left.clone(), context);
+                            let right: Int<'_> = self.expr_to_int(right.clone(), context);
+                            return left.gt(&right);
+                        }
+                        _ => panic!("Expected a integer type for lt, but got {:?}", ltype),
+                    }
+                }
+                BinOp::GreaterThanEqual => {
+                    let ltype = left.get_type();
+                    let rtype = right.get_type();
+                    assert!(ltype == rtype, "Expected the same type for both sides of the equality, but got {:?} and {:?}", ltype, rtype);
+                    match ltype {
+                        RuntimeType::IntRuntimeType => {
+                            let left: Int<'_> = self.expr_to_int(left.clone(), context);
+                            let right: Int<'_> = self.expr_to_int(right.clone(), context);
+                            return left.ge(&right);
+                        }
+                        _ => panic!("Expected a integer type for lt, but got {:?}", ltype),
+                    }
+                }
+                _ => panic!("Expected a boolean binop, but got {:?}", op),
+            },
+            RExpr::Typ {
+                op,
+                val,
+                of,
+                type_: _,
+            } => {
+                let _type = val.get_type();
+                match op {
+                    TyOp::IsInstanceOf => {
+                        return Bool::from_bool(context, _type == *of);
+                    }
+                    TyOp::IsNotInstanceOf => {
+                        return Bool::from_bool(context, _type != *of);
+                    }
+                }
+            }
+            RExpr::Uno { op, val, type_: _ } => match op {
+                UnOp::Negate => {
+                    let val = self.expr_to_bool(val.clone(), context);
+                    return val.not();
+                }
+                UnOp::Negative => panic!("expected a negate, but got a negative of number"),
+            },
+            RExpr::Con {
+                con,
+                left,
+                right,
+                type_: _,
+            } => {
+                let cond = self.expr_to_bool(con.clone(), context);
+                let left = self.expr_to_bool(left.clone(), context);
+                let right = self.expr_to_bool(right.clone(), context);
+                return cond.ite(&left, &right);
+            }
+        }
+    }
+
+    fn expr_to_int(self: &mut Self, expr: Rc<RExpr>, context: &'a Context) -> Int<'a>
+    where
+        F: Clone + Fn(&i64, &'a Context) -> Array<'a>,
+        G: Clone + Fn(&i64, &'a Context) -> Datatype<'a>,
+    {
+        match expr.as_ref() {
+            RExpr::Lit { lit, type_: _ } => match lit {
+                Lit::IntLit { int_value } => Int::from_i64(context, *int_value),
+                _ => panic!("Expected an integer literal, but got {:?}", lit),
+            },
+            RExpr::Sym { id, type_ } => {
+                if let Some(ast) = self.imemory.get(id) {
+                    return ast.clone();
+                } else {
+                    let ast = match type_ {
+                        RuntimeType::IntRuntimeType => Int::new_const(&context, id.as_str()),
+                        _ => panic!("Expected a integer  type, but got {:?}", type_),
+                    };
+                    self.imemory.insert(id.clone(), ast.clone());
+                    return ast;
+                }
+            }
+            RExpr::Ref { .. } => panic!("this one really should not be here"),
+            RExpr::SRf { .. } => panic!("this one really should not be here"),
+            RExpr::Bin {
+                op,
+                left,
+                right,
+                type_: _,
+            } => match op {
+                BinOp::Plus => {
+                    let left = self.expr_to_int(left.clone(), context);
+                    let right = self.expr_to_int(right.clone(), context);
+                    return left + right;
+                }
+                BinOp::Minus => {
+                    let left = self.expr_to_int(left.clone(), context);
+                    let right = self.expr_to_int(right.clone(), context);
+                    return left - right;
+                }
+                BinOp::Multiply => {
+                    let left = self.expr_to_int(left.clone(), context);
+                    let right = self.expr_to_int(right.clone(), context);
+                    return left * right;
+                }
+                BinOp::Divide => {
+                    let left = self.expr_to_int(left.clone(), context);
+                    let right = self.expr_to_int(right.clone(), context);
+                    return left / right;
+                }
+                BinOp::Modulo => {
+                    let left = self.expr_to_int(left.clone(), context);
+                    let right = self.expr_to_int(right.clone(), context);
+                    return left.modulo(&right);
+                }
+                _ => panic!("Expected a integer binop, but got {:?}", op),
+            },
+            RExpr::Typ { .. } => panic!("this one should not be here"),
+            RExpr::Uno { op, val, type_: _ } => match op {
+                UnOp::Negate => panic!("expected a negative, but got a negate of bool"),
+                UnOp::Negative => {
+                    let val = self.expr_to_int(val.clone(), context);
+                    return Int::from_i64(context, 0) - val;
+                }
+            },
+            RExpr::Con {
+                con,
+                left,
+                right,
+                type_: _,
+            } => {
+                let cond = self.expr_to_bool(con.clone(), context);
+                let left = self.expr_to_int(left.clone(), context);
+                let right = self.expr_to_int(right.clone(), context);
+                return cond.ite(&left, &right);
+            }
+        }
+    }
+
+    fn expr_to_array(self: &mut Self, expr: Rc<RExpr>, context: &'a Context) -> Array<'a>
+    where
+        F: Clone + Fn(&i64, &'a Context) -> Array<'a>,
+        G: Clone + Fn(&i64, &'a Context) -> Datatype<'a>,
+    {
+        match expr.as_ref() {
+            RExpr::Ref { ptr, type_ } => {
+                if let Some(ast) = self.amemory.get(ptr) {
+                    return ast.clone();
+                } else {
+                    let ast = (self.get_arr)(&ptr, context);
+                    self.amemory.insert(ptr.clone(), ast.clone());
+                    return ast;
+                }
+            }
+            RExpr::SRf { ptr, type_ } => {
+                if let Some(ast) = self.amemory.get(ptr) {
+                    return ast.clone();
+                } else {
+                    let ast = match type_ {
+                        RuntimeType::ArrayRuntimeType { inner_type } => {
+                            let domain = Sort::int(context);
+                            let range = match inner_type.as_ref() {
+                                RuntimeType::IntRuntimeType => Sort::int(context),
+                                RuntimeType::BoolRuntimeType => Sort::bool(context),
+                                _ => panic!("Expected an integer type, but got {:?}", inner_type),
+                            };
+                            Array::new_const(&context, format!("{}", ptr), &domain, &range)
+                        }
+                        _ => panic!("Expected a array type, but got {:?}", type_),
+                    };
+                    self.amemory.insert(ptr.clone(), ast.clone());
+                    return ast;
+                }
+            }
+            RExpr::Con {
+                con,
+                left,
+                right,
+                type_,
+            } => {
+                let cond = self.expr_to_bool(con.clone(), context);
+                let left = self.expr_to_array(left.clone(), context);
+                let right = self.expr_to_array(right.clone(), context);
+                return cond.ite(&left, &right);
+            }
+            _ => panic!("Expected a reference expression, but got {:?}", expr),
+        }
+    }
+
+    fn expr_to_ref(self: &mut Self, expr: Rc<RExpr>, context: &'a Context) -> Datatype<'a>
+    where
+        F: Clone + Fn(&i64, &'a Context) -> Array<'a>,
+        G: Clone + Fn(&i64, &'a Context) -> Datatype<'a>,
+    {
+        match expr.as_ref() {
+            RExpr::Ref { ptr, type_ } => {
+                if let Some(ast) = self.rmemory.get(ptr) {
+                    return ast.clone();
+                } else {
+                    let ast = (self.get_ref)(&ptr, context);
+                    self.rmemory.insert(ptr.clone(), ast.clone());
+                    return ast;
+                }
+            }
+            RExpr::SRf { ptr, type_ } => {
+                if let Some(ast) = self.rmemory.get(ptr) {
+                    return ast.clone();
+                } else {
+                    let ast = match type_ {
+                        RuntimeType::ReferenceRuntimeType { type_, .. } => {
+                            Datatype::new_const(&context, format!("{}", ptr), todo!())
+                        }
+                        _ => panic!("Expected a reference type, but got {:?}", type_),
+                    };
+                    self.rmemory.insert(ptr.clone(), ast.clone());
+                    return ast;
+                }
+            }
+            RExpr::Con {
+                con,
+                left,
+                right,
+                type_,
+            } => {
+                let cond = self.expr_to_bool(con.clone(), context);
+                let left = self.expr_to_ref(left.clone(), context);
+                let right = self.expr_to_ref(right.clone(), context);
+                return cond.ite(&left, &right);
+            }
+            _ => panic!("Expected a reference expression, but got {:?}", expr),
+        }
+    }
+}
 //Resolved heapvalue
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Debug)]
 pub(crate) enum RHeapValue<T> {
@@ -1995,8 +2115,9 @@ impl MergeEngine for SetEngine {
         let mut config = Config::new();
         config.set_proof_generation(true);
         let context: Context = Context::new(&config);
-        let mut bmemory = HashMap::new();
-        let mut imemory = HashMap::new();
+        let get_arr = |_: &i64, _: &Context| -> Array { panic!() };
+        let get_ref = |_: &i64, _: &Context| -> Datatype { panic!() };
+        let mut z3_builder = Z3Builder::new(get_arr, get_ref);
         let solver = Solver::new(&context);
         solver.push();
 
@@ -2008,7 +2129,7 @@ impl MergeEngine for SetEngine {
                     right: r.clone(),
                     type_: RuntimeType::BoolRuntimeType,
                 });
-                RExpr::expr_to_bool(temp, &context, &mut bmemory, &mut imemory)
+                z3_builder.expr_to_bool(temp, &context)
             })
             .collect();
 
@@ -2035,22 +2156,23 @@ impl MergeEngine for SetEngine {
         */
         let config = Config::new();
         let context: Context = Context::new(&config);
-        let mut bmemory = HashMap::new();
-        let mut imemory = HashMap::new();
+        let get_arr = |_: &i64, _: &Context| -> Array { panic!() };
+        let get_ref = |_: &i64, _: &Context| -> Datatype { panic!() };
+        let mut z3_builder = Z3Builder::new(get_arr, get_ref);
         let solver = Solver::new(&context);
         solver.push();
 
         let premise = svalue::and(state.hed_constr.clone(), state.unq_constr.clone());
         let premise: Vec<_> = premise
             .iter()
-            .map(|v| RExpr::expr_to_bool(v.clone(), &context, &mut bmemory, &mut imemory))
+            .map(|v| z3_builder.expr_to_bool(v.clone(), &context))
             .collect();
         let premise = Bool::or(&context, premise.iter().collect::<Vec<_>>().as_slice());
 
         let conclusion = self.eval_with(state, expr);
         let conclusion: Vec<_> = conclusion
             .iter()
-            .map(|v| RExpr::expr_to_bool(v.clone(), &context, &mut bmemory, &mut imemory))
+            .map(|v| z3_builder.expr_to_bool(v.clone(), &context))
             .collect();
         let conclusion = Bool::or(&context, conclusion.iter().collect::<Vec<_>>().as_slice());
 
@@ -2683,22 +2805,20 @@ impl MergeEngine for TreeEngine {
         let mut config = Config::new();
         config.set_proof_generation(true);
         let context: Context = Context::new(&config);
-        let mut bmemory = HashMap::new();
-        let mut imemory = HashMap::new();
+        let get_arr = |_: &i64, _: &Context| -> Array { panic!() };
+        let get_ref = |_: &i64, _: &Context| -> Datatype { panic!() };
+        let mut z3_builder = Z3Builder::new(get_arr, get_ref);
         let solver = Solver::new(&context);
         solver.push();
 
-        let constr = RExpr::expr_to_bool(
-            RExpr::evaluate_binop(
-                BinOp::And,
-                _state.hed_constr.clone(),
-                _state.unq_constr.clone(),
-                RuntimeType::BoolRuntimeType,
-            ),
-            &context,
-            &mut bmemory,
-            &mut imemory,
+        let constr = RExpr::evaluate_binop(
+            BinOp::And,
+            _state.hed_constr.clone(),
+            _state.unq_constr.clone(),
+            RuntimeType::BoolRuntimeType,
         );
+
+        let constr = z3_builder.expr_to_bool(constr, &context);
 
         solver.assert(&constr);
         let result = solver.check();
@@ -2719,8 +2839,9 @@ impl MergeEngine for TreeEngine {
         let mut config = Config::new();
         config.set_proof_generation(true);
         let context: Context = Context::new(&config);
-        let mut bmemory = HashMap::new();
-        let mut imemory = HashMap::new();
+        let get_arr = |_: &i64, _: &Context| -> Array { panic!() };
+        let get_ref = |_: &i64, _: &Context| -> Datatype { panic!() };
+        let mut z3_builder = Z3Builder::new(get_arr, get_ref);
         let solver = Solver::new(&context);
         solver.push();
 
@@ -2731,11 +2852,11 @@ impl MergeEngine for TreeEngine {
             RuntimeType::BoolRuntimeType,
         );
         //println!("premise: {:?}", premise.clone().as_string());
-        let premise = RExpr::expr_to_bool(premise, &context, &mut bmemory, &mut imemory);
+        let premise: Bool<'_> = z3_builder.expr_to_bool(premise, &context);
 
         let conclusion = self.eval_with(state, expr);
         //println!("conclusion: {:?}", conclusion.clone().as_string());
-        let conclusion = RExpr::expr_to_bool(conclusion, &context, &mut bmemory, &mut imemory);
+        let conclusion: Bool<'_> = z3_builder.expr_to_bool(conclusion, &context);
 
         let constraint = premise.implies(&conclusion);
         let constraint = constraint.not();

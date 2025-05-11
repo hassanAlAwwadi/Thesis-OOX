@@ -1,8 +1,11 @@
+use std::{os::linux::raw, vec};
+
 use clap::{Parser, Subcommand};
-use itertools::Itertools;
+use itertools::{izip, Itertools};
 use lib::{
-    insert_exceptional_clauses, parse_program, type_compilation_unit, verify, CompilationUnit,
-    Heuristic, Options, SourcePos, SymResult, SymbolTable, FILE_NAMES,
+    execute_verify_thrice, insert_exceptional_clauses, parse_program, set_up_verify,
+    type_compilation_unit, verify, CompilationUnit, Heuristic, Options, SourcePos, SymResult,
+    SymbolTable, FILE_NAMES,
 };
 use pretty::BoxAllocator;
 
@@ -101,35 +104,42 @@ enum Commands {
 
 fn main() -> Result<(), String> {
     if let Some((class_name, method_name)) = Some(("Main", "main")) {
-        let k = 15;
         let quiet = false;
         let heuristic = Heuristic::PathMerging;
         let visualize_heuristic = false;
         let visualize_coverage = false;
         let time_budget = 900;
         let symbolic_array_size = 100;
+        let source_paths = vec!["benchmark_programs/experiment_m/0.oox"];
+        for i in 1..16 {
+            let options = Options {
+                k: 10,
+                quiet,
+                with_exceptional_clauses: true,
+                heuristic,
+                visualize_heuristic,
+                visualize_coverage,
+                symbolic_array_size,
+                time_budget,
+                log_path: "log/log.txt",
+                discard_logs: true,
+                prune_path_z3: false,
+                local_solving_threshold: None,
+            };
+            let (raw_r, tree_r, set_r, _, raw_d, tree_d, set_d) =
+                verify(&source_paths, class_name, method_name, options.clone())?;
 
-        let options = Options {
-            k,
-            quiet,
-            with_exceptional_clauses: true,
-            heuristic,
-            visualize_heuristic,
-            visualize_coverage,
-            symbolic_array_size,
-            time_budget,
-            log_path: "log/log.txt",
-            discard_logs: true,
-            prune_path_z3: false,
-            local_solving_threshold: None,
-        };
+            println!("k: {}", i * 10);
+            println!("unmerged   result: {:?}", raw_r);
+            println!("unmerged   time: {:?}", raw_d);
+            println!("merged     result: {:?}", tree_r);
+            println!("merged     time: {:?}", tree_d);
+            println!("abstracted result: {:?}", set_r);
+            println!("abstracted time: {:?}", set_d);
+            println!("-------------------------------------");
+        }
+        println!("-------------------------------------");
 
-        let source_paths = vec!["./benchmark_programs/experiment_m/0.oox"];
-        let (raw_result, tree_result, set_result, statistics) =
-            verify(source_paths.as_slice(), class_name, method_name, options)?;
-        println!("raw_result: {:?}", raw_result);
-        println!("tree_result: {:?}", tree_result);
-        println!("set_result: {:?}", set_result);
         /*
         let result_text = result_text(sym_result_1, source_paths);
 

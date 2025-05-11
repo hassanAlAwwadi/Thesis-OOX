@@ -1,4 +1,10 @@
-use std::{cell::RefCell, collections::HashMap, ops::AddAssign, rc::Rc, time::Instant};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    ops::AddAssign,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use clap::ValueEnum;
 use im_rc::{vector, HashMap as ImHashMap, HashSet as ImHashSet};
@@ -1596,16 +1602,56 @@ pub fn verify(
     class_name: &str,
     method_name: &str,
     options: Options,
-) -> std::result::Result<(SymResult, SymResult, SymResult, Statistics), Error> {
+) -> std::result::Result<
+    (
+        SymResult,
+        SymResult,
+        SymResult,
+        Statistics,
+        Duration,
+        Duration,
+        Duration,
+    ),
+    Error,
+> {
+    let (symbol_table, program, flows, entry_method, root_logger, state, path_counter, statistics) =
+        set_up_verify(paths, class_name, method_name, options)?;
+    return Ok(execute_verify_thrice(
+        options,
+        symbol_table,
+        program,
+        flows,
+        entry_method,
+        root_logger,
+        state,
+        path_counter,
+        statistics,
+    ));
+}
+
+pub fn set_up_verify(
+    paths: &[impl ToString + AsRef<str>],
+    class_name: &str,
+    method_name: &str,
+    options: Options<'_>,
+) -> Result<
+    (
+        SymbolTable,
+        HashMap<u64, CFGStatement>,
+        HashMap<u64, Vec<u64>>,
+        MethodIdentifier,
+        Logger,
+        State,
+        Rc<RefCell<IdCounter<u64>>>,
+        Statistics,
+    ),
+    String,
+> {
     if !options.quiet {
         println!("Starting up");
     }
-
-    // Set global file names
     *FILE_NAMES.lock().unwrap() = paths.iter().map(ToString::to_string).collect();
-
     let mut c = CompilationUnit::empty();
-
     for (file_number, path) in (0..).zip(paths.iter()) {
         let file_content = std::fs::read_to_string(path.as_ref()).map_err(|err| err.to_string())?;
         let file_cu =
@@ -1621,12 +1667,9 @@ pub fn verify(
     if options.with_exceptional_clauses {
         c = insert_exceptional_clauses(c);
     }
-
-    // dbg!(&c);
     if !options.quiet {
         println!("Parsing completed");
     }
-
     let initial_method = c
         .find_class_declaration_member(method_name, class_name.into())
         .ok_or_else(|| {
@@ -1635,48 +1678,27 @@ pub fn verify(
                 method_name, class_name
             )
         })?;
-
     let symbol_table = SymbolTable::from_ast(&c)?;
-
     if !options.quiet {
         println!("Symbol table completed");
     }
-
     let c = type_compilation_unit(c, &symbol_table)?;
     if !options.quiet {
         println!("Typing completed");
     }
-
     let (result, flw) = labelled_statements(c);
-
     let program: HashMap<u64, CFGStatement> = result.into_iter().collect();
-    // dbg!(&program);
-
     let flows: HashMap<u64, Vec<u64>> = utils::group_by(flw.into_iter());
-
-    /*
-    println!("starting to print program");
-    for (i, stmt) in program.clone().into_iter().sorted_by_key(|(k, _)| *k) {
-        println!("{:?}: {:?}", i, stmt);
-    }
-    for (s, e) in flows.clone().into_iter().sorted_by_key(|(k, _)| *k) {
-        println!("{:?} -> {:?}", s, e);
-    }
-    */
-
-    // dbg!(&flows);
     let argument_types = initial_method
         .params
         .iter()
         .map(Typeable::type_of)
         .collect();
-
     let entry_method = MethodIdentifier {
         decl_name: class_name.to_string(),
         method_name: method_name.to_string(),
         arg_list: argument_types,
     };
-
     let pc = find_entry_for_static_invocation(
         &entry_method.decl_name,
         &entry_method.method_name,
@@ -1684,7 +1706,6 @@ pub fn verify(
         &program,
         &symbol_table,
     );
-    // dbg!(&params);
     let params = initial_method
         .params
         .iter()
@@ -1699,13 +1720,6 @@ pub fn verify(
             )
         })
         .collect();
-    // dbg!(&params);
-
-    // let root_logger = slog::Logger::root(
-    //     Mutex::new(slog_bunyan::default(std::io::stderr()).filter_level(Level::Debug)).fuse(),
-    //     o!(),
-    // );
-
     let root_logger = if options.discard_logs {
         slog::Logger::root(slog::Discard, o!())
     } else {
@@ -1719,15 +1733,12 @@ pub fn verify(
 
         builder.build().unwrap()
     };
-
     info!(
         root_logger,
         "Starting verification of {}::{}", class_name, method_name
     );
-
     let mut constraints = ImHashSet::new();
     constraints.insert(Rc::new(Expression::TRUE));
-
     let state = State {
         pc,
         stack: Stack::new(vector![StackFrame {
@@ -1745,10 +1756,39 @@ pub fn verify(
         logger: root_logger.new(o!("pathId" => 0)),
         path_id: 0,
     };
-
     let path_counter = Rc::new(RefCell::new(IdCounter::new(0)));
-    let mut statistics: Statistics = Default::default();
+    let statistics: Statistics = Default::default();
+    Ok((
+        symbol_table,
+        program,
+        flows,
+        entry_method,
+        root_logger,
+        state,
+        path_counter,
+        statistics,
+    ))
+}
 
+pub fn execute_verify_thrice(
+    options: Options<'_>,
+    symbol_table: SymbolTable,
+    program: HashMap<u64, CFGStatement>,
+    flows: HashMap<u64, Vec<u64>>,
+    entry_method: MethodIdentifier,
+    root_logger: Logger,
+    state: State,
+    path_counter: Rc<RefCell<IdCounter<u64>>>,
+    mut statistics: Statistics,
+) -> (
+    SymResult,
+    SymResult,
+    SymResult,
+    Statistics,
+    Duration,
+    Duration,
+    Duration,
+) {
     let now = Instant::now();
     let tree_result = heuristics::path_merging::sym_exec(
         state.clone(),
@@ -1762,8 +1802,7 @@ pub fn verify(
         &options,
         false,
     );
-    println!("merging without abstraction took: {:?}", now.elapsed());
-
+    let elapsed_tree = now.elapsed();
     let now = Instant::now();
     let set_result = heuristics::path_merging::sym_exec(
         state.clone(),
@@ -1777,8 +1816,7 @@ pub fn verify(
         &options,
         true,
     );
-    println!("merging with abstraction took: {:?}", now.elapsed());
-
+    let elapsed_set = now.elapsed();
     let now = Instant::now();
     let raw_result = heuristics::depth_first_search::sym_exec(
         state,
@@ -1791,13 +1829,10 @@ pub fn verify(
         entry_method.clone(),
         &options,
     );
-    println!("depth first took: {:?}", now.elapsed());
-
+    let elapsed_raw = now.elapsed();
     let reachability = reachability(entry_method, &program, &flows, &symbol_table);
     statistics.reachable_statements = reachability.len() as u32;
-
     statistics.number_of_paths_explored = path_counter.borrow().current_value();
-
     if options.visualize_coverage {
         let contents = pretty_print_compilation_unit(
             &|pc: u64| {
@@ -1813,8 +1848,15 @@ pub fn verify(
         );
         std::fs::write("coverage_visualized.txt", contents).unwrap();
     }
-
-    return Ok((raw_result, tree_result, set_result, statistics));
+    return (
+        raw_result,
+        tree_result,
+        set_result,
+        statistics,
+        elapsed_raw,
+        elapsed_tree,
+        elapsed_set,
+    );
 }
 
 #[test]

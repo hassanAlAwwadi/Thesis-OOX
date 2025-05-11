@@ -1,11 +1,47 @@
-class Main {
-  // testing extremely simple programs
+class Node {
+    int value ;
+    Node next ;
+    bool member(int x) {
+        assume this != null;
+        int v := this.value ;
+        if(x==v) return true ;
+        else {
+            Node n := this.next ;
+            if (n == null) {
+                return false;
+            } else {
+                bool b := n.member(x) ;
+                return b ;
+            }
+        }
+    }
+    Node min()
+    {
+       Node p := this ;
+       Node min := p ;
+       int minval := min.value ;
 
-  // Found with k = 300
-  static void main() {
-    int i = 3;
-    int j = 1;
-    bool ok = i < j;
-    assert ok;
-  }
+       while ( p != null) {
+          int value := p.value ;
+          if ( value < minval) {
+               min := p ;
+               minval := value ;
+          }
+          p := p.next;
+       }
+       return min ;
+    }
+}
+
+class Main {
+
+    static void main(Node node)
+        requires(node != null)
+        exceptional(false)
+    {
+        Node min := node.min() ;
+        int x := min.value ;
+        bool ok := node.member(x) ;
+        assert ok ;
+    }
 }

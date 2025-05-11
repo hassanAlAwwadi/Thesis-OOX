@@ -37,7 +37,7 @@ extern crate pest_derive;
 
 use std::sync::Mutex;
 
-pub use exec::{verify, Heuristic, Options, SymResult};
+pub use exec::{execute_verify_thrice, set_up_verify, verify, Heuristic, Options, SymResult};
 
 pub use positioned::SourcePos;
 

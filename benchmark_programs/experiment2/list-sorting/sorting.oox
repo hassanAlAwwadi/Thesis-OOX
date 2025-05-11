@@ -164,7 +164,7 @@ class MergeSort implements Sorter {
         requires(array != null)
         exceptional(false)
     {
-        // if (left >= right) {  // error , should be <
+        // if (left >= right) // error , should be <
         if (left < right) {
             int middle := (left + right) / 2;
             MergeSort.mergesort(array, left, middle);
