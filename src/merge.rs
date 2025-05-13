@@ -1842,12 +1842,14 @@ pub(crate) trait MergeRef: Sized
     fn create_array_of_size(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType) -> Self;
     fn create_sym_ptr_indr(loc: i64, type_: RuntimeType) -> Self;
 
-    fn create_sym_obj<F>(type_: RuntimeType, classes: HashMap<Identifier, Rc<Class>>, f: F) -> Self 
+    fn create_sym_obj<F, G>(type_: Identifier, classes: &HashMap<Identifier, Rc<Class>>, reserve_space: &mut F, assign_value_to_space: &mut G) -> Self 
         where
-            F: FnMut(Self) -> i64;
-    fn create_sym_array<F>(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType, f: F)
+            F: FnMut() -> i64,
+            G: FnMut(i64, Self) -> ();
+    fn create_sym_array<F, G>(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType, reserve_space: &mut F, assign_value_to_space: &mut G) -> Self
         where
-            F: FnMut(Self) -> i64;
+            F: FnMut() -> i64,
+            G: FnMut(i64, Self) -> ();
 
     //note the muteable fields and engines below
     //this is because we might need to initialize heap values
@@ -1958,16 +1960,100 @@ impl MergeRef for Rc<Tree<Rc<RExpr>, RHeapValue<RExpr>>>
         }))
     }
     
-    fn create_sym_obj<F>(type_: RuntimeType, classes: HashMap<Identifier, Rc<Class>>, f: F) -> Self 
+    fn create_sym_obj<F, G>(type_: Identifier, classes: &HashMap<Identifier, Rc<Class>>, reserve_space: &mut F,  assign_value_to_space: &mut G) -> Self 
         where
-            F: FnMut(Self) -> i64 {
-        todo!()
+            F: FnMut() -> i64,
+            G: FnMut(i64, Self) -> () {
+        
+        let mut fields = BTreeMap::new();
+        
+        for member in classes.get(&type_).unwrap().members.iter(){
+            let i = reserve_space(); 
+            match member{
+                DeclarationMember::Field { type_, name, .. } => {
+                    match type_{
+                        NonVoidType::ReferenceType { .. } | NonVoidType::ArrayType { .. } => {
+                            let ref_ = MergeExpr::mk_ref(i, type_.clone().into());
+                            fields.insert(name.clone(), ref_);
+                            let indr = MergeRef::create_sym_ptr_indr(i, type_.clone().into());
+                            assign_value_to_space(i, indr);
+                             
+                        },
+                        _ => {
+                            let sym = MergeExpr::mk_sym(Identifier::with_unknown_pos(format!("__{}", i)), type_.clone().into());
+                            fields.insert(name.clone(), sym);
+                        }
+                    }
+                }
+                _ => {},
+            }
+        }
+        Rc::new(Tree::Leaf(RHeapValue::ObjectValue { sym: true, fields, type_}))
     }
     
-    fn create_sym_array<F>(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType, f: F)
+    fn create_sym_array<F, G>(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType,  reserve_space: &mut F, assign_value_to_space: &mut G) -> Self 
         where
-            F: FnMut(Self) -> i64 {
-        todo!()
+            F: FnMut() -> i64,
+            G: FnMut(i64, Self) -> () 
+    {
+        let size_tree = Tree::<Self::InnerExpr, Self::InnerExpr>::from_cond(size);
+        let t: RuntimeType = inner_type.clone().into();
+        let r = Tree::map(size_tree, &mut |i|{
+            match i.as_ref(){
+                RExpr::Lit{ 
+                    lit: Lit::IntLit { int_value }, ..
+                } => {
+                    let size = *int_value;
+                    let mut elements = vec![];
+                    for i in 0..size{
+                        let elem =  match inner_type{
+                            NonVoidType::ReferenceType { .. } | NonVoidType::ArrayType { .. } => {
+                                let i = reserve_space();
+                                let ref_ = MergeExpr::mk_ref(i, t.clone());
+                                let indr = MergeRef::create_sym_ptr_indr(i, t.clone());
+                                assign_value_to_space(i, indr);
+                                ref_
+                            
+                            },
+                            _ => {
+                                let k = reserve_space();
+                                MergeExpr::mk_sym(Identifier::with_unknown_pos(format!("__{}", k)),t.clone())
+                            }
+                        };
+                        elements.push(elem);
+                    }
+                    let size = *int_value as usize;
+                    let t = RHeapValue::ArrayValue { 
+                        size: Either::Left(size),
+                        elements, 
+                        type_: array_type.clone(),
+                        sym: true, 
+                    };
+                    t
+                }
+                // I've already turned the conds into the tree I'm mapping over
+                RExpr::Con{..} => unreachable!(),
+                // a more complex index size, very annoying indeed.
+                // when I need to insert or delete, I'll stretch you as needed
+                // and whenever I read or write to it, I'll put in a condition
+                // the assertions that the size are inserted into the code, or
+                // can be inserted into the code, at least. 
+                _ => {
+                    let elements = vec![];
+                    let t = RHeapValue::ArrayValue {
+                        size: Either::Right(i),
+                        elements, 
+                        type_: array_type.clone(),
+                        // when we generate elements, if sym is false, we use mk_default, 
+                        // but when sym is true we go out of our way to use symbolic values
+                        // and possibly symbolic references
+                        sym: true
+                    };
+                    t
+                },
+            }
+        });
+        return r;
     }
     
     fn update_ref_field_to(
@@ -2033,7 +2119,6 @@ impl MergeRef for HashSet<RHeapValue<RExpr>>{
                     };
                     result.insert(t);
                 }
-                // I've already turned the conds into the tree I'm mapping over
                 RExpr::Con { con: _, left, right, type_: _ } => {
                     //annoying, really, but I can at least just flatten this
                     let l = Self::create_array_of_size( hash_unit(left .clone()),  inner_type.clone(), array_type.clone());
@@ -2085,16 +2170,108 @@ impl MergeRef for HashSet<RHeapValue<RExpr>>{
         })
     }
     
-    fn create_sym_obj<F>(type_: RuntimeType, classes: HashMap<Identifier, Rc<Class>>, f: F) -> Self 
+    fn create_sym_obj<F, G>(type_: Identifier, classes: &HashMap<Identifier, Rc<Class>>, reserve_space: &mut F, assign_value_to_space: &mut G) -> Self 
         where
-            F: FnMut(Self) -> i64 {
-        todo!()
+            F: FnMut() -> i64,
+            G: FnMut(i64, Self) -> () {
+        
+        let mut fields = BTreeMap::new();
+        
+        for member in classes.get(&type_).unwrap().members.iter(){
+            let i = reserve_space(); 
+            match member{
+                DeclarationMember::Field { type_, name, .. } => {
+                    match type_{
+                        NonVoidType::ReferenceType { .. } | NonVoidType::ArrayType { .. } => {
+                            let ref_ = MergeExpr::mk_ref(i, type_.clone().into());
+                            fields.insert(name.clone(), ref_);
+                            let indr = MergeRef::create_sym_ptr_indr(i, type_.clone().into());
+                            assign_value_to_space(i, indr);
+                             
+                        },
+                        _ => {
+                            let sym = MergeExpr::mk_sym(Identifier::with_unknown_pos(format!("__{}", i)), type_.clone().into());
+                            fields.insert(name.clone(), sym);
+                        }
+                    }
+                }
+                _ => {},
+            }
+        }
+        hash_unit(RHeapValue::ObjectValue { sym: true, fields, type_})
     }
     
-    fn create_sym_array<F>(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType, f: F)
+    fn create_sym_array<F, G>(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType,  reserve_space: &mut F, assign_value_to_space: &mut G) -> Self 
         where
-            F: FnMut(Self) -> i64 {
-        todo!()
+            F: FnMut() -> i64,
+            G: FnMut(i64, Self) -> () 
+    {
+        let mut result = HashSet::new();
+        for i in size.iter(){
+            match i.as_ref(){
+                RExpr::Lit{ 
+                    lit: Lit::IntLit { int_value }, ..
+                } => {
+                    let size = *int_value;
+                    let mut elements = vec![];
+                    for i in 0..size{
+                        let elem =  match inner_type.clone(){
+                            NonVoidType::ReferenceType { .. } | NonVoidType::ArrayType { .. } => {
+                                let i = reserve_space();
+                                let ref_ = MergeExpr::mk_ref(i, inner_type.clone().into());
+                                let indr = MergeRef::create_sym_ptr_indr(i, inner_type.clone().into());
+                                assign_value_to_space(i, indr);
+                                ref_
+                            
+                            },
+                            _ => {
+                                let k = reserve_space();
+                                MergeExpr::mk_sym(Identifier::with_unknown_pos(format!("__{}", k)),inner_type.clone().into())
+                            }
+                        };
+                        elements.push(elem);
+                    }
+                    let size = *int_value as usize;
+                    let t = RHeapValue::ArrayValue { 
+                        size: Either::Left(size),
+                        elements, 
+                        type_: array_type.clone(),
+                        sym: true, 
+                    };
+                    result.insert(t);
+                }
+                RExpr::Con { con: _, left, right, type_: _ } => {
+                    //annoying, really, but I can at least just flatten this
+                    let l = Self::create_sym_array(hash_unit(left.clone()),  inner_type.clone(), array_type.clone(),  reserve_space, assign_value_to_space);
+                    let r = Self::create_sym_array(hash_unit(left.clone()),  inner_type.clone(), array_type.clone(),  reserve_space, assign_value_to_space);
+                    for l in l {
+                        result.insert(l);
+                    }
+                    for r in r{
+                        result.insert(r);
+                    }
+                },
+                // a more complex index size, very annoying indeed.
+                // when I need to insert or delete, I'll stretch you as needed
+                // and whenever I read or write to it, I'll put in a condition
+                // the assertions that the size are inserted into the code, or
+                // can be inserted into the code, at least. 
+                _ => {
+                    let elements = vec![];
+                    let t = RHeapValue::ArrayValue {
+                        size: Either::Right(i.clone()),
+                        elements, 
+                        type_: array_type.clone(),
+                        // when we generate elements, if sym is false, we use mk_default, 
+                        // but when sym is true we go out of our way to use symbolic values
+                        // and possibly symbolic references
+                        sym: true
+                    };
+                    result.insert(t);
+                },
+            }
+        };
+        return result;
     }
     
     fn update_ref_field_to(
@@ -2623,16 +2800,7 @@ impl<E, H> MergeEngine<E, H> where
                 MergeRef::update_ref_index_to(self, var, &index, value, &mut state.heap)
             },
         };
-    }
-
-    fn get_field_from_var(&self, var: E, field: Identifier, state: &mut MergeState<E, H>) -> E {
-        todo!()
-    }
-
-    fn get_elem_from_var(&self, var: E, index: E, state: &mut MergeState<E, H>) -> E {
-        todo!()
-    }
-   
+    }   
 }
 impl<C, T> Tree<C, T> {
     fn map<F, R>(tree: Rc<Self>, f: &mut F) -> Rc<Tree<C, R>>
@@ -2675,11 +2843,11 @@ impl<C, T> Tree<C, T> {
         }
     }
 
-    fn to_cond(tree: Rc<Tree<Rc<RExpr>, T>>, mut f: impl FnMut(&T) -> Rc<RExpr> + Clone) -> Rc<RExpr> {
+    fn to_cond<F>(tree: Rc<Tree<Rc<RExpr>, T>>, f: &mut F) -> Rc<RExpr> where F: FnMut(&T) -> Rc<RExpr> {
         match tree.as_ref() {
             Tree::Leaf(value) => return f(value),
             Tree::Node { con, left, right } => {
-                let left = Self::to_cond(left.clone(), f.clone());
+                let left = Self::to_cond(left.clone(), f);
                 let right = Self::to_cond(right.clone(), f);
                 return Rc::new(RExpr::Con {
                     con: con.clone(),
