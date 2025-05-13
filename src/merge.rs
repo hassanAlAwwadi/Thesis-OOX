@@ -11,6 +11,7 @@ use z3::DatatypeBuilder;
 use z3::DatatypeSort;
 use z3::Sort;
 
+use crate::exec::constants::this_str;
 use crate::typeable::Typeable;
 
 use crate::SourcePos;
@@ -1149,12 +1150,12 @@ impl<'a, F, G> Z3Builder<'a, F, G> {
                             let right = self.expr_to_int(right.clone(), context);
                             return left._eq(&right);
                         }
-                        RuntimeType::ARRAYRuntimeType => {
+                        RuntimeType::ArrayRuntimeType { .. } => {
                             let left = self.expr_to_array(left.clone(), context);
                             let right = self.expr_to_array(right.clone(), context);
                             return left._eq(&right);
                         }
-                        RuntimeType::ReferenceRuntimeType { type_, .. } => {
+                        RuntimeType::ReferenceRuntimeType { .. } => {
                             let left = self.expr_to_ref(left.clone(), context);
                             let right = self.expr_to_ref(right.clone(), context);
                             return left._eq(&right);
@@ -1431,6 +1432,7 @@ pub(crate) struct MergeEngine<E, H> {
     supply: i64,
     config: Config,
     context: Context,
+    classes: HashMap<Identifier, Rc<Class>>
 }
 
 pub type TreeEngine = MergeEngine<Rc<RExpr>, Rc<Tree<Rc<RExpr>, RHeapValue<RExpr>>>>;
@@ -1836,11 +1838,11 @@ impl<E> MergeExpr for HashSet<E> where E: MergeExpr + Eq + Hash + Clone{
 pub(crate) trait MergeRef: Sized 
 {
     type InnerExpr; 
-    fn create_obj(type_: Identifier, classes: HashMap<Identifier, Class>) -> Self;
+    fn create_obj(type_: Identifier, classes: &HashMap<Identifier, Rc<Class>>) -> Self;
     fn create_array_of_size(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType) -> Self;
     fn create_sym_ptr_indr(loc: i64, type_: RuntimeType) -> Self;
 
-    fn create_sym_obj<F>(type_: RuntimeType, classes: HashMap<Identifier, Class>, f: F) -> Self 
+    fn create_sym_obj<F>(type_: RuntimeType, classes: HashMap<Identifier, Rc<Class>>, f: F) -> Self 
         where
             F: FnMut(Self) -> i64;
     fn create_sym_array<F>(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType, f: F)
@@ -1933,8 +1935,8 @@ impl MergeRef for Rc<Tree<Rc<RExpr>, RHeapValue<RExpr>>>
         return r;
     }
     
-    fn create_obj(type_: Identifier, classes: HashMap<Identifier, Class>) -> Self{
-        let Class { members, ..} = classes.get(&type_).unwrap(); 
+    fn create_obj(type_: Identifier, classes: &HashMap<Identifier, Rc<Class>>) -> Self{
+        let Class { members, ..} = classes.get(&type_).unwrap().as_ref(); 
         let mut fields = BTreeMap::new();
         for member in members{
             match member{
@@ -1956,7 +1958,7 @@ impl MergeRef for Rc<Tree<Rc<RExpr>, RHeapValue<RExpr>>>
         }))
     }
     
-    fn create_sym_obj<F>(type_: RuntimeType, classes: HashMap<Identifier, Class>, f: F) -> Self 
+    fn create_sym_obj<F>(type_: RuntimeType, classes: HashMap<Identifier, Rc<Class>>, f: F) -> Self 
         where
             F: FnMut(Self) -> i64 {
         todo!()
@@ -2060,8 +2062,8 @@ impl MergeRef for HashSet<RHeapValue<RExpr>>{
         return result;
     }
 
-    fn create_obj(type_: Identifier, classes: HashMap<Identifier, Class>) -> Self{
-        let Class { members, ..} = classes.get(&type_).unwrap(); 
+    fn create_obj(type_: Identifier, classes: &HashMap<Identifier, Rc<Class>>) -> Self{
+        let Class { members, ..} = classes.get(&type_).unwrap().as_ref(); 
         let mut fields = BTreeMap::new();
         for member in members{
             match member{
@@ -2083,7 +2085,7 @@ impl MergeRef for HashSet<RHeapValue<RExpr>>{
         })
     }
     
-    fn create_sym_obj<F>(type_: RuntimeType, classes: HashMap<Identifier, Class>, f: F) -> Self 
+    fn create_sym_obj<F>(type_: RuntimeType, classes: HashMap<Identifier, Rc<Class>>, f: F) -> Self 
         where
             F: FnMut(Self) -> i64 {
         todo!()
@@ -2227,10 +2229,17 @@ impl<E, H> MergeState<E,H> where
 }
 
 impl<E, H> MergeEngine<E, H> {
-    pub(crate) fn new() -> Self{
+    pub(crate) fn new(decls: &HashMap<Identifier, Declaration>) -> Self{
         let config = Config::new();
         let context = Context::new(&config);
-        return MergeEngine { supply: 0, config, context, _p_e: PhantomData, _p_h: PhantomData };
+        
+        let classes = decls.iter().filter_map(|(i,d)|{
+            match d {
+                Declaration::Class(class) => Some((i.clone(), class.clone())),
+                Declaration::Interface(interface) => None,
+            }
+        }).collect(); 
+        return MergeEngine { supply: 0, config, context, _p_e: PhantomData, _p_h: PhantomData, classes };
     }
 
     pub(crate) fn next_reference_id(&mut self) -> i64 {
@@ -2251,7 +2260,6 @@ impl<E, H> MergeEngine<E, H> where
         expr: Rc<Expression>,
         symbols: Vec<(Identifier, Identifier, RuntimeType)>,
         rsymbols: Vec<(Identifier, Identifier, RuntimeType)>,
-        classes: HashMap<Identifier, Declaration> //need you for default creation of references 
     ) -> MergeState<E, H> {
         let mut top_frame: HashMap<Identifier, E> = HashMap::new();
         let mut start_heap: HashMap<i64, H> = HashMap::new();
@@ -2343,6 +2351,13 @@ impl<E, H> MergeEngine<E, H> where
         return Result::Ok;
     }
 
+    pub(crate) fn construct_ref(&mut self, state: &mut MergeState<E, H>, id: Identifier, type_: Identifier){
+        let heap_value = MergeRef::create_obj(type_.clone(), &self.classes);
+        let ptr = self.next_reference_id();
+        let ref_ = MergeExpr::mk_ref(ptr, RuntimeType::ReferenceRuntimeType { type_: type_ });
+        state.heap.insert(ptr, heap_value);
+        state.stack.last_mut().unwrap().insert(id, ref_);
+    }
     pub(crate) fn eval_with_r(&mut self, state: &mut MergeState<E, H>, rhs: &Rhs) -> E {
         match rhs {
             Rhs::RhsExpression {

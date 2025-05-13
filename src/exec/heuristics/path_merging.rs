@@ -4,7 +4,7 @@ use itertools::{izip, Either};
 use slog::Logger;
 
 use crate::{
-    cfg::CFGStatement, exec::{constants, IdCounter, SymResult}, merge::{DynamicPointer, MergeEngine, MergeExpr, MergeRef, MergeState, Mergeable, SetEngine, TreeEngine}, positioned::WithPosition, statistics::Statistics, symbol_table::SymbolTable, typeable::Typeable, Expression, Identifier, Invocation, Lhs, Options, Rhs, RuntimeType, Statement, TypeExpr
+    cfg::CFGStatement, exec::{constants::{self, this_str}, IdCounter, SymResult}, merge::{DynamicPointer, MergeEngine, MergeExpr, MergeRef, MergeState, Mergeable, SetEngine, TreeEngine}, positioned::WithPosition, statistics::Statistics, symbol_table::SymbolTable, typeable::Typeable, Expression, Identifier, Invocation, Lhs, Options, Rhs, RuntimeType, Statement, TypeExpr
 };
 
 use super::State;
@@ -22,6 +22,7 @@ pub(crate) fn sym_exec(
 ) -> SymResult {
     let mut symbols = vec![];
     let mut rsymbols = vec![];
+    let decls = &st.declarations;
     for (id, expr) in init.stack.current_stackframe().unwrap().params.iter() {
         println!("{:?}: {:?}", id, expr);
         match  expr.as_ref(){
@@ -45,8 +46,8 @@ pub(crate) fn sym_exec(
     }
 
     if abstraction {
-        let mut engine = SetEngine::new();
-        let state = engine.make_new_state(init.pc, Rc::new(Expression::TRUE), symbols, rsymbols, st.declarations.clone());
+        let mut engine = SetEngine::new(decls);
+        let state = engine.make_new_state(init.pc, Rc::new(Expression::TRUE), symbols, rsymbols);
         return run(
             engine,
             state,
@@ -60,8 +61,8 @@ pub(crate) fn sym_exec(
             options,
         );
     } else {
-        let mut engine = TreeEngine::new();
-        let state = engine.make_new_state(init.pc, Rc::new(Expression::TRUE), symbols, rsymbols, st.declarations.clone());
+        let mut engine = TreeEngine::new(decls);
+        let state = engine.make_new_state(init.pc, Rc::new(Expression::TRUE), symbols, rsymbols);
         return run(
             engine,
             state,
@@ -740,9 +741,9 @@ where
 
 fn insert_states_function_call<E, H>(
     engine: &mut MergeEngine<E, H>,
-    current: MergeState<E, H>,
+    mut current: MergeState<E, H>,
     values: &Vec<(RuntimeType, E)>,
-    constraints_target_pairs: &mut Vec<(Rc<Expression>, (u64, Vec<Identifier>))>,
+    constraints_target_pairs: &mut Vec<(Rc<Expression>, (u64, Vec<Identifier>, Option<Identifier>))>,
     paths: &mut Vec<(MergeState<E,H>, Status)>,
     merges: &mut Vec<MergeInfo>,
     return_var: Option<Lhs>,
@@ -756,10 +757,37 @@ fn insert_states_function_call<E, H>(
     }
     
 
+
+    if constraints_target_pairs.len() == 1{
+        let (p, (e, a, c)) = constraints_target_pairs.pop().unwrap();
+        engine.add_assumption_to(&mut current, Either::Left(p));
+        
+        for (arg, (type_, val)) in a.iter().zip(values.iter()) {
+            engine.assign_evaled(
+                &mut current,
+                &Lhs::LhsVar {
+                    var: arg.clone(),
+                    type_: type_.clone(),
+                    info: crate::SourcePos::UnknownPosition,
+                },
+                val.clone(),
+            );
+        }
+        current.set_pointer(e);
+        current.push_dynamic_cf(DynamicPointer::Ret(return_ptr, return_var.clone()));
+
+        if let Some(class) = c {
+            engine.construct_ref(&mut current, this_str(), class);
+        }
+
+        paths.push((current, Status::Active()));
+        return;
+    }
+
+    
     let mut head = current;
     let mut must_push = true;
-
-    while let Some((expr, (entry, args))) = constraints_target_pairs.pop() {
+    while let Some((expr, (entry, args, _))) = constraints_target_pairs.pop() {
         if constraints_target_pairs.len() > 0 {
             merges.push(MergeInfo {
                 merge_at: return_ptr,
@@ -822,7 +850,7 @@ fn get_possible_function_heads(
     invocation: &Invocation,
     st: &SymbolTable,
     funmap: &FTable,
-) -> Vec<(Rc<Expression>, (u64, Vec<Identifier>))> {
+) -> Vec<(Rc<Expression>, (u64, Vec<Identifier>, Option<Identifier>))> {
     match invocation {
         Invocation::InvokeMethod {
             lhs,
@@ -844,7 +872,7 @@ fn get_possible_function_heads(
                         .get(&(c.name().clone(), m.name.clone(), arg_types.clone()))
                         .unwrap()
                         .clone();
-                    res.push((Rc::new(Expression::TRUE), (ptr.0, ptr.1)));
+                    res.push((Rc::new(Expression::TRUE), (ptr.0, ptr.1, None)));
                 } else {
                     for (_i, (c, m)) in resolved.iter() {
                         let cond = Rc::new(Expression::TypeExpr {
@@ -861,7 +889,7 @@ fn get_possible_function_heads(
                             .get(&(c.name().clone(), m.name.clone(), arg_types.clone()))
                             .unwrap()
                             .clone();
-                        res.push((cond, (ptr.0, ptr.1)));
+                        res.push((cond, (ptr.0, ptr.1, None)));
                     }
                 }
             } else {
@@ -879,7 +907,7 @@ fn get_possible_function_heads(
                         },
                     });
                     let ptr = funmap.get(key).unwrap().clone();
-                    res.push((cond, (ptr.0, ptr.1)));
+                    res.push((cond, (ptr.0, ptr.1, None)));
                 }
             }
             return res;
@@ -903,20 +931,12 @@ fn get_possible_function_heads(
 
             let (i, m) = resolved.as_ref().map(AsRef::as_ref).unwrap();
             let class_name = i.name().clone();
-            let cond = Rc::new(Expression::TypeExpr {
-                texpr: TypeExpr::InstanceOf {
-                    var: constants::this_str(),
-                    rhs: RuntimeType::ReferenceRuntimeType {
-                        type_: class_name.clone(),
-                    },
-                    info: crate::SourcePos::UnknownPosition,
-                },
-            });
+            
             let ptr = funmap
-                .get(&(class_name, m.name.clone(), arg_types.clone()))
+                .get(&(class_name.clone(), m.name.clone(), arg_types.clone()))
                 .unwrap()
                 .clone();
-            return vec![(cond, (ptr.0, ptr.1))];
+            return vec![(Rc::new(Expression::TRUE), (ptr.0, ptr.1, Some(class_name)))];
         }
         Invocation::InvokeSuperConstructor {
             arguments: _,
