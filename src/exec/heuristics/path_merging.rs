@@ -24,7 +24,6 @@ pub(crate) fn sym_exec(
     let mut rsymbols = vec![];
     let decls = &st.declarations;
     for (id, expr) in init.stack.current_stackframe().unwrap().params.iter() {
-        println!("{:?}: {:?}", id, expr);
         match  expr.as_ref(){
             Expression::SymbolicVar {
                 var,

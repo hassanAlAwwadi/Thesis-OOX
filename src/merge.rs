@@ -1835,6 +1835,8 @@ impl<E> MergeExpr for HashSet<E> where E: MergeExpr + Eq + Hash + Clone{
 
 }
 
+//many a callback in here
+// wonder if that'll be inefficient
 pub(crate) trait MergeRef: Sized 
 {
     type InnerExpr; 
@@ -1851,37 +1853,33 @@ pub(crate) trait MergeRef: Sized
             F: FnMut() -> i64,
             G: FnMut(i64, Self) -> ();
 
-    //note the muteable fields and engines below
-    //this is because we might need to initialize heap values
     fn update_ref_field_to(
-        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
-        var: &Self::InnerExpr, 
+        var: Self::InnerExpr, 
         field: &Identifier, 
         value: Self::InnerExpr,
-        heap: &mut HashMap<i64, Self>
-    );  
+        state: &mut MergeState<Self::InnerExpr, Self>,
+        engine: &mut MergeEngine<Self::InnerExpr, Self>
+    ) -> ();
     
     fn update_ref_index_to(
-        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
-        var: &Self::InnerExpr, 
-        index: &Self::InnerExpr, 
-        value: Self::InnerExpr,
-        heap: &mut HashMap<i64, Self>
-    );
+        var: Self::InnerExpr, index: &Self::InnerExpr, value: Self::InnerExpr,
+        state: &mut MergeState<Self::InnerExpr, Self>,
+        engine: &mut MergeEngine<Self::InnerExpr, Self>
+    ) -> ();
 
     fn get_ref_field(
-        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
-        var: &Self::InnerExpr, 
+        var: Self::InnerExpr, 
         field: &Identifier, 
-        heap: &mut HashMap<i64, Self>
-    ) -> Self::InnerExpr;  
-    
-    fn get_ref_index(
-        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
-        var: &Self::InnerExpr, 
-        index: &Self::InnerExpr, 
-        heap: &mut HashMap<i64, Self>
+        state: &mut MergeState<Self::InnerExpr, Self>,
+        engine: &mut MergeEngine<Self::InnerExpr, Self>
     ) -> Self::InnerExpr;
+
+    fn get_ref_index(
+        var: Self::InnerExpr, 
+        index: &Self::InnerExpr, 
+        state: &mut MergeState<Self::InnerExpr, Self>,
+        engine: &mut MergeEngine<Self::InnerExpr, Self>
+    ) -> Self::InnerExpr; 
 
 }
 
@@ -2057,40 +2055,43 @@ impl MergeRef for Rc<Tree<Rc<RExpr>, RHeapValue<RExpr>>>
     }
     
     fn update_ref_field_to(
-        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
-        var: &Self::InnerExpr, 
+        var: Self::InnerExpr, 
         field: &Identifier, 
         value: Self::InnerExpr,
-        heap: &mut HashMap<i64, Self>
-    ) {
-        todo!()
-    }
+        state: &mut MergeState<Self::InnerExpr, Self>,
+        engine: &mut MergeEngine<Self::InnerExpr, Self>
+    ) -> () {
+            todo!()
+        }
     
     fn update_ref_index_to(
-        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
-        var: &Self::InnerExpr, 
-        index: &Self::InnerExpr, 
-        value: Self::InnerExpr,
-        heap: &mut HashMap<i64, Self>
-    ) {
+        var: Self::InnerExpr, index: &Self::InnerExpr, value: Self::InnerExpr,
+
+        //needed for lazy exapnding, of course
+        state: &mut MergeState<Self::InnerExpr, Self>,
+        engine: &mut MergeEngine<Self::InnerExpr, Self>
+    ) -> () 
+    {
         todo!()
     }
-    
+
     fn get_ref_field(
-        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
-        var: &Self::InnerExpr, 
+        var: Self::InnerExpr, 
         field: &Identifier, 
-        heap: &mut HashMap<i64, Self>
-    ) -> Self::InnerExpr {
+        state: &mut MergeState<Self::InnerExpr, Self>,
+        engine: &mut MergeEngine<Self::InnerExpr, Self>
+    ) -> Self::InnerExpr 
+    {
         todo!()
     }
-    
+
     fn get_ref_index(
-        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
-        var: &Self::InnerExpr, 
+        var: Self::InnerExpr, 
         index: &Self::InnerExpr, 
-        heap: &mut HashMap<i64, Self>
-    ) -> Self::InnerExpr {
+        state: &mut MergeState<Self::InnerExpr, Self>,
+        engine: &mut MergeEngine<Self::InnerExpr, Self>
+    ) -> Self::InnerExpr 
+    {
         todo!()
     }
 }
@@ -2275,40 +2276,42 @@ impl MergeRef for HashSet<RHeapValue<RExpr>>{
     }
     
     fn update_ref_field_to(
-        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
-        var: &Self::InnerExpr, 
+        var: Self::InnerExpr, 
         field: &Identifier, 
         value: Self::InnerExpr,
-        heap: &mut HashMap<i64, Self>
-    ) {
-        todo!()
-    }
+        state: &mut MergeState<Self::InnerExpr, Self>,
+        engine: &mut MergeEngine<Self::InnerExpr, Self>
+    ) -> () {
+            todo!()
+        }
     
     fn update_ref_index_to(
-        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
-        var: &Self::InnerExpr, 
-        index: &Self::InnerExpr, 
-        value: Self::InnerExpr,
-        heap: &mut HashMap<i64, Self>
-    ) {
+        var: Self::InnerExpr, index: &Self::InnerExpr, value: Self::InnerExpr,
+        //needed for lazy expanding, sadly
+        state: &mut MergeState<Self::InnerExpr, Self>,
+        engine: &mut MergeEngine<Self::InnerExpr, Self>
+    ) -> () 
+    {
         todo!()
     }
-    
+
     fn get_ref_field(
-        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
-        var: &Self::InnerExpr, 
+        var: Self::InnerExpr, 
         field: &Identifier, 
-        heap: &mut HashMap<i64, Self>
-    ) ->  Self::InnerExpr {
+        state: &mut MergeState<Self::InnerExpr, Self>,
+        engine: &mut MergeEngine<Self::InnerExpr, Self>
+    ) -> Self::InnerExpr 
+    {
         todo!()
     }
-    
+
     fn get_ref_index(
-        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
-        var: &Self::InnerExpr, 
+        var: Self::InnerExpr, 
         index: &Self::InnerExpr, 
-        heap: &mut HashMap<i64, Self>
-    ) -> Self::InnerExpr {
+        state: &mut MergeState<Self::InnerExpr, Self>,
+        engine: &mut MergeEngine<Self::InnerExpr, Self>
+    ) -> Self::InnerExpr 
+    {
         todo!()
     }
 
@@ -2552,7 +2555,12 @@ impl<E, H> MergeEngine<E, H> where
                 info: _,
             } => {
                 let var = self.eval_with(state, var.clone());
-                let field = MergeRef::get_ref_field( self, &var, field, &mut state.heap);
+                let field = MergeRef::get_ref_field(
+                    var, 
+                    field, 
+                    state,
+                    self
+                    );
                 return field;
             }
             Rhs::RhsElem {
@@ -2563,7 +2571,12 @@ impl<E, H> MergeEngine<E, H> where
             } => {
                 let var = self.eval_with(state, var.clone());
                 let index = self.eval_with(state, index.clone());
-                let elem = MergeRef::get_ref_index(self, &var, &index, &mut state.heap);
+                let elem = MergeRef::get_ref_index(
+                    var, 
+                    &index, 
+                    state,
+                    self
+                );
                 return elem;
             }
             Rhs::RhsArray {
@@ -2791,13 +2804,24 @@ impl<E, H> MergeEngine<E, H> where
                 state.stack.last_mut().unwrap().insert(var.clone(), value);
             },
             Lhs::LhsField { var, var_type, field, type_, info } => {
-                let var = state.stack.last_mut().unwrap().get(var).unwrap();
-                MergeRef::update_ref_field_to(self,  var, field, value, &mut state.heap)
+                let var = state.stack.last().unwrap().get(var).unwrap();
+                MergeRef::update_ref_field_to(
+                    var.clone(), 
+                    field, value, 
+                    state,
+                    self
+                    )
             },
             Lhs::LhsElem { var, index, type_, info } => {
                 let var = state.stack.last().unwrap().get(var).unwrap();
                 let index = self.eval_with(state, index.clone());
-                MergeRef::update_ref_index_to(self, var, &index, value, &mut state.heap)
+                MergeRef::update_ref_index_to(
+                    var.clone(), 
+                    &index, 
+                    value, 
+                    state,
+                    self
+                    )
             },
         };
     }   
