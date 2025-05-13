@@ -1828,16 +1828,6 @@ pub fn execute_verify_thrice(
     );
     let elapsed_set = now.elapsed();
 
-    if options.k > 200 { return (
-        tree_result,
-        tree_result,
-        set_result,
-        statistics,
-        elapsed_tree,
-        elapsed_tree,
-        elapsed_set,
-    );};
-
     let now = Instant::now();
     let raw_result = heuristics::depth_first_search::sym_exec(
         state,

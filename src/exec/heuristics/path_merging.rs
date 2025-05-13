@@ -4,11 +4,10 @@ use itertools::{izip, Either};
 use slog::Logger;
 
 use crate::{
-    cfg::CFGStatement, exec::{constants, IdCounter, SymResult}, merge::{DynamicPointer, MergeEngine, MergeState, SetEngine, TreeEngine}, positioned::WithPosition, statistics::Statistics, symbol_table::SymbolTable, typeable::Typeable, Expression, Identifier, Invocation, Lhs, Options, Rhs, RuntimeType, Statement, TypeExpr
+    cfg::CFGStatement, exec::{constants, IdCounter, SymResult}, merge::{DynamicPointer, MergeEngine, MergeExpr, MergeRef, MergeState, Mergeable, SetEngine, TreeEngine}, positioned::WithPosition, statistics::Statistics, symbol_table::SymbolTable, typeable::Typeable, Expression, Identifier, Invocation, Lhs, Options, Rhs, RuntimeType, Statement, TypeExpr
 };
 
 use super::State;
-
 pub(crate) fn sym_exec(
     init: State,
     program: &HashMap<u64, CFGStatement>,
@@ -22,22 +21,32 @@ pub(crate) fn sym_exec(
     abstraction: bool,
 ) -> SymResult {
     let mut symbols = vec![];
+    let mut rsymbols = vec![];
     for (id, expr) in init.stack.current_stackframe().unwrap().params.iter() {
-        if let Expression::SymbolicVar {
-            var,
-            type_,
-            info: _,
-        } = expr.as_ref()
-        {
-            symbols.push((id.clone(), var.clone(), type_.clone()));
-        } else {
-            panic!("starting out with non symbolic values!?");
+        println!("{:?}: {:?}", id, expr);
+        match  expr.as_ref(){
+            Expression::SymbolicVar {
+                var,
+                type_,
+                info: _,
+            } => {
+                symbols.push((id.clone(), var.clone(), type_.clone()));
+            } 
+            Expression::SymbolicRef { 
+                var, 
+                type_, 
+                info 
+            } => {
+                rsymbols.push((id.clone(), var.clone(), type_.clone()));
+
+            }
+            _ => {panic!("strange expr at start: {:?}", expr)}
         }
     }
 
     if abstraction {
         let mut engine = SetEngine::new();
-        let state = engine.make_new_state(init.pc, Rc::new(Expression::TRUE), symbols);
+        let state = engine.make_new_state(init.pc, Rc::new(Expression::TRUE), symbols, rsymbols, st.declarations.clone());
         return run(
             engine,
             state,
@@ -52,7 +61,7 @@ pub(crate) fn sym_exec(
         );
     } else {
         let mut engine = TreeEngine::new();
-        let state = engine.make_new_state(init.pc, Rc::new(Expression::TRUE), symbols);
+        let state = engine.make_new_state(init.pc, Rc::new(Expression::TRUE), symbols, rsymbols, st.declarations.clone());
         return run(
             engine,
             state,
@@ -80,9 +89,9 @@ struct MergeInfo {
 }
 
 type FTable = HashMap<(Identifier, Identifier, Vec<RuntimeType>), (u64, Vec<Identifier>, Rc<Expression>)>;
-fn run<T>(
-    mut engine: T,
-    init_state: T::State,
+fn run<E, H>(
+    mut engine: MergeEngine<E, H>,
+    init_state: MergeState<E, H>,
     program: &HashMap<u64, CFGStatement>,
     flows: &HashMap<u64, Vec<u64>>,
     st: &SymbolTable,
@@ -93,8 +102,8 @@ fn run<T>(
     options: &Options,
 ) -> SymResult
 where
-    T: MergeEngine,
-    T::EValue: Clone,
+    E: Mergeable<MergeOn = E> + MergeExpr,
+    H: Mergeable<MergeOn = E> + MergeRef<InnerExpr = E>
 {
     let mut function_entry_map: FTable = HashMap::new();
 
@@ -158,7 +167,7 @@ where
     }
     // states that are actively progressing
     // together with a reference to their parent and sibling
-    let mut paths: Vec<(T::State, Status)> = vec![];
+    let mut paths: Vec<(MergeState<E,H>, Status)> = vec![];
     let mut m_at_s_at: Vec<MergeInfo> = vec![];
     paths.push((init_state, Status::Active()));
 
@@ -729,18 +738,18 @@ where
     return SymResult::Valid;
 }
 
-fn insert_states_function_call<T>(
-    engine: &mut T,
-    current: T::State,
-    values: &Vec<(RuntimeType, T::EValue)>,
+fn insert_states_function_call<E, H>(
+    engine: &mut MergeEngine<E, H>,
+    current: MergeState<E, H>,
+    values: &Vec<(RuntimeType, E)>,
     constraints_target_pairs: &mut Vec<(Rc<Expression>, (u64, Vec<Identifier>))>,
-    paths: &mut Vec<(T::State, Status)>,
+    paths: &mut Vec<(MergeState<E,H>, Status)>,
     merges: &mut Vec<MergeInfo>,
     return_var: Option<Lhs>,
     return_ptr: u64,
 ) where
-    T: MergeEngine,
-    T::EValue: Clone,
+    E: Mergeable<MergeOn = E> + MergeExpr,
+    H: Mergeable<MergeOn = E> + MergeRef<InnerExpr = E>
 {
     if constraints_target_pairs.len() <= 0 {
         panic!("no function entry points found")
@@ -917,9 +926,8 @@ fn get_possible_function_heads(
     }
 }
 
-fn set_to_next_pc<T>(top_state: &mut T, flows: &HashMap<u64, Vec<u64>>)
+fn set_to_next_pc<E, H>(top_state: &mut MergeState<E, H>, flows: &HashMap<u64, Vec<u64>>)
 where
-    T: MergeState,
 {
     let nexts = flows
         .get(&top_state.get_pointer())

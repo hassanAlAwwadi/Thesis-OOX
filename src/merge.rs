@@ -1,20 +1,26 @@
+use itertools::izip;
 use itertools::Either;
 
 use itertools::iproduct;
+use itertools::Merge;
 use ordered_float::NotNan;
 use utils::utils::{hash_unit, union, union_with};
 use z3::ast::Array;
 use z3::ast::Datatype;
+use z3::DatatypeBuilder;
+use z3::DatatypeSort;
 use z3::Sort;
 
 use crate::typeable::Typeable;
 
 use crate::SourcePos;
+use crate::SymbolTable;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
 use std::hash::Hash;
+use std::marker::PhantomData;
 use std::panic;
 
 use std::rc::Rc;
@@ -50,15 +56,11 @@ pub(crate) enum RExpr {
         id: Identifier,
         type_: RuntimeType,
     },
-    //symbolic reference
-    SRf {
-        ptr: i64,
-        type_: RuntimeType,
-    },
     //reference to a variable
     Ref {
         ptr: i64,
         type_: RuntimeType,
+        // we expand lazely, when needed
     },
     //binary operation
     Bin {
@@ -88,12 +90,13 @@ pub(crate) enum RExpr {
         type_: RuntimeType,
     },
 }
+
+/** mainly front end simplification **/
 impl RExpr {
     fn get_type(&self) -> RuntimeType {
         match self {
             RExpr::Lit { type_, .. } => type_.clone(),
             RExpr::Sym { type_, .. } => type_.clone(),
-            RExpr::SRf { type_, .. } => type_.clone(),
             RExpr::Ref { type_, .. } => type_.clone(),
             RExpr::Bin { type_, .. } => type_.clone(),
             RExpr::Typ { type_, .. } => type_.clone(),
@@ -957,9 +960,6 @@ impl RExpr {
             RExpr::Ref { ptr, type_: _ } => {
                 format!("&{}", ptr)
             }
-            RExpr::SRf { ptr, type_: _ } => {
-                format!("$&{}", ptr)
-            }
             RExpr::Bin {
                 op,
                 left,
@@ -1068,31 +1068,6 @@ impl RExpr {
         }
     }
 
-    fn default(type_: &NonVoidType) -> Rc<Self> {
-        match type_ {
-            NonVoidType::IntType { .. } => Rc::new(RExpr::Lit {
-                lit: Lit::IntLit { int_value: 0 },
-                type_: RuntimeType::IntRuntimeType,
-            }),
-            NonVoidType::FloatType { .. } => Rc::new(RExpr::Lit {
-                lit: Lit::FloatLit {
-                    float_value: NotNan::new(0.0).unwrap(),
-                },
-                type_: RuntimeType::FloatRuntimeType,
-            }),
-            NonVoidType::BoolType { .. } => Rc::new(RExpr::Lit {
-                lit: Lit::BoolLit { bool_value: false },
-                type_: RuntimeType::BoolRuntimeType,
-            }),
-            NonVoidType::StringType { .. } => Rc::new(RExpr::Lit {
-                lit: Lit::StringLit {
-                    string_value: String::new(),
-                },
-                type_: RuntimeType::StringRuntimeType,
-            }),
-            _ => panic!("Unsupported runtime type for default value"),
-        }
-    }
 }
 
 struct Z3Builder<'a, F, G> {
@@ -1137,8 +1112,7 @@ impl<'a, F, G> Z3Builder<'a, F, G> {
                     return ast;
                 }
             }
-            RExpr::Ref { ptr: _, type_: _ } => unreachable!("this one really should not be here"),
-            RExpr::SRf { ptr: _, type_: _ } => unreachable!("this one really should not be here"),
+            RExpr::Ref { .. } => unreachable!("this one really should not be here"),
             RExpr::Bin {
                 op,
                 left,
@@ -1326,7 +1300,6 @@ impl<'a, F, G> Z3Builder<'a, F, G> {
                 }
             }
             RExpr::Ref { .. } => panic!("this one really should not be here"),
-            RExpr::SRf { .. } => panic!("this one really should not be here"),
             RExpr::Bin {
                 op,
                 left,
@@ -1387,49 +1360,7 @@ impl<'a, F, G> Z3Builder<'a, F, G> {
         F: Clone + Fn(&i64, &'a Context) -> Array<'a>,
         G: Clone + Fn(&i64, &'a Context) -> Datatype<'a>,
     {
-        match expr.as_ref() {
-            RExpr::Ref { ptr, type_ } => {
-                if let Some(ast) = self.amemory.get(ptr) {
-                    return ast.clone();
-                } else {
-                    let ast = (self.get_arr)(&ptr, context);
-                    self.amemory.insert(ptr.clone(), ast.clone());
-                    return ast;
-                }
-            }
-            RExpr::SRf { ptr, type_ } => {
-                if let Some(ast) = self.amemory.get(ptr) {
-                    return ast.clone();
-                } else {
-                    let ast = match type_ {
-                        RuntimeType::ArrayRuntimeType { inner_type } => {
-                            let domain = Sort::int(context);
-                            let range = match inner_type.as_ref() {
-                                RuntimeType::IntRuntimeType => Sort::int(context),
-                                RuntimeType::BoolRuntimeType => Sort::bool(context),
-                                _ => panic!("Expected an integer type, but got {:?}", inner_type),
-                            };
-                            Array::new_const(&context, format!("{}", ptr), &domain, &range)
-                        }
-                        _ => panic!("Expected a array type, but got {:?}", type_),
-                    };
-                    self.amemory.insert(ptr.clone(), ast.clone());
-                    return ast;
-                }
-            }
-            RExpr::Con {
-                con,
-                left,
-                right,
-                type_,
-            } => {
-                let cond = self.expr_to_bool(con.clone(), context);
-                let left = self.expr_to_array(left.clone(), context);
-                let right = self.expr_to_array(right.clone(), context);
-                return cond.ite(&left, &right);
-            }
-            _ => panic!("Expected a reference expression, but got {:?}", expr),
-        }
+        todo!("thhis should def have a different return type")
     }
 
     fn expr_to_ref(self: &mut Self, expr: Rc<RExpr>, context: &'a Context) -> Datatype<'a>
@@ -1437,57 +1368,52 @@ impl<'a, F, G> Z3Builder<'a, F, G> {
         F: Clone + Fn(&i64, &'a Context) -> Array<'a>,
         G: Clone + Fn(&i64, &'a Context) -> Datatype<'a>,
     {
-        match expr.as_ref() {
-            RExpr::Ref { ptr, type_ } => {
-                if let Some(ast) = self.rmemory.get(ptr) {
-                    return ast.clone();
-                } else {
-                    let ast = (self.get_ref)(&ptr, context);
-                    self.rmemory.insert(ptr.clone(), ast.clone());
-                    return ast;
-                }
-            }
-            RExpr::SRf { ptr, type_ } => {
-                if let Some(ast) = self.rmemory.get(ptr) {
-                    return ast.clone();
-                } else {
-                    let ast = match type_ {
-                        RuntimeType::ReferenceRuntimeType { type_, .. } => {
-                            Datatype::new_const(&context, format!("{}", ptr), todo!())
-                        }
-                        _ => panic!("Expected a reference type, but got {:?}", type_),
-                    };
-                    self.rmemory.insert(ptr.clone(), ast.clone());
-                    return ast;
-                }
-            }
-            RExpr::Con {
-                con,
-                left,
-                right,
-                type_,
-            } => {
-                let cond = self.expr_to_bool(con.clone(), context);
-                let left = self.expr_to_ref(left.clone(), context);
-                let right = self.expr_to_ref(right.clone(), context);
-                return cond.ite(&left, &right);
-            }
-            _ => panic!("Expected a reference expression, but got {:?}", expr),
-        }
+        todo!("this should def have a different return type btw, one that acknowledges the possibility of a pointer and null and all that")
     }
 }
 //Resolved heapvalue
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Debug)]
 pub(crate) enum RHeapValue<T> {
     ObjectValue {
+        // if you are generated from a symbolic reference, and we need to further generate
+        // referecens you keep, we need to make sure those are also generated according to
+        // symbolic ref procedures
+        sym: bool,
         fields: BTreeMap<Identifier, Rc<T>>,
-        type_: RuntimeType,
+        type_: Identifier,
     },
     ArrayValue {
+        // if you are generated from a symbolic reference, and we need to further generate
+        // referecens you keep, we need to make sure those are also generated according to
+        // symbolic ref procedures
+        sym: bool, 
+        // If the size is complex, the inner element vector will be stretched as needed 
+        size: Either<usize, Rc<T>>,
+        // and if its symbolic, when I stretch I'll fill it with symbolic values 
         elements: Vec<Rc<T>>,
         type_: RuntimeType,
+        
     },
+    SymPtrIndr{
+        // we can have predicates over this symbol
+        symbol_ptr: Identifier,
+        ptr: SymPtrIndr,
+        type_ : RuntimeType,
+    }
 }
+
+#[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Debug)]
+pub(crate) enum SymPtrIndr{
+    //lazy initialization means we sometimes wait before initing
+    Uninitialized,
+    Possible{
+        nullable: bool,
+        possibilities: Vec<(i64, RuntimeType)>
+    }
+
+}
+ 
+
 
 #[derive(PartialEq, Clone, Debug)]
 pub(crate) enum DynamicPointer {
@@ -1499,781 +1425,16 @@ pub(crate) enum DynamicPointer {
     Thr(u64, u64),
 }
 
-pub trait MergeEngine {
-    type State: MergeState;
-    type EValue;
-    fn new() -> Self;
-
-    fn next_reference_id(&mut self) -> i64;
-
-    fn make_new_state(
-        self: &mut Self,
-        pc: u64,
-        expr: Rc<Expression>,
-        symbols: Vec<(Identifier, Identifier, RuntimeType)>,
-    ) -> Self::State;
-
-    fn split_on(
-        &mut self,
-        state: &mut Self::State,
-        expr: Rc<Expression>,
-    ) -> (Self::State, Self::State);
-
-    fn decl_in(
-        &mut self,
-        state: &mut Self::State,
-        r#type: &NonVoidType,
-        var: &Identifier,
-        _info: &SourcePos,
-    ) -> Result;
-
-    fn eval_with_r(&mut self, state: &mut Self::State, rhs: &Rhs) -> Self::EValue;
-    fn eval_with(&self, state: &Self::State, expr: Rc<Expression>) -> Self::EValue;
-
-    fn assign_expr(&mut self, state: &mut Self::State, lhs: &Lhs, rhs: &Rhs) -> bool;
-    fn assign_evaled(&mut self, state: &mut Self::State, lhs: &Lhs, value: Self::EValue);
-
-    fn is_feasible(&self, state: &Self::State) -> bool;
-    fn is_valid_for(&self, state: &Self::State, expr: Rc<Expression>) -> bool;
-
-    fn add_assumption_to(
-        &self,
-        state: &mut Self::State,
-        assumption: Either<Rc<Expression>, TypeExpr>,
-    );
-}
-pub trait MergeState {
-    fn path_length(&self) -> u64;
-
-    fn incr_path(&mut self) -> u64;
-
-    fn get_pointer(&self) -> u64;
-
-    fn set_pointer(&mut self, ptr: u64) -> u64;
-
-    fn pop_stack(&mut self) -> ();
-
-    fn push_stack(&mut self) -> ();
-
-    fn get_dynamic_cf_size(&self) -> usize;
-
-    fn pop_dynamic_cf(&mut self) -> Option<DynamicPointer>;
-
-    fn push_dynamic_cf(&mut self, dn: DynamicPointer) -> ();
-
-    fn merge_full(&mut self, left: Self, right: Self) -> ();
-
-    fn merge_part(&mut self, left: Self) -> ();
-}
-
-pub(crate) type SValue = HashSet<Rc<RExpr>>;
-type SStack = Vec<HashMap<Identifier, SValue>>;
-type SHeap = HashMap<i64, HashSet<RHeapValue<RExpr>>>;
-
-pub mod svalue {
-    use super::*;
-    pub fn or(unq_constr_1: SValue, unq_constr_2: SValue) -> SValue {
-        iproduct!(unq_constr_1.iter(), unq_constr_2.iter())
-            .map(|(l, r)| {
-                RExpr::evaluate_binop(
-                    BinOp::Or,
-                    l.clone(),
-                    r.clone(),
-                    RuntimeType::BoolRuntimeType,
-                )
-            })
-            .collect()
-    }
-
-    pub fn and(unq_constr_1: SValue, unq_constr_2: SValue) -> SValue {
-        iproduct!(unq_constr_1.iter(), unq_constr_2.iter())
-            .map(|(l, r)| {
-                RExpr::evaluate_binop(
-                    BinOp::And,
-                    l.clone(),
-                    r.clone(),
-                    RuntimeType::BoolRuntimeType,
-                )
-            })
-            .collect()
-    }
-
-    pub fn mk_true() -> SValue {
-        return hash_unit(Rc::new(RExpr::Lit {
-            lit: Lit::BoolLit { bool_value: true },
-            type_: RuntimeType::BoolRuntimeType,
-        }));
-    }
-}
-pub(crate) struct SetState {
-    pointer: u64,
-    path_length: u64,
-    hed_constr: SValue,
-    unq_constr: SValue,
-    stack: SStack,
-    heap: SHeap,
-    dynamic_cont: Vec<DynamicPointer>,
-}
-pub(crate) struct SetEngine {
+pub(crate) struct MergeEngine<E, H> {
+    _p_e: PhantomData<E>,
+    _p_h: PhantomData<H>,
     supply: i64,
+    config: Config,
+    context: Context,
 }
 
-impl MergeEngine for SetEngine {
-    type State = SetState;
-    type EValue = SValue;
-    fn new() -> Self {
-        return SetEngine { supply: 0 };
-    }
-
-    fn next_reference_id(&mut self) -> i64 {
-        let s = self.supply.clone();
-        self.supply = self.supply + 1;
-        return s;
-    }
-
-    fn make_new_state(
-        self: &mut Self,
-        pc: u64,
-        expr: Rc<Expression>,
-        symbols: Vec<(Identifier, Identifier, RuntimeType)>,
-    ) -> SetState {
-        let mut hashmap = HashMap::new();
-        for (k, s, t) in symbols {
-            hashmap.insert(k, hash_unit(Rc::new(RExpr::Sym { id: s, type_: t })));
-        }
-
-        let mut temp = SetState {
-            path_length: 0,
-            pointer: pc,
-            hed_constr: svalue::mk_true(),
-            unq_constr: svalue::mk_true(),
-            stack: vec![hashmap],
-            heap: HashMap::new(),
-            dynamic_cont: vec![],
-        };
-
-        let constr = self.eval_with(&mut temp, expr);
-
-        temp.hed_constr = constr;
-        return temp;
-    }
-
-    fn split_on(&mut self, state: &mut SetState, constraint: Rc<Expression>) -> (SetState, SetState) {
-        //the constraint will be assumed later on in the program, so we can ignore it here
-        let new_top: SValue = iproduct!(state.hed_constr.iter(), state.unq_constr.iter())
-            .map(|(l, r)| {
-                RExpr::evaluate_binop(
-                    BinOp::And,
-                    l.clone(),
-                    r.clone(),
-                    RuntimeType::BoolRuntimeType,
-                )
-            })
-            .collect();
-
-        let left = SetState {
-            path_length: state.path_length,
-            pointer: state.pointer,
-            hed_constr: new_top.clone(),
-            unq_constr: svalue::mk_true(),
-            stack: state.stack.clone(),
-            heap: state.heap.clone(),
-            dynamic_cont: state.dynamic_cont.clone(),
-        };
-        let right = SetState {
-            path_length: state.path_length,
-            pointer: state.pointer,
-            hed_constr: new_top,
-            unq_constr: svalue::mk_true(),
-            stack: state.stack.clone(),
-            heap: state.heap.clone(),
-            dynamic_cont: state.dynamic_cont.clone(),
-        };
-
-        return (left, right);
-    }
-
-    fn decl_in(
-        &mut self,
-        state: &mut SetState,
-        r#type: &NonVoidType,
-        var: &Identifier,
-        _info: &SourcePos,
-    ) -> Result {
-        let val = self.eval_with(state, Rc::new(r#type.default()));
-        state
-            .stack
-            .last_mut()
-            .map(|frame| frame.insert(var.clone(), val));
-        return Result::Ok;
-    }
-
-    fn eval_with_r(&mut self, state: &mut SetState, rhs: &Rhs) -> SValue {
-        match rhs {
-            Rhs::RhsExpression {
-                value,
-                type_: _,
-                info: _,
-            } => {
-                let vals = self.eval_with(state, value.clone());
-                return vals;
-            }
-            Rhs::RhsField {
-                var,
-                field,
-                type_: _,
-                info: _,
-            } => {
-                let _stack = state.stack.last().unwrap();
-                let reference_set = self.eval_with(state, var.clone());
-                let mut new_values = HashSet::new();
-                for reference in reference_set {
-                    if let RExpr::Ref { ptr, type_: _ } = reference.as_ref() {
-                        for heap_value in state.heap.get(ptr).unwrap_or(&HashSet::new()) {
-                            if let RHeapValue::ObjectValue { fields, type_: _ } = heap_value {
-                                if let Some(value) = fields.get(field) {
-                                    new_values.insert(value.clone());
-                                }
-                            } else {
-                                panic!(
-                                    "Expected an object value in the heap, but got {:?}",
-                                    heap_value
-                                );
-                            }
-                        }
-                    } else {
-                        panic!("Expected a reference, but got {:?}", reference);
-                    }
-                }
-                return new_values;
-            }
-            Rhs::RhsElem {
-                var,
-                index,
-                type_: _,
-                info: _,
-            } => {
-                let _stack = state.stack.last().unwrap();
-                let reference_set = self.eval_with(state, var.clone());
-
-                let index_set: Vec<usize> = self
-                    .eval_with(state, index.clone())
-                    .into_iter()
-                    .map(|i| {
-                        if let RExpr::Lit {
-                            lit: Lit::IntLit { int_value },
-                            ..
-                        } = i.as_ref()
-                        {
-                            *int_value as usize
-                        } else {
-                            panic!(
-                                "Expected an integer literal for array index, but got {:?}",
-                                i
-                            );
-                        }
-                    })
-                    .collect();
-
-                let mut new_values = HashSet::new();
-                for (reference, index) in iproduct!(reference_set.iter(), index_set.iter()) {
-                    if let RExpr::Ref { ptr, type_: _ } = reference.as_ref() {
-                        for heap_value in state.heap.get(ptr).unwrap_or(&HashSet::new()) {
-                            if let RHeapValue::ArrayValue { elements, type_: _ } = heap_value {
-                                if let Some(value) = elements.get(*index) {
-                                    new_values.insert(value.clone());
-                                }
-                            } else {
-                                panic!(
-                                    "Expected an array value in the heap, but got {:?}",
-                                    heap_value
-                                );
-                            }
-                        }
-                    } else {
-                        panic!("Expected a reference, but got {:?}", reference);
-                    }
-                }
-                return new_values;
-            }
-            Rhs::RhsArray {
-                array_type,
-                sizes,
-                type_,
-                info: _,
-            } => {
-                assert!(sizes.len() == 1, "Support for only 1D arrays");
-                let size = sizes[0].clone();
-                let sizes: Vec<_> = self
-                    .eval_with(state, size)
-                    .into_iter()
-                    .map(|i| {
-                        if let RExpr::Lit {
-                            lit: Lit::IntLit { int_value },
-                            ..
-                        } = i.as_ref()
-                        {
-                            *int_value as usize
-                        } else {
-                            panic!(
-                                "Expected an integer literal for array index, but got {:?}",
-                                i
-                            );
-                        }
-                    })
-                    .collect();
-
-                let new_ref = self.next_reference_id();
-                let mut new_values = HashSet::new();
-                for size in sizes {
-                    let mut new_elements = vec![];
-                    for _ in 0..size {
-                        new_elements.push(RExpr::default(array_type));
-                    }
-                    let new_value = RHeapValue::ArrayValue {
-                        elements: new_elements,
-                        type_: array_type.clone().into(),
-                    };
-
-                    new_values.insert(new_value);
-                }
-                state.heap.insert(new_ref, new_values);
-                return hash_unit(Rc::new(RExpr::Ref {
-                    ptr: new_ref,
-                    type_: type_.clone(),
-                }));
-            }
-            Rhs::RhsCast {
-                cast_type: _,
-                var: _,
-                info: _,
-            } => todo!("casting"),
-            Rhs::RhsCall {
-                invocation: _,
-                type_: _,
-                info: _,
-            } => unreachable!("should be handled by the engine"),
-        }
-    }
-    fn eval_with(&self, state: &SetState, expr: Rc<Expression>) -> SValue {
-        match expr.as_ref() {
-            Expression::Lit {
-                lit,
-                type_,
-                info: _,
-            } => hash_unit(Rc::new(RExpr::Lit {
-                lit: lit.clone(),
-                type_: type_.clone(),
-            })),
-            Expression::SymbolicVar {
-                var,
-                type_,
-                info: _,
-            } => hash_unit(Rc::new(RExpr::Sym {
-                id: var.clone(),
-                type_: type_.clone(),
-            })),
-            Expression::Ref {
-                ref_,
-                type_,
-                info: _,
-            } => hash_unit(Rc::new(RExpr::Ref {
-                ptr: ref_.clone(),
-                type_: type_.clone(),
-            })),
-
-            Expression::Var {
-                var,
-                type_: _,
-                info: _,
-            } => state.stack.last().unwrap().get(var).unwrap().clone(),
-
-            Expression::Conditional {
-                guard,
-                true_,
-                false_,
-                type_,
-                info: _,
-            } => {
-                let gs = self.eval_with(state, guard.clone());
-                let ls = self.eval_with(state, true_.clone());
-                let rs = self.eval_with(state, false_.clone());
-                iproduct!(gs.iter(), ls.iter(), rs.iter())
-                    .map(|(g, l, r)| {
-                        RExpr::evaluate_guard(g.clone(), l.clone(), r.clone(), type_.clone())
-                    })
-                    .collect()
-            }
-            Expression::BinOp {
-                bin_op,
-                lhs,
-                rhs,
-                type_,
-                info: _,
-            } => {
-                let ls = self.eval_with(state, lhs.clone());
-                let rs = self.eval_with(state, rhs.clone());
-                iproduct!(ls.iter(), rs.iter())
-                    .map(|(l, r)| {
-                        RExpr::evaluate_binop(bin_op.clone(), l.clone(), r.clone(), type_.clone())
-                    })
-                    .collect()
-            }
-
-            Expression::TypeExpr { texpr } => match texpr {
-                TypeExpr::InstanceOf { var, rhs, info: _ } => {
-                    let vals = state.stack.last().unwrap().get(var).unwrap().clone();
-                    vals.iter()
-                        .map(|val| {
-                            RExpr::evaluate_tyop(TyOp::IsInstanceOf, val.clone(), rhs.clone())
-                        })
-                        .collect()
-                }
-                TypeExpr::NotInstanceOf { var, rhs, info: _ } => {
-                    let vals = state.stack.last().unwrap().get(var).unwrap().clone();
-                    vals.iter()
-                        .map(|val| {
-                            RExpr::evaluate_tyop(TyOp::IsNotInstanceOf, val.clone(), rhs.clone())
-                        })
-                        .collect()
-                }
-            },
-
-            Expression::UnOp {
-                un_op,
-                value,
-                type_: _,
-                info: _,
-            } => {
-                let vals = self.eval_with(state, value.clone());
-                vals.iter()
-                    .map(|val| RExpr::evaluate_unop(un_op.clone(), val.clone()))
-                    .collect()
-            }
-
-            //should de doable
-            Expression::SizeOf {
-                var: _,
-                type_: _,
-                info: _,
-            } => todo!(),
-
-            //won't be done for a while
-            Expression::SymbolicRef {
-                var: _,
-                type_: _,
-                info: _,
-            } => todo!(),
-            Expression::Forall {
-                elem: _,
-                range: _,
-                domain: _,
-                formula: _,
-                type_: _,
-                info: _,
-            } => todo!(),
-            Expression::Exists {
-                elem: _,
-                range: _,
-                domain: _,
-                formula: _,
-                type_: _,
-                info: _,
-            } => todo!(),
-        }
-    }
-
-    fn assign_expr(&mut self, state: &mut SetState, lhs: &Lhs, rhs: &Rhs) -> bool {
-        let expr = self.eval_with_r(state, rhs);
-        self.assign_evaled(state, lhs, expr);
-        return true;
-    }
-    fn assign_evaled(&mut self, state: &mut SetState, lhs: &Lhs, value: SValue) {
-        match lhs {
-            Lhs::LhsVar {
-                var,
-                type_: _,
-                info: _,
-            } => {
-                let stack = state.stack.last_mut().unwrap();
-                stack.insert(var.clone(), value);
-            }
-            Lhs::LhsElem {
-                var,
-                index,
-                type_: _,
-                info: _,
-            } => {
-                let indexset: Vec<usize> = self
-                    .eval_with(state, index.clone())
-                    .into_iter()
-                    .map(|i| {
-                        if let RExpr::Lit {
-                            lit: Lit::IntLit { int_value },
-                            ..
-                        } = i.as_ref()
-                        {
-                            *int_value as usize
-                        } else {
-                            panic!(
-                                "Expected an integer literal for array index, but got {:?}",
-                                i
-                            );
-                        }
-                    })
-                    .collect();
-                let stack = state.stack.last().unwrap();
-                let references = stack.get(var).unwrap();
-                //its a hashset of possibilities, but each one should be fully resolved
-
-                let i_rs: Vec<_> = iproduct!(indexset, references).collect();
-                // if there is only one possible reference to change, then the old value of that reference can be thrown away;
-                let mut buffer = HashMap::new();
-                for (index, reference) in i_rs {
-                    if let RExpr::Ref { ptr, type_: _ } = reference.as_ref() {
-                        let mut new_values = HashSet::new();
-                        for heap_value in state.heap.get(ptr).unwrap_or(&HashSet::new()) {
-                            if let RHeapValue::ArrayValue { elements, type_ } = heap_value {
-                                for val in &value {
-                                    let mut updated_elements = elements.clone();
-                                    updated_elements[index] = val.clone();
-                                    new_values.insert(RHeapValue::ArrayValue {
-                                        elements: updated_elements,
-                                        type_: type_.clone(),
-                                    });
-                                }
-                            } else {
-                                panic!(
-                                    "Expected an array value in the heap, but got {:?}",
-                                    heap_value
-                                );
-                            }
-                            if references.len() != 1 {
-                                new_values.insert(heap_value.clone());
-                            }
-                        }
-                        buffer.insert(ptr, new_values);
-                    } else {
-                        panic!("Expected a reference, but got {:?}", reference);
-                    }
-                }
-                for (k, v) in buffer {
-                    state.heap.insert(*k, v);
-                }
-            }
-            Lhs::LhsField {
-                var,
-                var_type: _,
-                field,
-                type_: _,
-                info: _,
-            } => {
-                let stack = state.stack.last().unwrap();
-                let references = stack.get(var).unwrap();
-
-                let mut buffer = HashMap::new();
-                for reference in references {
-                    if let RExpr::Ref { ptr, type_: _ } = reference.as_ref() {
-                        let mut new_values = HashSet::new();
-                        for heap_value in state.heap.get(ptr).unwrap_or(&HashSet::new()) {
-                            if let RHeapValue::ObjectValue { fields, type_ } = heap_value {
-                                for val in &value {
-                                    let mut updated_fields = fields.clone();
-                                    updated_fields.insert(field.clone(), val.clone());
-                                    new_values.insert(RHeapValue::ObjectValue {
-                                        fields: updated_fields,
-                                        type_: type_.clone(),
-                                    });
-                                }
-                            } else {
-                                panic!(
-                                    "Expected an object value in the heap, but got {:?}",
-                                    heap_value
-                                );
-                            }
-                            if references.len() != 1 {
-                                new_values.insert(heap_value.clone());
-                            }
-                        }
-                        buffer.insert(ptr, new_values);
-                    } else {
-                        panic!("Expected a reference, but got {:?}", reference);
-                    }
-                }
-                for (k, v) in buffer {
-                    state.heap.insert(*k, v);
-                }
-            }
-        }
-    }
-
-    fn is_feasible(&self, state: &SetState) -> bool {
-        let mut config = Config::new();
-        config.set_proof_generation(true);
-        let context: Context = Context::new(&config);
-        let get_arr = |_: &i64, _: &Context| -> Array { panic!() };
-        let get_ref = |_: &i64, _: &Context| -> Datatype { panic!() };
-        let mut z3_builder = Z3Builder::new(get_arr, get_ref);
-        let solver = Solver::new(&context);
-        solver.push();
-
-        let constrs: Vec<_> = iproduct!(state.hed_constr.iter(), state.unq_constr.iter())
-            .map(|(l, r)| {
-                let temp = Rc::new(RExpr::Bin {
-                    op: BinOp::And,
-                    left: l.clone(),
-                    right: r.clone(),
-                    type_: RuntimeType::BoolRuntimeType,
-                });
-                z3_builder.expr_to_bool(temp, &context)
-            })
-            .collect();
-
-        let constr: Bool<'_> = Bool::or(&context, constrs.iter().collect::<Vec<_>>().as_slice());
-        solver.assert(&constr);
-        let result = solver.check();
-
-        // Check satisfiability
-        solver.pop(1);
-        return matches!(result, z3::SatResult::Sat);
-    }
-    fn is_valid_for(&self, state: &SetState, expr: Rc<Expression>) -> bool {
-        /*
-        if let Some(last_frame) = state.stack.last() {
-          for (key, value) in last_frame {
-            println!("Key: {:?}", key);
-            for possible_value in value {
-              println!("Possible Value: {:?}", possible_value.clone().as_string(|v| {return format!("()")} ));
-            }
-          }
-        } else {
-          println!("Stack is empty");
-        }
-        */
-        let config = Config::new();
-        let context: Context = Context::new(&config);
-        let get_arr = |_: &i64, _: &Context| -> Array { panic!() };
-        let get_ref = |_: &i64, _: &Context| -> Datatype { panic!() };
-        let mut z3_builder = Z3Builder::new(get_arr, get_ref);
-        let solver = Solver::new(&context);
-        solver.push();
-
-        let premise = svalue::and(state.hed_constr.clone(), state.unq_constr.clone());
-        let premise: Vec<_> = premise
-            .iter()
-            .map(|v| z3_builder.expr_to_bool(v.clone(), &context))
-            .collect();
-        let premise = Bool::or(&context, premise.iter().collect::<Vec<_>>().as_slice());
-
-        let conclusion = self.eval_with(state, expr);
-        let conclusion: Vec<_> = conclusion
-            .iter()
-            .map(|v| z3_builder.expr_to_bool(v.clone(), &context))
-            .collect();
-        let conclusion = Bool::or(&context, conclusion.iter().collect::<Vec<_>>().as_slice());
-
-        let constraint = premise.implies(&conclusion);
-        let constraint = constraint.not();
-
-        // Check satisfiability
-        solver.assert(&constraint);
-        let result = solver.check();
-
-        solver.pop(1);
-        return matches!(result, z3::SatResult::Unsat);
-    }
-
-    fn add_assumption_to(
-        &self,
-        state: &mut SetState,
-        assumption: Either<Rc<Expression>, TypeExpr>,
-    ) {
-        let expr = assumption.either(|s| s, |t| Rc::new(Expression::TypeExpr { texpr: t }));
-        let cond = self.eval_with(state, expr);
-        state.unq_constr = svalue::and(state.unq_constr.clone(), cond);
-    }
-}
-
-impl MergeState for SetState {
-    fn path_length(&self) -> u64 {
-        return self.path_length.clone();
-    }
-
-    fn incr_path(&mut self) -> u64 {
-        self.path_length = self.path_length + 1;
-        return self.path_length.clone();
-    }
-
-    fn get_pointer(&self) -> u64 {
-        return self.pointer.clone();
-    }
-
-    fn set_pointer(&mut self, ptr: u64) -> u64 {
-        self.pointer = ptr;
-        return self.pointer.clone();
-    }
-
-    fn pop_stack(&mut self) -> () {
-        //ugly, why does it need to be like this?
-        if self.stack.len() > 1 {
-            self.stack.pop();
-        } else if self.stack.len() == 1 {
-            self.stack[0] = HashMap::new();
-        } else {
-            unreachable!("stack should always be at least 1 long");
-        }
-    }
-
-    fn push_stack(&mut self) -> () {
-        self.stack.push(HashMap::new());
-    }
-
-    fn get_dynamic_cf_size(&self) -> usize {
-        return self.dynamic_cont.len();
-    }
-
-    fn pop_dynamic_cf(&mut self) -> Option<DynamicPointer> {
-        return self.dynamic_cont.pop();
-    }
-
-    fn push_dynamic_cf(&mut self, dn: DynamicPointer) -> () {
-        self.dynamic_cont.push(dn);
-    }
-
-    fn merge_full(&mut self, left: Self, right: Self) -> () {
-        assert_eq!(left.stack.len(), right.stack.len());
-        assert_eq!(left.pointer, right.pointer);
-
-        self.pointer = left.pointer;
-        self.dynamic_cont = left.dynamic_cont;
-        
-        self.path_length = std::cmp::min(left.path_length, right.path_length);
-        self.unq_constr = svalue::and(
-            self.unq_constr.clone(),
-            svalue::or(left.unq_constr, right.unq_constr),
-        );
-
-        let paired = left.stack.into_iter().zip(right.stack);
-
-        self.heap = union_with(left.heap, right.heap, |v, w| union(v, w));
-        self.stack = paired
-            .map(|(frame_1, frame_2)| union_with(frame_1, frame_2, |v, w| union(v, w)))
-            .collect();
-    }
-
-    fn merge_part(&mut self, left: Self) -> () {
-
-        self.pointer = left.pointer;
-        self.path_length = left.path_length;
-
-        self.unq_constr = svalue::and(self.unq_constr.clone(), left.unq_constr);
-        
-        self.dynamic_cont = left.dynamic_cont;
-        self.heap = left.heap;
-        self.stack = left.stack;
-        return;
-    }
-}
+pub type TreeEngine = MergeEngine<Rc<RExpr>, Rc<Tree<Rc<RExpr>, RHeapValue<RExpr>>>>;
+pub type SetEngine = MergeEngine<HashSet<Rc<RExpr>>, HashSet<RHeapValue<RExpr>>>; 
 
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Debug)]
 pub(crate) enum Tree<C, T> {
@@ -2285,55 +1446,714 @@ pub(crate) enum Tree<C, T> {
     },
 }
 
-pub(crate) type TValue = Rc<RExpr>;
-type TStack = Vec<HashMap<Identifier, TValue>>;
-type THeap = HashMap<i64, Rc<Tree<Rc<RExpr>, RHeapValue<RExpr>>>>;
-
-pub mod tvalue {
-    use super::*;
-
-    pub fn mk_true() -> TValue {
-        return Rc::new(RExpr::Lit {
-            lit: Lit::BoolLit { bool_value: true },
-            type_: RuntimeType::BoolRuntimeType,
-        });
-    }
-}
-pub(crate) struct TreeState {
+pub(crate) struct MergeState<E, H>{
     pointer: u64,
     path_length: u64,
-    hed_constr: TValue,
-    unq_constr: TValue,
-    stack: TStack,
-    heap: THeap,
+    hed_constr: E,
+    unq_constr: E,
+    stack: Vec<HashMap<Identifier, E>>,
+    heap:      HashMap<i64, H>,
     dynamic_cont: Vec<DynamicPointer>,
-    split: Option<Rc<RExpr>>,
-    left: bool,
-}
-pub(crate) struct TreeEngine {
-    supply: i64,
+    split: Option<E>,
+    left: bool
 }
 
-impl MergeState for TreeState {
-    fn path_length(&self) -> u64 {
+
+pub(crate) trait Mergeable: Sized + Clone{
+    type MergeOn;
+    fn merge(con: Self::MergeOn, left: Self, right: Self) -> Self;
+    fn merge_map<I>(con: Self::MergeOn, left: HashMap<I, Self>, right: HashMap<I, Self>)  -> HashMap<I, Self>
+        where I:Eq + Hash + Clone;
+}
+impl Mergeable for Rc<RExpr>{
+    type MergeOn = Rc<RExpr>;
+    fn merge(con: Self::MergeOn, left: Self, right: Self) -> Self{
+        if Rc::ptr_eq(&left, &right) {
+            return left;
+        }
+
+        let type_ = left.get_type();
+        Rc::new(RExpr::Con {
+            con,
+            left,
+            right,
+            type_,
+        })
+    }
+    fn merge_map<I>(con: Self::MergeOn, left: HashMap<I, Self>, right: HashMap<I, Self>)  -> HashMap<I, Self> 
+        where I:Eq + Hash + Clone
+    {
+        union_with(
+            left, 
+            right, 
+            |l, r|{Self::merge(con.clone(), l, r)},
+            |l| { panic!("you for expressions, this one should be impossible")},
+            |r| { panic!("you for expressions, this one should be impossible")}
+        )
+    }
+}
+impl Mergeable for HashSet<Rc<RExpr>> where{
+    type MergeOn = HashSet<Rc<RExpr>>;
+
+    fn merge(_: Self::MergeOn, left: Self, right: Self) -> Self {
+        union(left, right)
+    }        
+    fn merge_map<I>(con: Self::MergeOn, left: HashMap<I, Self>, right: HashMap<I, Self>)  -> HashMap<I, Self> 
+        where I:Eq + Hash + Clone
+    {
+        union_with(
+            left, 
+            right, 
+            |l, r|{Self::merge(con.clone(), l, r)},
+            |l| { panic!("you for expressions, this one should be impossible")},
+            |r| { panic!("you for expressions, this one should be impossible")}
+        )
+    }
+}
+
+impl Mergeable for HashSet<RHeapValue<RExpr>> where{
+    type MergeOn = HashSet<Rc<RExpr>>;
+
+    fn merge(_: Self::MergeOn, left: Self, right: Self) -> Self {
+        union(left, right)
+    }        
+    fn merge_map<I>(con: Self::MergeOn, left: HashMap<I, Self>, right: HashMap<I, Self>)  -> HashMap<I, Self> 
+        where I:Eq + Hash + Clone
+    {
+        union_with(
+            left, 
+            right, 
+            |l, r|{Self::merge(con.clone(), l, r)},
+            |l| { 
+                //l must be the result of lazy creation
+                //which is annoying. We can extend it with a single fresh value and that should be enough
+                l
+            },
+            |r| { 
+                r
+            }
+        )
+    }
+}
+
+impl<C, V> Mergeable for Rc<Tree<C, V>> where C: Clone{
+    type MergeOn = C;
+
+    fn merge(con: C, left: Self, right: Self) -> Self {
+        // we can only hope that this is fast
+        if Rc::ptr_eq(&left, &right) {
+            return left;
+        }
+
+        Rc::new(Tree::Node { con, left, right })
+    }  
+        fn merge_map<I>(con: Self::MergeOn, left: HashMap<I, Self>, right: HashMap<I, Self>)  -> HashMap<I, Self> 
+        where I:Eq + Hash + Clone
+    {
+    union_with(
+            left, 
+            right, 
+            |l, r|{Self::merge(con.clone(), l, r)},
+            |l| { 
+                //l must be the result of lazy creation
+                //which is annoying. We can extend it with a single fresh value and that should be enough
+                l
+            },
+            |r| { 
+                r
+            }
+        )
+    }      
+}
+
+pub(crate) trait MergeExpr : Clone{
+    fn mk_default(type_: &NonVoidType) -> Self;
+    fn mk_lit(lit: Lit, type_: RuntimeType) -> Self;
+    fn mk_sym(id: Identifier, type_: RuntimeType ) -> Self ;
+    fn mk_null(type_: RuntimeType) -> Self;
+    fn mk_ref(ptr: i64, type_: RuntimeType) -> Self;
+    fn mk_true() -> Self;
+    fn mk_false() -> Self;
+    fn mk_bool(b: bool) -> Self { if b {return Self::mk_true();} else {return Self::mk_false();}}
+    fn mk_int(i: i64) -> Self;
+    fn mk_con(c: Self, l: Self, r: Self,  type_: RuntimeType) -> Self;
+    fn mk_bin_op(op: BinOp, l: Self, r: Self, type_: RuntimeType) -> Self;
+    fn mk_un_op(op: UnOp, v: Self, type_: RuntimeType) -> Self;
+    fn mk_ty_op(op: TyOp, v: Self, target: RuntimeType) -> Self;
+    fn and(l: Self, r: Self) -> Self;
+    fn or(l: Self, r: Self) -> Self;
+    fn eq(l: Self, r: Self) -> Self;
+    fn not(l: Self) -> Self;
+    fn lt(l: Self, r: Self) -> Self;
+    fn le(l: Self, r: Self) -> Self;
+    fn gt(l: Self, r: Self) -> Self;
+    fn ge(l: Self, r: Self) -> Self;
+
+    fn to_z3_bool<'a, F, G> (builder: &mut Z3Builder<'a, F, G>, expr: Self, context: &'a Context) -> Bool<'a> where
+        F: Clone + Fn(&i64, &'a Context) -> Array<'a>,
+        G: Clone + Fn(&i64, &'a Context) -> Datatype<'a>; 
+
+
+}
+impl MergeExpr for Rc<RExpr>{
+
+    fn mk_default(type_: &NonVoidType) -> Self {
+        match type_{
+            NonVoidType::IntType{ .. }       => Self::mk_int(0),
+            NonVoidType::BoolType{ .. }      => Self::mk_false(),
+            NonVoidType::ReferenceType{ .. } => Self::mk_null(type_.clone().into()),
+            NonVoidType::ArrayType { .. }    => Self::mk_null(type_.clone().into()),
+            _ => panic!("type {:?} not yet supported", type_),
+        }
+        
+    }
+    fn mk_lit(lit: Lit, type_: RuntimeType) -> Self {
+        return Rc::new(RExpr::Lit { lit, type_ })
+    }
+    fn mk_sym(id: Identifier, type_: RuntimeType ) -> Self {
+        Rc::new(RExpr::Sym { id, type_ })
+    }
+    fn mk_null(type_: RuntimeType) -> Self { 
+        Rc::new(RExpr::Lit {
+            lit: Lit::NullLit,
+            type_,
+        })
+    }
+    fn mk_ref(ptr: i64, type_: RuntimeType) -> Self{
+        Rc::new(RExpr::Ref { ptr, type_})
+    }
+
+    fn mk_true() -> Self {
+        Rc::new(RExpr::Lit { lit: Lit::BoolLit { bool_value: true }, type_: RuntimeType::BoolRuntimeType })
+    }
+    fn mk_false() -> Self {
+        Rc::new(RExpr::Lit {
+            lit: Lit::BoolLit { bool_value: false },
+            type_: RuntimeType::BoolRuntimeType,
+        })
+    }
+    fn mk_int(i: i64) -> Self{
+       return Rc::new(RExpr::Lit { lit: Lit::IntLit { int_value: i }, type_: RuntimeType::IntRuntimeType });
+    }
+    fn mk_con(c: Self, l: Self, r: Self,  type_:RuntimeType) -> Self{ 
+        RExpr::evaluate_guard(c, l, r, type_)
+    }
+    fn mk_bin_op(op: BinOp, l: Self, r: Self, type_:RuntimeType) -> Self {
+        RExpr::evaluate_binop(op, l, r, type_)
+
+    }
+    fn mk_un_op(op: UnOp, v: Self, type_: RuntimeType) -> Self{
+        RExpr::evaluate_unop(op, v)
+    }
+    fn mk_ty_op(op: TyOp, v: Self, target: RuntimeType) -> Self{
+        RExpr::evaluate_tyop(op, v, target)
+    }
+
+    fn and(l: Self, r: Self) -> Self {
+        RExpr::evaluate_binop(
+            BinOp::And,
+            l,
+            r,
+            RuntimeType::BoolRuntimeType,
+        )
+    }
+    fn or(l: Self, r: Self) -> Self {
+        RExpr::evaluate_binop(
+            BinOp::Or,
+            l,
+            r,
+            RuntimeType::BoolRuntimeType,
+        )
+    }
+    fn eq(l: Self, r: Self) -> Self {
+        RExpr::evaluate_binop(BinOp::Equal, l, r, RuntimeType::BoolRuntimeType)
+    }
+    fn not(l: Self) -> Self {
+        RExpr::evaluate_unop(UnOp::Negate, l)
+    }
+    fn lt(l: Self, r: Self) -> Self {
+        RExpr::evaluate_binop(BinOp::LessThan, l, r, RuntimeType::BoolRuntimeType)
+    }
+    fn le(l: Self, r: Self) -> Self {
+        RExpr::evaluate_binop(BinOp::LessThanEqual, l, r, RuntimeType::BoolRuntimeType)
+    }
+    fn gt(l: Self, r: Self) -> Self {
+        RExpr::evaluate_binop(BinOp::GreaterThan, l, r, RuntimeType::BoolRuntimeType)
+    }
+    fn ge(l: Self, r: Self) -> Self {
+        RExpr::evaluate_binop(BinOp::GreaterThanEqual, l, r, RuntimeType::BoolRuntimeType)
+    }
+
+
+    fn to_z3_bool<'a, F, G> (builder: &mut Z3Builder<'a, F, G>, expr: Self, context: &'a Context) -> Bool<'a> where
+        F: Clone + Fn(&i64, &'a Context) -> Array<'a>,
+        G: Clone + Fn(&i64, &'a Context) -> Datatype<'a>
+    {
+        builder.expr_to_bool(expr, context)   
+    } 
+
+}
+impl<E> MergeExpr for HashSet<E> where E: MergeExpr + Eq + Hash + Clone{
+
+    fn mk_default(type_: &NonVoidType) -> Self{ 
+        hash_unit(MergeExpr::mk_default(type_))
+    }
+    fn mk_lit(lit: Lit, type_: RuntimeType) -> Self {
+        hash_unit(MergeExpr::mk_lit(lit, type_))
+    }
+
+    fn mk_sym(id: Identifier, type_: RuntimeType ) -> Self  {
+        hash_unit(MergeExpr::mk_sym(id, type_))
+    }
+
+    fn mk_null(type_: RuntimeType) -> Self{
+        hash_unit(MergeExpr::mk_null(type_))
+    }
+    fn mk_ref(ptr: i64, type_: RuntimeType) -> Self{
+        hash_unit(MergeExpr::mk_ref(ptr, type_))
+    }
+
+    fn mk_true() -> Self {
+        return hash_unit(MergeExpr::mk_true());
+    }
+
+    fn mk_false() -> Self {
+        return hash_unit(MergeExpr::mk_false());
+    }
+    fn mk_int(i: i64) -> Self{
+       return hash_unit(MergeExpr::mk_int(i));
+    }
+
+    fn mk_con(c: Self, l: Self, r: Self, type_: RuntimeType) -> Self{ 
+        let mut res = HashSet::new();
+        for (c, l, r) in iproduct!(c.iter(), l.iter(), r.iter()){
+            res.insert(MergeExpr::mk_con(c.clone(), l.clone(), r.clone(), type_.clone()));
+        }
+        return res; 
+    }
+
+    fn mk_bin_op(op: BinOp, l: Self, r: Self, type_: RuntimeType) -> Self {
+        let mut res = HashSet::new();
+        for (l, r) in iproduct!(l.iter(), r.iter()){
+            res.insert(MergeExpr::mk_bin_op(op.clone(), l.clone(), r.clone(), type_.clone()));
+        }
+        return res; 
+    }
+    
+    fn mk_un_op(op: UnOp, v: Self, type_: RuntimeType) -> Self {
+        let mut res = HashSet::new();
+        for v in iproduct!(v.iter()){
+            res.insert(MergeExpr::mk_un_op(op.clone(), v.clone(), type_.clone()));
+        }
+        return res; 
+    }
+    
+    fn mk_ty_op(op: TyOp, v: Self, target: RuntimeType) -> Self {
+        let mut res = HashSet::new();
+        for v in iproduct!(v.iter()){
+            res.insert(MergeExpr::mk_ty_op(op.clone(), v.clone(), target.clone()));
+        }
+        return res; 
+    }
+
+    fn and(l: Self, r: Self) -> Self {
+        let mut res = HashSet::new();
+        for (l, r) in iproduct!(l.iter(), r.iter()){
+            res.insert(MergeExpr::and(l.clone(), r.clone()));
+        }
+        return res; 
+    }
+
+    fn or(l: Self, r: Self) -> Self {
+        let mut res = HashSet::new();
+        for (l, r) in iproduct!(l.iter(), r.iter()){
+            res.insert(MergeExpr::or(l.clone(), r.clone()));
+        }
+        return res; 
+    }
+
+    fn eq(l: Self, r: Self) -> Self {
+        let mut res = HashSet::new();
+        for (l, r) in iproduct!(l.iter(), r.iter()){
+            res.insert(MergeExpr::eq(l.clone(), r.clone()));
+        }
+        return res; 
+    }
+
+    fn not(l: Self) -> Self {
+        let mut res = HashSet::new();
+        for l in l.iter() {
+            res.insert(MergeExpr::not(l.clone()));
+        }
+        return res; 
+    }
+
+    fn lt(l: Self, r: Self) -> Self {
+        let mut res = HashSet::new();
+        for (l, r) in iproduct!(l.iter(), r.iter()){
+            res.insert(MergeExpr::lt(l.clone(), r.clone()));
+        }
+        return res; 
+    }
+
+    fn le(l: Self, r: Self) -> Self {
+        let mut res = HashSet::new();
+        for (l, r) in iproduct!(l.iter(), r.iter()){
+            res.insert(MergeExpr::le(l.clone(), r.clone()));
+        }
+        return res; 
+    }
+
+    fn gt(l: Self, r: Self) -> Self {
+        let mut res = HashSet::new();
+        for (l, r) in iproduct!(l.iter(), r.iter()){
+            res.insert(MergeExpr::gt(l.clone(), r.clone()));
+        }
+        return res; 
+    }
+
+    fn ge(l: Self, r: Self) -> Self {
+        let mut res = HashSet::new();
+        for (l, r) in iproduct!(l.iter(), r.iter()){
+            res.insert(MergeExpr::ge(l.clone(), r.clone()));
+        }
+        return res; 
+    }
+
+    fn to_z3_bool<'a, F, G> (builder: &mut Z3Builder<'a, F, G>, expr: Self, context: &'a Context) -> Bool<'a> where
+        F: Clone + Fn(&i64, &'a Context) -> Array<'a>,
+        G: Clone + Fn(&i64, &'a Context) -> Datatype<'a>
+    {
+        let expr : Vec<_> = expr.iter().map(|e| { MergeExpr::to_z3_bool(builder, e.clone(), context) }).collect();
+        let expr = Bool::or(&context, expr.iter().collect::<Vec<_>>().as_slice());
+        return expr;
+
+    }
+    
+
+}
+
+pub(crate) trait MergeRef: Sized 
+{
+    type InnerExpr; 
+    fn create_obj(type_: Identifier, classes: HashMap<Identifier, Class>) -> Self;
+    fn create_array_of_size(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType) -> Self;
+    fn create_sym_ptr_indr(loc: i64, type_: RuntimeType) -> Self;
+
+    fn create_sym_obj<F>(type_: RuntimeType, classes: HashMap<Identifier, Class>, f: F) -> Self 
+        where
+            F: FnMut(Self) -> i64;
+    fn create_sym_array<F>(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType, f: F)
+        where
+            F: FnMut(Self) -> i64;
+
+    //note the muteable fields and engines below
+    //this is because we might need to initialize heap values
+    fn update_ref_field_to(
+        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
+        var: &Self::InnerExpr, 
+        field: &Identifier, 
+        value: Self::InnerExpr,
+        heap: &mut HashMap<i64, Self>
+    );  
+    
+    fn update_ref_index_to(
+        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
+        var: &Self::InnerExpr, 
+        index: &Self::InnerExpr, 
+        value: Self::InnerExpr,
+        heap: &mut HashMap<i64, Self>
+    );
+
+    fn get_ref_field(
+        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
+        var: &Self::InnerExpr, 
+        field: &Identifier, 
+        heap: &mut HashMap<i64, Self>
+    ) -> Self::InnerExpr;  
+    
+    fn get_ref_index(
+        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
+        var: &Self::InnerExpr, 
+        index: &Self::InnerExpr, 
+        heap: &mut HashMap<i64, Self>
+    ) -> Self::InnerExpr;
+
+}
+
+impl MergeRef for Rc<Tree<Rc<RExpr>, RHeapValue<RExpr>>>
+{
+    type InnerExpr = Rc<RExpr>;
+    
+    fn create_array_of_size(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType) -> Self
+    {
+        let size_tree = Tree::<Self::InnerExpr, Self::InnerExpr>::from_cond(size);
+        let r = Tree::map(size_tree, &mut |i|{
+            match i.as_ref(){
+                RExpr::Lit{ 
+                    lit: Lit::IntLit { int_value }, ..
+                } => {
+                    let size = *int_value;
+                    let mut elements = vec![];
+                    for i in 0..size{
+                        let elem = MergeExpr::mk_default(&inner_type);
+                        elements.push(elem);
+                    }
+                    let size = *int_value as usize;
+                    let t = RHeapValue::ArrayValue { 
+                        size: Either::Left(size),
+                        elements, 
+                        type_: array_type.clone(),
+                        sym: false, 
+                    };
+                    t
+                }
+                // I've already turned the conds into the tree I'm mapping over
+                RExpr::Con{..} => unreachable!(),
+                // a more complex index size, very annoying indeed.
+                // when I need to insert or delete, I'll stretch you as needed
+                // and whenever I read or write to it, I'll put in a condition
+                // the assertions that the size are inserted into the code, or
+                // can be inserted into the code, at least. 
+                _ => {
+                    let elements = vec![];
+                    let t = RHeapValue::ArrayValue {
+                        size: Either::Right(i),
+                        elements, 
+                        type_: array_type.clone(),
+                        // when we generate elements, if sym is false, we use mk_default, 
+                        // but when sym is true we go out of our way to use symbolic values
+                        // and possibly symbolic references
+                        sym: false
+                    };
+                    t
+                },
+            }
+        });
+        return r;
+    }
+    
+    fn create_obj(type_: Identifier, classes: HashMap<Identifier, Class>) -> Self{
+        let Class { members, ..} = classes.get(&type_).unwrap(); 
+        let mut fields = BTreeMap::new();
+        for member in members{
+            match member{
+                DeclarationMember::Field { type_, name, info } => {
+                    let val = MergeExpr::mk_default(type_);
+                    fields.insert(name.clone(), val); 
+                },
+                _ => {}
+            }
+        }
+        return Rc::new(Tree::Leaf(RHeapValue::ObjectValue { sym: false, fields, type_  }))
+    }
+
+    fn create_sym_ptr_indr(loc: i64, type_: RuntimeType) -> Self {
+        Rc::new(Tree::Leaf(RHeapValue::SymPtrIndr { 
+            symbol_ptr: Identifier::with_unknown_pos(format!("__{}", loc.clone())), 
+            ptr: SymPtrIndr::Uninitialized, 
+            type_ 
+        }))
+    }
+    
+    fn create_sym_obj<F>(type_: RuntimeType, classes: HashMap<Identifier, Class>, f: F) -> Self 
+        where
+            F: FnMut(Self) -> i64 {
+        todo!()
+    }
+    
+    fn create_sym_array<F>(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType, f: F)
+        where
+            F: FnMut(Self) -> i64 {
+        todo!()
+    }
+    
+    fn update_ref_field_to(
+        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
+        var: &Self::InnerExpr, 
+        field: &Identifier, 
+        value: Self::InnerExpr,
+        heap: &mut HashMap<i64, Self>
+    ) {
+        todo!()
+    }
+    
+    fn update_ref_index_to(
+        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
+        var: &Self::InnerExpr, 
+        index: &Self::InnerExpr, 
+        value: Self::InnerExpr,
+        heap: &mut HashMap<i64, Self>
+    ) {
+        todo!()
+    }
+    
+    fn get_ref_field(
+        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
+        var: &Self::InnerExpr, 
+        field: &Identifier, 
+        heap: &mut HashMap<i64, Self>
+    ) -> Self::InnerExpr {
+        todo!()
+    }
+    
+    fn get_ref_index(
+        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
+        var: &Self::InnerExpr, 
+        index: &Self::InnerExpr, 
+        heap: &mut HashMap<i64, Self>
+    ) -> Self::InnerExpr {
+        todo!()
+    }
+}
+impl MergeRef for HashSet<RHeapValue<RExpr>>{
+    type InnerExpr = HashSet<Rc<RExpr>>;
+
+    fn create_array_of_size(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType) -> Self {
+        let mut result = HashSet::new();
+        for i in size.iter(){
+            match i.as_ref(){
+                RExpr::Lit{ 
+                    lit: Lit::IntLit { int_value }, ..
+                } => {
+                    let size = *int_value;
+                    let mut elements = vec![];
+                    for i in 0..size{
+                        let elem = MergeExpr::mk_default(&inner_type);
+                        elements.push(elem);
+                    }
+                    let size = *int_value as usize;
+                    let t = RHeapValue::ArrayValue { 
+                        size: Either::Left(size),
+                        elements, 
+                        type_: array_type.clone(),
+                        sym: false, 
+                    };
+                    result.insert(t);
+                }
+                // I've already turned the conds into the tree I'm mapping over
+                RExpr::Con { con: _, left, right, type_: _ } => {
+                    //annoying, really, but I can at least just flatten this
+                    let l = Self::create_array_of_size( hash_unit(left .clone()),  inner_type.clone(), array_type.clone());
+                    let r = Self::create_array_of_size( hash_unit(right.clone()), inner_type.clone(), array_type.clone());
+                    for l in l {
+                        result.insert(l);
+                    }
+                    for r in r{
+                        result.insert(r);
+                    }
+                },
+
+                _ => {
+                    //argh, a math expression, probably
+                    let elements = vec![];
+                    let t = RHeapValue::ArrayValue {
+                        size: Either::Right(i.clone()),
+                        elements, 
+                        type_: array_type.clone(),
+                        sym: false
+                    };
+                    result.insert(t);
+                },
+            }
+        };
+        return result;
+    }
+
+    fn create_obj(type_: Identifier, classes: HashMap<Identifier, Class>) -> Self{
+        let Class { members, ..} = classes.get(&type_).unwrap(); 
+        let mut fields = BTreeMap::new();
+        for member in members{
+            match member{
+                DeclarationMember::Field { type_, name, info } => {
+                    let val = MergeExpr::mk_default(type_);
+                    fields.insert(name.clone(), val); 
+                },
+                _ => {}
+            }
+        }
+        return hash_unit(RHeapValue::ObjectValue { sym: false, fields, type_  })
+    }
+
+    fn create_sym_ptr_indr(loc: i64, type_: RuntimeType) -> Self {
+        hash_unit(RHeapValue::SymPtrIndr { 
+            symbol_ptr: Identifier::with_unknown_pos(format!("__{}", loc.clone())), 
+            ptr: SymPtrIndr::Uninitialized, 
+            type_ 
+        })
+    }
+    
+    fn create_sym_obj<F>(type_: RuntimeType, classes: HashMap<Identifier, Class>, f: F) -> Self 
+        where
+            F: FnMut(Self) -> i64 {
+        todo!()
+    }
+    
+    fn create_sym_array<F>(size: Self::InnerExpr,  inner_type: NonVoidType, array_type: RuntimeType, f: F)
+        where
+            F: FnMut(Self) -> i64 {
+        todo!()
+    }
+    
+    fn update_ref_field_to(
+        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
+        var: &Self::InnerExpr, 
+        field: &Identifier, 
+        value: Self::InnerExpr,
+        heap: &mut HashMap<i64, Self>
+    ) {
+        todo!()
+    }
+    
+    fn update_ref_index_to(
+        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
+        var: &Self::InnerExpr, 
+        index: &Self::InnerExpr, 
+        value: Self::InnerExpr,
+        heap: &mut HashMap<i64, Self>
+    ) {
+        todo!()
+    }
+    
+    fn get_ref_field(
+        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
+        var: &Self::InnerExpr, 
+        field: &Identifier, 
+        heap: &mut HashMap<i64, Self>
+    ) ->  Self::InnerExpr {
+        todo!()
+    }
+    
+    fn get_ref_index(
+        engine: &mut MergeEngine<Self::InnerExpr, Self>, 
+        var: &Self::InnerExpr, 
+        index: &Self::InnerExpr, 
+        heap: &mut HashMap<i64, Self>
+    ) -> Self::InnerExpr {
+        todo!()
+    }
+
+}
+impl<E, H> MergeState<E,H> where{
+    pub(crate) fn path_length(&self) -> u64 {
         return self.path_length;
     }
 
-    fn incr_path(&mut self) -> u64 {
+    pub(crate) fn incr_path(&mut self) -> u64 {
         self.path_length = self.path_length + 1;
         return self.path_length;
     }
 
-    fn get_pointer(&self) -> u64 {
+    pub(crate) fn get_pointer(&self) -> u64 {
         return self.pointer;
     }
 
-    fn set_pointer(&mut self, ptr: u64) -> u64 {
+    pub(crate) fn set_pointer(&mut self, ptr: u64) -> u64 {
         self.pointer = ptr;
         return self.pointer;
     }
 
-    fn pop_stack(&mut self) -> () {
+    pub(crate) fn pop_stack(&mut self) -> () {
         //ugly, why does it need to be like this?
         if self.stack.len() > 1 {
             self.stack.pop();
@@ -2344,23 +2164,28 @@ impl MergeState for TreeState {
         }
     }
 
-    fn push_stack(&mut self) -> () {
+    pub(crate) fn push_stack(&mut self) -> () {
         self.stack.push(HashMap::new());
     }
 
-    fn get_dynamic_cf_size(&self) -> usize {
+    pub(crate) fn get_dynamic_cf_size(&self) -> usize {
         return self.dynamic_cont.len();
     }
 
-    fn pop_dynamic_cf(&mut self) -> Option<DynamicPointer> {
+    pub(crate) fn pop_dynamic_cf(&mut self) -> Option<DynamicPointer> {
         return self.dynamic_cont.pop();
     }
 
-    fn push_dynamic_cf(&mut self, dn: DynamicPointer) -> () {
+    pub(crate) fn push_dynamic_cf(&mut self, dn: DynamicPointer) -> () {
         self.dynamic_cont.push(dn);
     }
 
-    fn merge_full(&mut self, left: Self, right: Self) -> () {
+}
+impl<E, H> MergeState<E,H> where
+    E: MergeExpr + Mergeable<MergeOn = E>,
+    H: Mergeable<MergeOn = E> + MergeRef<InnerExpr = E>, 
+{
+    pub(crate) fn merge_full(&mut self, left: Self, right: Self) -> () {
         let (left, right) = if left.left {
             (left, right)
         } else {
@@ -2377,59 +2202,23 @@ impl MergeState for TreeState {
 
         let lc = left.unq_constr;
         let rc = right.unq_constr;
-        self.unq_constr = RExpr::evaluate_binop(
-            BinOp::And,
+        self.unq_constr = MergeExpr::and(
             self.unq_constr.clone(),
-            RExpr::evaluate_binop(
-                BinOp::Or,
-                lc.clone(),
-                rc.clone(),
-                RuntimeType::BoolRuntimeType,
-            ),
-            RuntimeType::BoolRuntimeType,
+            MergeExpr::or(lc.clone(),rc.clone())
         );
-
-        let paired = left.stack.into_iter().zip(right.stack);
-
-        self.heap = union_with(left.heap, right.heap, |v, w| {
-            if Rc::ptr_eq(&v, &w) {
-                return v;
-            }
-            let ntree = Tree::Node {
-                con: split.clone(),
-                left: v,
-                right: w,
-            };
-            Rc::new(ntree)
-        });
-        self.stack = paired
-            .map(|(frame_1, frame_2)| {
-                union_with(frame_1, frame_2, |v, w| {
-                    if Rc::ptr_eq(&v, &w) {
-                        return v;
-                    }
-
-                    let t = v.get_type();
-                    Rc::new(RExpr::Con {
-                        con: split.clone(),
-                        left: v,
-                        right: w,
-                        type_: t,
-                    })
-                })
-            })
+        self.heap = Mergeable::merge_map(split.clone(), left.heap, right.heap);
+        self.stack = izip!(left.stack, right.stack)
+            .map(|(l,r)| {Mergeable::merge_map(split.clone(), l, r)})
             .collect();
     }
 
-    fn merge_part(&mut self, left: Self) -> () {
+    pub(crate) fn merge_part(&mut self, left: Self) -> () {
         self.split = None;
         self.pointer = left.pointer;
         self.path_length = left.path_length;
-        self.unq_constr = RExpr::evaluate_binop(
-            BinOp::And,
+        self.unq_constr = MergeExpr::and(
             self.unq_constr.clone(),
             left.unq_constr,
-            RuntimeType::BoolRuntimeType,
         );
         self.dynamic_cont = left.dynamic_cont;
         self.heap = left.heap;
@@ -2437,41 +2226,64 @@ impl MergeState for TreeState {
     }
 }
 
-impl MergeEngine for TreeEngine {
-    type State = TreeState;
-    type EValue = TValue;
-    fn new() -> Self {
-        return TreeEngine { supply: 0 };
+impl<E, H> MergeEngine<E, H> {
+    pub(crate) fn new() -> Self{
+        let config = Config::new();
+        let context = Context::new(&config);
+        return MergeEngine { supply: 0, config, context, _p_e: PhantomData, _p_h: PhantomData };
     }
 
-    fn next_reference_id(&mut self) -> i64 {
+    pub(crate) fn next_reference_id(&mut self) -> i64 {
         let s = self.supply.clone();
         self.supply = self.supply + 1;
         return s;
     }
+    
+    
+}
+impl<E, H> MergeEngine<E, H> where
+    E: Mergeable<MergeOn = E> + MergeExpr,
+    H: Mergeable<MergeOn = E> + MergeRef<InnerExpr = E> {
 
-    fn make_new_state(
+    pub(crate) fn make_new_state(
         self: &mut Self,
         pc: u64,
         expr: Rc<Expression>,
         symbols: Vec<(Identifier, Identifier, RuntimeType)>,
-    ) -> Self::State {
-        let mut hashmap: HashMap<Identifier, TValue> = HashMap::new();
+        rsymbols: Vec<(Identifier, Identifier, RuntimeType)>,
+        classes: HashMap<Identifier, Declaration> //need you for default creation of references 
+    ) -> MergeState<E, H> {
+        let mut top_frame: HashMap<Identifier, E> = HashMap::new();
+        let mut start_heap: HashMap<i64, H> = HashMap::new();
         for (k, s, t) in symbols {
-            hashmap.insert(k, Rc::new(RExpr::Sym { id: s, type_: t }));
+            top_frame.insert(k, MergeExpr::mk_sym(s, t ));
+        }        
+        for (k, _, t) in rsymbols {
+            let s = self.next_reference_id();
+            top_frame.insert(k, MergeExpr::mk_ref( s, t.clone()));
+            start_heap.insert(
+                s, 
+                 MergeRef::create_sym_ptr_indr(s, t)
+            );
         }
 
-        let mut temp = TreeState {
+
+        
+        //we'll need you...
+        let mut temp = MergeState {
             path_length: 0,
             pointer: pc,
-            hed_constr: tvalue::mk_true(),
-            unq_constr: tvalue::mk_true(),
-            stack: vec![hashmap],
-            heap: HashMap::new(),
+            hed_constr: MergeExpr::mk_true(),
+            unq_constr: MergeExpr::mk_true(),
+            stack: vec![top_frame],
+            heap: start_heap,
             dynamic_cont: vec![],
             split: None,
             left: false,
         };
+        let mut stack_frame = temp.stack.last_mut().unwrap();
+
+
 
         let constr = self.eval_with(&mut temp, expr);
 
@@ -2479,41 +2291,33 @@ impl MergeEngine for TreeEngine {
         return temp;
     }
 
-    fn split_on(
+    pub(crate) fn split_on(
         &mut self,
-        state: &mut Self::State,
+        state: &mut MergeState<E, H>,
         constr: Rc<Expression>,
-    ) -> (Self::State, Self::State) {
-        let new_top: TValue = RExpr::evaluate_binop(
-            BinOp::And,
+    ) -> (MergeState<E, H>, MergeState<E, H>) {
+        let new_top: E = MergeExpr::and(
             state.hed_constr.clone(),
-            state.unq_constr.clone(),
-            RuntimeType::BoolRuntimeType,
+            state.unq_constr.clone()
         );
-        let constrs: TValue = self.eval_with(state, constr.clone());
+        let constrs: E = self.eval_with(state, constr.clone());
         state.split = Some(constrs.clone());
-        let left = TreeState {
+        let left = MergeState {
             path_length: state.path_length,
             pointer: state.pointer,
             hed_constr: new_top.clone(),
-            unq_constr: Rc::new(RExpr::Lit{
-                lit: Lit::BoolLit { bool_value: true },
-                type_: RuntimeType::BoolRuntimeType,
-            }),
+            unq_constr: MergeExpr::mk_true(),
             stack: state.stack.clone(),
             heap: state.heap.clone(),
             dynamic_cont: state.dynamic_cont.clone(),
             split: None,
             left: true,
         };
-        let right = TreeState {
+        let right = MergeState {
             path_length: state.path_length,
             pointer: state.pointer,
-            hed_constr: new_top,
-            unq_constr: Rc::new(RExpr::Lit{
-                lit: Lit::BoolLit { bool_value: true },
-                type_: RuntimeType::BoolRuntimeType,
-            }),
+            hed_constr: new_top.clone(),
+            unq_constr: MergeExpr::mk_true(),
             stack: state.stack.clone(),
             heap: state.heap.clone(),
             dynamic_cont: state.dynamic_cont.clone(),
@@ -2524,14 +2328,14 @@ impl MergeEngine for TreeEngine {
         return (left, right);
     }
 
-    fn decl_in(
+    pub(crate) fn decl_in(
         &mut self,
-        state: &mut Self::State,
-        r#type: &NonVoidType,
+        state: &mut MergeState<E, H>,
+        type_: &NonVoidType,
         var: &Identifier,
         _info: &SourcePos,
     ) -> Result {
-        let val = self.eval_with(state, Rc::new(r#type.default()));
+        let val = MergeExpr::mk_default(type_);
         state
             .stack
             .last_mut()
@@ -2539,7 +2343,7 @@ impl MergeEngine for TreeEngine {
         return Result::Ok;
     }
 
-    fn eval_with_r(&mut self, state: &mut Self::State, rhs: &Rhs) -> TValue {
+    pub(crate) fn eval_with_r(&mut self, state: &mut MergeState<E, H>, rhs: &Rhs) -> E {
         match rhs {
             Rhs::RhsExpression {
                 value,
@@ -2556,7 +2360,7 @@ impl MergeEngine for TreeEngine {
                 info: _,
             } => {
                 let var = self.eval_with(state, var.clone());
-                let field = get_field_from_var(var, field.clone(), state);
+                let field = MergeRef::get_ref_field( self, &var, field, &mut state.heap);
                 return field;
             }
             Rhs::RhsElem {
@@ -2567,7 +2371,7 @@ impl MergeEngine for TreeEngine {
             } => {
                 let var = self.eval_with(state, var.clone());
                 let index = self.eval_with(state, index.clone());
-                let elem = get_elem_from_var(var, index, state);
+                let elem = MergeRef::get_ref_index(self, &var, &index, &mut state.heap);
                 return elem;
             }
             Rhs::RhsArray {
@@ -2578,15 +2382,17 @@ impl MergeEngine for TreeEngine {
             } => {
                 assert!(sizes.len() == 1, "Support for only 1D arrays");
                 let size = sizes[0].clone();
-                let sizes = self.eval_with(state, size);
-                let new_ref = self.next_reference_id();
-                let heap_value = create_array_of_size(sizes, array_type, type_);
-
-                state.heap.insert(new_ref, heap_value);
-                return Rc::new(RExpr::Ref {
-                    ptr: new_ref,
-                    type_: type_.clone(),
-                });
+                let size = self.eval_with(state, size);
+                let ptr = self.next_reference_id();
+                let ref_: E = E::mk_ref(ptr, type_.clone());
+                let heap_value   = H::create_array_of_size(
+                    size, 
+                    array_type.clone(), 
+                    type_.clone(), 
+                );
+                
+                state.heap.insert(ptr, heap_value);
+                return ref_;
             }
             Rhs::RhsCast {
                 cast_type: _,
@@ -2601,32 +2407,23 @@ impl MergeEngine for TreeEngine {
         }
     }
 
-    fn eval_with(&self, state: &Self::State, expr: Rc<Expression>) -> TValue {
+    pub(crate) fn eval_with(&self, state: &MergeState<E, H>, expr: Rc<Expression>) -> E {
         match expr.as_ref() {
             Expression::Lit {
                 lit,
                 type_,
                 info: _,
-            } => Rc::new(RExpr::Lit {
-                lit: lit.clone(),
-                type_: type_.clone(),
-            }),
+            } => MergeExpr::mk_lit(lit.clone(), type_.clone()),
             Expression::SymbolicVar {
                 var,
                 type_,
                 info: _,
-            } => Rc::new(RExpr::Sym {
-                id: var.clone(),
-                type_: type_.clone(),
-            }),
+            } => MergeExpr::mk_sym(var.clone(), type_.clone()),
             Expression::Ref {
                 ref_,
                 type_,
                 info: _,
-            } => Rc::new(RExpr::Ref {
-                ptr: ref_.clone(),
-                type_: type_.clone(),
-            }),
+            } => MergeExpr::mk_ref(ref_.clone(), type_.clone()),
 
             Expression::Var {
                 var,
@@ -2648,7 +2445,7 @@ impl MergeEngine for TreeEngine {
                 let l = self.eval_with(state, true_.clone());
                 let r = self.eval_with(state, false_.clone());
 
-                RExpr::evaluate_guard(g, l, r, type_.clone())
+                MergeExpr::mk_con(g, l, r, type_.clone())
             }
 
             Expression::BinOp {
@@ -2660,28 +2457,28 @@ impl MergeEngine for TreeEngine {
             } => {
                 let l = self.eval_with(state, lhs.clone());
                 let r = self.eval_with(state, rhs.clone());
-                RExpr::evaluate_binop(bin_op.clone(), l, r, type_.clone())
+                MergeExpr::mk_bin_op(bin_op.clone(), l, r, type_.clone())
             }
 
             Expression::TypeExpr { texpr } => match texpr {
                 TypeExpr::InstanceOf { var, rhs, info: _ } => {
-                    let val = state.stack.last().unwrap().get(var).unwrap().clone();
-                    RExpr::evaluate_tyop(TyOp::IsInstanceOf, val.clone(), rhs.clone())
+                let val = state.stack.last().unwrap().get(var).unwrap().clone();
+                    MergeExpr::mk_ty_op(TyOp::IsInstanceOf, val, rhs.clone())
                 }
                 TypeExpr::NotInstanceOf { var, rhs, info: _ } => {
                     let val = state.stack.last().unwrap().get(var).unwrap().clone();
-                    RExpr::evaluate_tyop(TyOp::IsNotInstanceOf, val.clone(), rhs.clone())
+                    MergeExpr::mk_ty_op(TyOp::IsNotInstanceOf, val, rhs.clone())
                 }
             },
 
             Expression::UnOp {
                 un_op,
                 value,
-                type_: _,
+                type_,
                 info: _,
             } => {
                 let val = self.eval_with(state, value.clone());
-                RExpr::evaluate_unop(un_op.clone(), val.clone())
+                MergeExpr::mk_un_op(un_op.clone(), val, type_.clone())
             }
 
             //should be doable
@@ -2691,7 +2488,7 @@ impl MergeEngine for TreeEngine {
                 info: _,
             } => todo!(),
 
-            //won't be done for a while
+            //shouldn't be present
             Expression::SymbolicRef {
                 var: _,
                 type_: _,
@@ -2716,97 +2513,14 @@ impl MergeEngine for TreeEngine {
         }
     }
 
-    fn assign_expr(&mut self, state: &mut Self::State, lhs: &Lhs, rhs: &Rhs) -> bool {
+    pub(crate) fn assign_expr(&mut self, state: &mut MergeState<E, H>, lhs: &Lhs, rhs: &Rhs) -> bool {
         let rhs = self.eval_with_r(state, rhs);
         self.assign_evaled(state, lhs, rhs);
         return true;
     }
 
-    fn assign_evaled(&mut self, state: &mut Self::State, lhs: &Lhs, value: TValue) {
-        match lhs {
-            Lhs::LhsVar {
-                var,
-                type_: _,
-                info: _,
-            } => {
-                let stack = state.stack.last_mut().unwrap();
-                stack.insert(var.clone(), value);
-            }
-            Lhs::LhsElem {
-                var,
-                index,
-                type_: _,
-                info: _,
-            } => {
-                // It's a single TValue, but it should be fully resolved
 
-                let index_value = self.eval_with(state, index.clone());
-                if let RExpr::Lit {
-                    lit: Lit::IntLit { int_value },
-                    ..
-                } = index_value.as_ref()
-                {
-                    let index = *int_value as usize;
-                    let stack = state.stack.last().unwrap();
-                    let references = stack.get(var).unwrap();
-
-                    if let RExpr::Ref { ptr, type_: _ } = references.as_ref() {
-                        let heap_value = state.heap.get(ptr).unwrap();
-                        let new_value = Tree::map(heap_value.clone(), |arr| {
-                            if let RHeapValue::ArrayValue { elements, type_ } = arr {
-                                let mut updated_elements = elements.clone();
-                                updated_elements[index] = value.clone();
-                                RHeapValue::ArrayValue {
-                                    elements: updated_elements,
-                                    type_: type_.clone(),
-                                }
-                            } else {
-                                panic!("Expected an array value in the heap, but got {:?}", arr);
-                            }
-                        });
-                        state.heap.insert(*ptr, new_value);
-                    } else {
-                        panic!("Expected a reference, but got {:?}", references);
-                    }
-                } else {
-                    panic!(
-                        "Expected an integer literal for array index, but got {:?}",
-                        index_value
-                    );
-                }
-            }
-            Lhs::LhsField {
-                var,
-                var_type: _,
-                field,
-                type_: _,
-                info: _,
-            } => {
-                let stack = state.stack.last().unwrap();
-                let references = stack.get(var).unwrap();
-                if let RExpr::Ref { ptr, type_: _ } = references.as_ref() {
-                    let heap_value = state.heap.get(ptr).unwrap();
-                    let new_value = Tree::map(heap_value.clone(), |obj| {
-                        if let RHeapValue::ObjectValue { fields, type_ } = obj {
-                            let mut updated_field = fields.clone();
-                            updated_field.insert(field.clone(), value.clone());
-                            RHeapValue::ObjectValue {
-                                fields: updated_field,
-                                type_: type_.clone(),
-                            }
-                        } else {
-                            panic!("Expected an object value in the heap, but got {:?}", obj);
-                        }
-                    });
-                    state.heap.insert(*ptr, new_value);
-                } else {
-                    panic!("Expected a reference, but got {:?}", references);
-                }
-            }
-        }
-    }
-
-    fn is_feasible(&self, _state: &Self::State) -> bool {
+    pub(crate) fn is_feasible(&self, _state: &MergeState<E, H>) -> bool {
         let mut config = Config::new();
         config.set_proof_generation(true);
         let context: Context = Context::new(&config);
@@ -2816,14 +2530,12 @@ impl MergeEngine for TreeEngine {
         let solver = Solver::new(&context);
         solver.push();
 
-        let constr = RExpr::evaluate_binop(
-            BinOp::And,
+        let constr = E::and(
             _state.hed_constr.clone(),
             _state.unq_constr.clone(),
-            RuntimeType::BoolRuntimeType,
         );
 
-        let constr = z3_builder.expr_to_bool(constr, &context);
+        let constr = E::to_z3_bool(&mut z3_builder, constr, &context);
 
         solver.assert(&constr);
         let result = solver.check();
@@ -2831,7 +2543,7 @@ impl MergeEngine for TreeEngine {
         solver.pop(1);
         matches!(result, z3::SatResult::Sat)
     }
-    fn is_valid_for(&self, state: &Self::State, expr: Rc<Expression>) -> bool {
+    pub(crate) fn is_valid_for(&self, state: &MergeState<E, H>, expr: Rc<Expression>) -> bool {
         /*
         if let Some(last_frame) = state.stack.last() {
             for (key, value) in last_frame {
@@ -2850,18 +2562,16 @@ impl MergeEngine for TreeEngine {
         let solver = Solver::new(&context);
         solver.push();
 
-        let premise = RExpr::evaluate_binop(
-            BinOp::And,
+        let premise = MergeExpr::and(
             state.hed_constr.clone(),
             state.unq_constr.clone(),
-            RuntimeType::BoolRuntimeType,
         );
         //println!("premise: {:?}", premise.clone().as_string());
-        let premise: Bool<'_> = z3_builder.expr_to_bool(premise, &context);
+        let premise: Bool<'_> = MergeExpr::to_z3_bool(&mut  z3_builder, premise, &context);
 
         let conclusion = self.eval_with(state, expr);
         //println!("conclusion: {:?}", conclusion.clone().as_string());
-        let conclusion: Bool<'_> = z3_builder.expr_to_bool(conclusion, &context);
+        let conclusion: Bool<'_> = MergeExpr::to_z3_bool(&mut z3_builder, conclusion, &context);
 
         let constraint = premise.implies(&conclusion);
         let constraint = constraint.not();
@@ -2870,158 +2580,51 @@ impl MergeEngine for TreeEngine {
         solver.pop(1);
         matches!(result, z3::SatResult::Unsat)
     }
-
-    fn add_assumption_to(
+    pub(crate) fn add_assumption_to(
         &self,
-        state: &mut Self::State,
+        state: &mut MergeState<E, H>,
         assumption: Either<Rc<Expression>, TypeExpr>,
     ) {
         let expr = assumption.either(|s| s, |t| Rc::new(Expression::TypeExpr { texpr: t }));
         let cond = self.eval_with(state, expr);
-        state.unq_constr = RExpr::evaluate_binop(
-            BinOp::And,
+        state.unq_constr = MergeExpr::and(
             state.unq_constr.clone(),
-            cond,
-            RuntimeType::BoolRuntimeType,
+            cond
         );
     }
-}
 
-fn get_elem_from_var(var: Rc<RExpr>, index: Rc<RExpr>, state: &mut TreeState) -> Rc<RExpr> {
-    match index.as_ref() {
-        RExpr::Lit {
-            lit: Lit::IntLit { int_value },
-            type_: _,
-        } => {
-            let index = *int_value as usize;
-            return get_elem_from_var_at(var, index, state);
-        }
-        RExpr::Con {
-            con,
-            left,
-            right,
-            type_: _,
-        } => {
-            let left_tree = get_elem_from_var(var.clone(), left.clone(), state);
-            let right_tree = get_elem_from_var(var.clone(), right.clone(), state);
-            return Rc::new(RExpr::Con {
-                con: con.clone(),
-                left: left_tree,
-                right: right_tree,
-                type_: left.get_type(),
-            });
-        }
-        _ => panic!(
-            "Expected an integer literal for array index, but got {:?}",
-            index
-        ),
+    pub(crate) fn assign_evaled(&mut self, state: &mut MergeState<E, H>, lhs: &Lhs, value: E) {
+        match lhs{
+            Lhs::LhsVar { var, type_, info } => {
+                state.stack.last_mut().unwrap().insert(var.clone(), value);
+            },
+            Lhs::LhsField { var, var_type, field, type_, info } => {
+                let var = state.stack.last_mut().unwrap().get(var).unwrap();
+                MergeRef::update_ref_field_to(self,  var, field, value, &mut state.heap)
+            },
+            Lhs::LhsElem { var, index, type_, info } => {
+                let var = state.stack.last().unwrap().get(var).unwrap();
+                let index = self.eval_with(state, index.clone());
+                MergeRef::update_ref_index_to(self, var, &index, value, &mut state.heap)
+            },
+        };
     }
-}
 
-fn get_elem_from_var_at(var: Rc<RExpr>, index: usize, state: &mut TreeState) -> Rc<RExpr> {
-    match var.as_ref() {
-        RExpr::Ref { ptr, type_: _ } => {
-            let heap_value = state.heap.get(ptr).unwrap();
-            let elem = Tree::<Rc<RExpr>, _>::to_cond(heap_value.clone(), |obj| {
-                if let RHeapValue::ArrayValue { elements, type_ } = obj {
-                    if index < elements.len() {
-                        return elements[index].clone();
-                    } else {
-                        panic!(
-                            "Index {} out of bounds for array of size {}",
-                            index,
-                            elements.len()
-                        );
-                    }
-                } else {
-                    panic!("Expected an array value in the heap, but got {:?}", obj);
-                }
-            });
-            return elem;
-        }
-        RExpr::Con {
-            con,
-            left,
-            right,
-            type_: _,
-        } => {
-            let left_tree = get_elem_from_var_at(left.clone(), index, state);
-            let right_tree = get_elem_from_var_at(right.clone(), index, state);
-            return Rc::new(RExpr::Con {
-                con: con.clone(),
-                left: left_tree,
-                right: right_tree,
-                type_: left.get_type(),
-            });
-        }
-        _ => panic!("Expected a reference, but got {:?}", var),
+    fn get_field_from_var(&self, var: E, field: Identifier, state: &mut MergeState<E, H>) -> E {
+        todo!()
     }
-}
 
-fn get_field_from_var(var: Rc<RExpr>, clone: Identifier, state: &TreeState) -> Rc<RExpr> {
-    match var.as_ref() {
-        RExpr::Ref { ptr, type_: _ } => {
-            let heap_value = state.heap.get(ptr).unwrap();
-            let field = Tree::<Rc<RExpr>, _>::to_cond(heap_value.clone(), |obj| {
-                if let RHeapValue::ObjectValue { fields, type_ } = obj {
-                    if let Some(value) = fields.get(&clone) {
-                        return value.clone();
-                    } else {
-                        panic!("Field {} not found in object", clone);
-                    }
-                } else {
-                    panic!("Expected an object value in the heap, but got {:?}", obj);
-                }
-            });
-            return field;
-        }
-        _ => panic!("Expected a reference, but got {:?}", var),
+    fn get_elem_from_var(&self, var: E, index: E, state: &mut MergeState<E, H>) -> E {
+        todo!()
     }
+   
 }
-
-fn create_array_of_size(
-    sizes: Rc<RExpr>,
-    inner: &NonVoidType,
-    outer: &RuntimeType,
-) -> Rc<Tree<Rc<RExpr>, RHeapValue<RExpr>>> {
-    match sizes.as_ref() {
-        RExpr::Lit {
-            lit: Lit::IntLit { int_value },
-            type_: _,
-        } => {
-            let mut elements = vec![RExpr::default(&inner); int_value.clone() as usize];
-            return Rc::new(Tree::Leaf(RHeapValue::ArrayValue {
-                elements,
-                type_: outer.clone(),
-            }));
-        }
-        RExpr::Con {
-            con,
-            left,
-            right,
-            type_,
-        } => {
-            let left_tree = create_array_of_size(left.clone(), inner, outer);
-            let right_tree = create_array_of_size(right.clone(), inner, outer);
-            Rc::new(Tree::Node {
-                con: con.clone(),
-                left: left_tree,
-                right: right_tree,
-            })
-        }
-        _ => panic!(
-            "Expected an integer literal for array size, but got {:?}",
-            sizes
-        ),
-    }
-}
-
 impl<C, T> Tree<C, T> {
-    fn map<F, R>(tree: Rc<Self>, f: F) -> Rc<Tree<C, R>>
+    fn map<F, R>(tree: Rc<Self>, f: &mut F) -> Rc<Tree<C, R>>
     where
         T: Clone,
         C: Clone,
-        F: Clone + Fn(T) -> R,
+        F: FnMut(T) -> R,
     {
         match tree.as_ref() {
             Tree::Leaf(value) => Rc::new(Tree::Leaf(f(value.clone()))),
@@ -3031,17 +2634,17 @@ impl<C, T> Tree<C, T> {
                 right: r,
             } => Rc::new(Tree::Node {
                 con: p.clone(),
-                left: Self::map(l.clone(), f.clone()),
+                left: Self::map(l.clone(), f),
                 right: Self::map(r.clone(), f),
             }),
         }
     }
 
-    fn flat_map<F, R>(tree: Rc<Self>, f: F) -> Rc<Tree<C, R>>
+    fn flat_map<F, R>(tree: Rc<Self>, f: &mut F) -> Rc<Tree<C, R>>
     where
         T: Clone,
         C: Clone,
-        F: Clone + Fn(T) -> Rc<Tree<C, R>>,
+        F: FnMut(T) -> Rc<Tree<C, R>>,
     {
         match tree.as_ref() {
             Tree::Leaf(value) => f(value.clone()),
@@ -3051,13 +2654,13 @@ impl<C, T> Tree<C, T> {
                 right: r,
             } => Rc::new(Tree::Node {
                 con: p.clone(),
-                left: Self::flat_map(l.clone(), f.clone()),
+                left: Self::flat_map(l.clone(), f),
                 right: Self::flat_map(r.clone(), f),
             }),
         }
     }
 
-    fn to_cond(tree: Rc<Tree<Rc<RExpr>, T>>, f: impl Fn(&T) -> Rc<RExpr> + Clone) -> Rc<RExpr> {
+    fn to_cond(tree: Rc<Tree<Rc<RExpr>, T>>, mut f: impl FnMut(&T) -> Rc<RExpr> + Clone) -> Rc<RExpr> {
         match tree.as_ref() {
             Tree::Leaf(value) => return f(value),
             Tree::Node { con, left, right } => {
@@ -3070,6 +2673,25 @@ impl<C, T> Tree<C, T> {
                     type_: left.get_type(),
                 });
             }
+        }
+    }
+    
+    fn from_cond(cond: Rc<RExpr>) -> Rc<Tree<Rc<RExpr>, Rc<RExpr>>>{
+        match cond.as_ref(){
+            RExpr::Con { con, 
+                left, 
+                right, 
+                type_ 
+            } => {
+                let left = Self::from_cond(left.clone());
+                let right = Self::from_cond(right.clone());
+                Rc::new(Tree::Node { 
+                    con: con.clone(), 
+                    left: left, 
+                    right: right 
+                })
+            }
+            _ => Rc::new(Tree::Leaf(cond))
         }
     }
 }

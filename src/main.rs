@@ -105,7 +105,7 @@ enum Commands {
 fn main() -> Result<(), String> {
     
     if let Some((class_name, method_name)) = Some(("Main", "main")) {
-        let quiet = true;
+        let quiet = false;
         let heuristic = Heuristic::PathMerging;
         let visualize_heuristic = false;
         let visualize_coverage = false;
@@ -113,12 +113,12 @@ fn main() -> Result<(), String> {
         let symbolic_array_size = 100;
         
         //let source_paths = vec!["examples/psv/fib.oox"];
-        let source_paths = vec!["benchmark_programs/experiment_m/0.oox"];
-
+        //let source_paths = vec!["benchmark_programs/experiment_m/0.oox"];
+        let source_paths = vec!["benchmark_programs/experiment_m/1.oox"];
         println!("results:");
         println!("k, rawresult, rawspeed, treeresult, treespeed, setresult, setspeed");
  
-        for i in 1..41 {
+        for i in 1..2 {
             let options = Options {
                 k: i*10,
                 quiet,

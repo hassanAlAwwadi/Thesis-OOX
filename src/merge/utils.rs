@@ -2,27 +2,33 @@ pub mod utils {
     use core::hash::Hash;
     use std::collections::{HashMap, HashSet};
 
-    pub fn union_with<K, V, F>(
+    pub fn union_with<K, V>(
         mut left: HashMap<K, V>,
-        right: HashMap<K, V>,
-        fun: F,
+        mut right: HashMap<K, V>,
+        combine: impl Fn(V, V) -> V,
+        lift_l: impl Fn(V) -> V, 
+        lift_r: impl Fn(V) -> V, 
     ) -> HashMap<K, V>
     where
         K: PartialEq,
         K: Eq,
         K: Hash,
-        F: Fn(V, V) -> V,
+        V: Clone,
     {
-        for (k, v) in right {
-            if let Some(w) = left.remove(&k) {
-                left.insert(k, fun(w, v));
-            } else {
-                left.insert(k, v);
+        for (k, v) in left.iter_mut(){
+            if let Some(r) = right.remove(k){
+                *v = combine(v.clone(), r);
+            }else{
+                *v = lift_l(v.clone()); 
             }
-        }
-        return left;
-    }
 
+
+        }
+        for (k, r) in right.into_iter(){
+            left.insert(k, lift_r(r));
+        }
+        return left; 
+    }
     pub fn union<V>(mut left: HashSet<V>, right: HashSet<V>) -> HashSet<V>
     where
         V: Eq,
